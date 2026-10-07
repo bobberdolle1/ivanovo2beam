@@ -1,0 +1,55 @@
+# ivanovo2beam — tiny CI fixture level.
+#
+# Used by the automated tests and by CI. It must build in a couple of seconds
+# and produce a level small enough to keep in a test artifact, while still
+# exercising every stage of the pipeline end to end. Deliberately covers a
+# piece of central Ivanovo with real streets and the Uvod river.
+#
+#   2048 vertices at 1.0 m spacing spans (2048 - 1) * 1.0 = 2047 m.
+
+region:
+  id: ivanovo_oblast
+  title: Ivanovo Oblast
+  bbox:
+    west: 39.00
+    south: 56.10
+    east: 43.20
+    north: 57.80
+  projection:
+    central_meridian: 41.10
+    latitude_of_origin: 57.00
+    origin: [40.97393, 56.99987]
+
+terrain:
+  source: copernicus_glo30
+  resolution_m: 30
+
+sectors:
+  size_m: 500
+
+roads:
+  simplify_tolerance_m: 0.5
+  junction_snap_m: 0.5
+  corridor_half_width_m: 8.0
+  max_grade: 0.12
+
+level:
+  id: ivanovo_test_sector
+  title: "Ivanovo 1:1 - Test Sector"
+  center: [40.97393, 56.99987]
+  terrain:
+    grid_size: 2048
+    square_size_m: 1.0
+  ground_margin_m: 5.0
+
+buildings:
+  enabled: true
+
+vegetation:
+  enabled: false
+
+cache:
+  dir: .cache
+
+build:
+  dir: build

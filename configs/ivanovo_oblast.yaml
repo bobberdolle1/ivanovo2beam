@@ -1,0 +1,86 @@
+# ivanovo2beam — region definition for Ivanovo Oblast, Russia.
+#
+# This file describes the REGION, not a specific buildable level. Level specs
+# (ivanovo_mvp.yaml, test_sector.yaml) inherit the region and add a `level:`
+# block. Keeping them separate means the projection, road classes and data
+# sources stay identical across every level built from this region.
+
+region:
+  id: ivanovo_oblast
+  title: Ivanovo Oblast
+  # Extent of the oblast plus a small margin so cross-border road links and
+  # the Volga reservoir do not get clipped at the edge.
+  bbox:
+    west: 39.00
+    south: 56.10
+    east: 43.20
+    north: 57.80
+
+  projection:
+    # Custom Transverse Mercator centred on the oblast.
+    #
+    # Ivanovo spans 39.0-43.2 E, straddling the UTM 37N/38N boundary. Using
+    # UTM 37N (central meridian 39 E) would put the eastern third of the
+    # region ~4 degrees from its central meridian, where the point scale
+    # factor is off by about +0.032% -- roughly 32 m of error per 100 km
+    # driven. Centring on the region halves the maximum distance from the
+    # central meridian and more than halves the error.
+    #
+    # `central_meridian` and `latitude_of_origin` define the projection;
+    # `scale_factor` is left unset so the loader computes the k0 that
+    # balances distortion between the central meridian and the region edge
+    # (k0 = 1 - W^2/4, see ivanovo2beam.gis.projection). For this bbox that
+    # yields 0.9998955 and a worst-case error of ~10.7 m per 100 km, i.e.
+    # 0.011%. Set scale_factor explicitly to override.
+    central_meridian: 41.10
+    latitude_of_origin: 57.00
+    # World origin: Ivanovo city centre. Game coordinates are metres east and
+    # north of this point. BeamNG stores world positions as 32-bit floats, so
+    # anchoring the origin inside the region keeps precision highest where the
+    # player spends most time.
+    origin: [40.97393, 56.99987]
+
+terrain:
+  # Copernicus DEM GLO-30. Public, free, open, 30 m ground resolution.
+  # See docs/data_sources.md for access details, fallbacks and attribution.
+  source: copernicus_glo30
+  resolution_m: 30
+
+sectors:
+  # 2 km sectors. A 220 x 145 km region is 110 x 73 sectors: large enough that
+  # per-sector overhead is negligible, small enough that a sector is a
+  # comfortable unit for caching and validation.
+  size_m: 2000
+
+roads:
+  # Real OSM tags always win over these defaults: lanes, width, surface,
+  # maxspeed, oneway, bridge and tunnel are read per-way when present.
+  # Widths follow Russian road categories (SP 42.13330) rather than US ones.
+  simplify_tolerance_m: 0.75
+  junction_snap_m: 0.5
+  corridor_half_width_m: 12.0
+  max_grade: 0.12
+  classes:
+    motorway:       {width_m: 15.0, lanes: 4, shoulder_m: 2.0, surface: asphalt, speed_kph: 110, priority: 100}
+    trunk:          {width_m: 14.0, lanes: 4, shoulder_m: 1.5, surface: asphalt, speed_kph: 90,  priority: 90}
+    primary:        {width_m: 10.0, lanes: 2, shoulder_m: 1.5, surface: asphalt, speed_kph: 90,  priority: 80}
+    secondary:      {width_m: 9.0,  lanes: 2, shoulder_m: 1.0, surface: asphalt, speed_kph: 90,  priority: 70}
+    tertiary:       {width_m: 8.0,  lanes: 2, shoulder_m: 1.0, surface: asphalt, speed_kph: 90,  priority: 60}
+    unclassified:   {width_m: 6.5,  lanes: 2, shoulder_m: 0.5, surface: asphalt, speed_kph: 60,  priority: 50}
+    residential:    {width_m: 6.0,  lanes: 2, shoulder_m: 0.0, surface: asphalt, speed_kph: 60,  priority: 45}
+    living_street:  {width_m: 5.5,  lanes: 2, shoulder_m: 0.0, surface: asphalt, speed_kph: 20,  priority: 40}
+    service:        {width_m: 4.5,  lanes: 2, shoulder_m: 0.0, surface: asphalt, speed_kph: 20,  priority: 30}
+    track:          {width_m: 3.5,  lanes: 1, shoulder_m: 0.0, surface: gravel,  speed_kph: 30,  priority: 20}
+
+buildings:
+  enabled: true
+
+vegetation:
+  # Off for the MVP. The Forest system and density tuning are milestone M3+.
+  enabled: false
+
+cache:
+  dir: .cache
+
+build:
+  dir: build

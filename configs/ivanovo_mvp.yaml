@@ -1,0 +1,64 @@
+# ivanovo2beam — first drivable level: a 5.1 x 5.1 km sector of central Ivanovo.
+#
+# This is milestone M2 "First Drivable Sector". It is deliberately small enough
+# to build in seconds and load quickly, but large enough to contain a real
+# slice of the city: the city centre street grid, the Uvod river, and several
+# kilometres of arterial road.
+#
+# Loads the region definition and adds a `level:` block.
+
+region:
+  id: ivanovo_oblast
+  title: Ivanovo Oblast
+  bbox:
+    west: 39.00
+    south: 56.10
+    east: 43.20
+    north: 57.80
+  projection:
+    central_meridian: 41.10
+    latitude_of_origin: 57.00
+    origin: [40.97393, 56.99987]
+
+terrain:
+  source: copernicus_glo30
+  resolution_m: 30
+
+sectors:
+  # Smaller sectors than the regional default: this level is a detail pass.
+  size_m: 1000
+
+roads:
+  simplify_tolerance_m: 0.5
+  junction_snap_m: 0.5
+  # Local roads in a city: keep the graded corridor tight so it does not
+  # swallow the pavements and front gardens of the surrounding blocks.
+  corridor_half_width_m: 10.0
+  max_grade: 0.12
+
+level:
+  id: ivanovo_mvp
+  title: "Ivanovo 1:1 - City Centre (MVP)"
+  # Ivanovo city centre.
+  center: [40.97393, 56.99987]
+  # 4096 vertices at 1.25 m spacing spans (4096 - 1) * 1.25 = 5118.75 m.
+  # 1.25 m is well above the 30 m DEM resolution, so the terrain's detail is
+  # synthesised where it matters: the graded road corridor. This is the
+  # "coarse world terrain + high-resolution road corridor" architecture.
+  terrain:
+    grid_size: 4096
+    square_size_m: 1.25
+  # Let the builder derive the vertical range from the DEM.
+  ground_margin_m: 5.0
+
+buildings:
+  enabled: true
+
+vegetation:
+  enabled: false
+
+cache:
+  dir: .cache
+
+build:
+  dir: build

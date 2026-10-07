@@ -227,9 +227,7 @@ class OsmWay:
         present = AREA_KEYS.intersection(self.tags)
         if not present:
             return False
-        if present == {"natural"} and self.tags["natural"] in LINEAR_NATURAL_VALUES:
-            return False
-        return True
+        return not (present == {"natural"} and self.tags["natural"] in LINEAR_NATURAL_VALUES)
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,0 +1,133 @@
+name: CI
+
+# The suite is split deliberately:
+#
+#   lint    -- style and import hygiene
+#   test    -- the full offline suite on the oldest and newest supported Python
+#   e2e     -- a complete level build using synthetic geodata, proving the
+#              pipeline produces a structurally valid, installable level
+#
+# Nothing in CI touches the network. Overpass and the DEM mirrors are donated
+# services that rate-limit and go down; a red build caused by someone else's
+# outage teaches nothing. The tests that do use the network are marked
+# `network` and are run manually (see docs/development.md).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install ruff
+        run: python -m pip install --upgrade pip ruff
+      - name: ruff check
+        run: ruff check --output-format=github .
+      - name: ruff format check
+        run: ruff format --check .
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install the package with all extras
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all]"
+      - name: Run the offline test suite
+        run: pytest -m "not network and not beamng" --durations=15
+
+  e2e:
+    name: End-to-end level build (synthetic geodata)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install the package with all extras
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all]"
+      - name: Build and validate the fixture level
+        # Uses a synthetic DEM and a hand-built OSM extract, so this runs with
+        # no network access at all.
+        run: pytest tests/test_build_offline.py -v
+      - name: Package size guard
+        # A generated level must never embed game assets. If the archive grows
+        # past a few tens of MB, something has been copied in that should have
+        # been referenced by path.
+        run: |
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+          from ivanovo2beam.beamng.materials import referenced_asset_paths
+          print(f"materials reference {len(referenced_asset_paths())} base-game textures by path")
+          print("no BeamNG asset is copied into the repository:")
+          bad = [p for p in Path('.').rglob('*')
+                 if p.suffix.lower() in {'.dds', '.cdae', '.dae'} and '.cache' not in p.parts]
+          if bad:
+              print("FAIL: game assets found in the tree:", bad, file=sys.stderr)
+              sys.exit(1)
+          print("OK")
+          PY
+
+  config-check:
+    name: Config and limits sanity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all]"
+      - name: Every shipped config must load and every level must fit the engine
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from ivanovo2beam.config import ProjectConfig
+          from ivanovo2beam.beamng.ter import MAX_SIZE, MIN_SIZE
+          for path in sorted(Path("configs").glob("*.yaml")):
+              cfg = ProjectConfig.load(path)
+              print(f"{path.name}: {cfg.region_id}", end="")
+              if cfg.level:
+                  g = cfg.level.grid
+                  assert MIN_SIZE <= g.grid_size <= MAX_SIZE, g.grid_size
+                  assert g.grid_size & (g.grid_size - 1) == 0, "not a power of two"
+                  print(f" | level {cfg.level.id}: {g.grid_size}^2 @ {g.square_size_m} m "
+                        f"= {g.extent_m/1000:.2f} km", end="")
+              scale = cfg.projection.measure_scale_error_over(cfg.bbox, samples=7)
+              print(f" | scale error {scale.error_metres_per_100km:.2f} m/100km")
+              assert scale.error_metres_per_100km < 20.0
+          print("all configs OK")
+          PY
