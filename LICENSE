@@ -1,0 +1,48 @@
+MIT License
+
+Copyright (c) 2026 ivanovo2beam contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------
+NOTICE ON GEOGRAPHIC DATA
+-------------------------------------------------------------------------------
+
+This licence applies to the SOURCE CODE of ivanovo2beam only.
+
+Geographic data used or downloaded by this software carries its own licences,
+which are NOT superseded by the MIT licence above:
+
+  * OpenStreetMap data (c) OpenStreetMap contributors, licensed ODbL 1.0.
+    https://www.openstreetmap.org/copyright
+
+  * Copernicus DEM (GLO-30/GLO-90) (c) ESA / European Union, Copernicus
+    Programme. Free and open under the Copernicus DEM Instrument Licence.
+
+  * ESA WorldCover (c) ESA WorldCover project / contains modified Copernicus
+    Sentinel data (2021), licensed CC BY 4.0.
+
+Any geodata this tool derives from OSM (road graphs, footprint tables, lane
+assignments, sector geodata) remains a Derivative Database under ODbL 1.0 and
+must not be relicensed under MIT. See docs/data_sources.md for the full
+obligation list, and build/attribution.json for the machine-readable
+provenance manifest of every generated artefact.
+
+No BeamNG.drive game asset is copied, redistributed or relicensed by this
+project. Generated levels reference base-game assets by path only.

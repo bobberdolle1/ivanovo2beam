@@ -1,0 +1,43 @@
+# Generated output — never commit generated assets
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Cache of downloaded / derived geodata
+.cache/
+.scratch/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# Large geodata must never enter git (see docs/data_sources.md)
+*.osm.pbf
+*.osm.bz2
+*.tif
+*.tiff
+*.hgt
+*.dem
+!tests/fixtures/**/*.tif
+
+# BeamNG build artefacts
+*.ter
+*.cdae
+*.dae
+*.dds
+!tests/fixtures/**/*.ter
