@@ -302,9 +302,7 @@ def _clip_points(
             continue
         enter_x, enter_y = ax + t_enter * dx, ay + t_enter * dy
         exit_x, exit_y = ax + t_exit * dx, ay + t_exit * dy
-        if not current:
-            current.append((enter_x, enter_y))
-        elif current[-1] != (enter_x, enter_y):
+        if not current or current[-1] != (enter_x, enter_y):
             current.append((enter_x, enter_y))
         current.append((exit_x, exit_y))
         if t_exit < 1.0:
@@ -486,8 +484,7 @@ def road_network_stats(roads: Sequence[Road]) -> dict[str, Any]:
         "total_length_km": round(total / 1000.0, 3),
         "by_class": dict(sorted(by_class.items(), key=lambda kv: -kv[1])),
         "length_km_by_class": {
-            k: round(v / 1000.0, 3)
-            for k, v in sorted(length_by_class.items(), key=lambda kv: -kv[1])
+            k: round(v / 1000.0, 3) for k, v in sorted(length_by_class.items(), key=lambda kv: -kv[1])
         },
         "bridges": sum(1 for r in roads if r.bridge),
         "tunnels": sum(1 for r in roads if r.tunnel),
@@ -530,7 +527,7 @@ def densify(points: NDArray[np.float64], max_spacing_m: float) -> NDArray[np.flo
         if length <= max_spacing_m:
             out.append((float(points[i + 1, 0]), float(points[i + 1, 1])))
             continue
-        steps = max(2, int(math.ceil(length / max_spacing_m)))
+        steps = max(2, math.ceil(length / max_spacing_m))
         ax, ay = float(points[i, 0]), float(points[i, 1])
         bx, by = float(points[i + 1, 0]), float(points[i + 1, 1])
         for step in range(1, steps + 1):

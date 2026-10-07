@@ -178,9 +178,7 @@ class TestExtractRoads:
         assert road.material_key == "Gravel"
 
     def test_width_from_lanes_when_no_width_tag(self, projection) -> None:
-        osm = make_osm(
-            projection, [([(0, 0), (100, 0)], {"highway": "residential", "lanes": "4"}, 1)]
-        )
+        osm = make_osm(projection, [([(0, 0), (100, 0)], {"highway": "residential", "lanes": "4"}, 1)])
         road = extract_roads(osm, projection, RoadSettings())[0]
         assert road.width_m == pytest.approx(14.0)
 
@@ -309,24 +307,24 @@ class TestNetworkStats:
     def test_stats_are_computed(self) -> None:
         def road(osm_id: int, highway: str, length: float, **kw) -> Road:
             spec = DEFAULT_ROAD_CLASSES[highway]
-            base = dict(
-                osm_id=osm_id,
-                highway=highway,
-                points=np.array([[0.0, 0.0], [length, 0.0]]),
-                width_m=spec.width_m,
-                lanes=spec.lanes,
-                surface=spec.surface,
-                oneway=False,
-                bridge=False,
-                tunnel=False,
-                layer=0,
-                name="",
-                maxspeed_kph=spec.speed_kph,
-                priority=spec.priority,
-                drivable=spec.drivable,
-                material_key="Asphalt",
-                decal_material="road_asphalt_2lane",
-            )
+            base = {
+                "osm_id": osm_id,
+                "highway": highway,
+                "points": np.array([[0.0, 0.0], [length, 0.0]]),
+                "width_m": spec.width_m,
+                "lanes": spec.lanes,
+                "surface": spec.surface,
+                "oneway": False,
+                "bridge": False,
+                "tunnel": False,
+                "layer": 0,
+                "name": "",
+                "maxspeed_kph": spec.speed_kph,
+                "priority": spec.priority,
+                "drivable": spec.drivable,
+                "material_key": "Asphalt",
+                "decal_material": "road_asphalt_2lane",
+            }
             base.update(kw)
             return Road(**base)
 
@@ -399,9 +397,7 @@ class TestClipGeometry:
 
     def test_diagonal_crossing_is_clipped_at_both_ends(self, projection) -> None:
         osm = make_osm(projection, [([(-8000, -8000), (8000, 8000)], {"highway": "primary"}, 1)])
-        roads = extract_roads(
-            osm, projection, RoadSettings(), clip_bounds=(-1000.0, -1000.0, 1000.0, 1000.0)
-        )
+        roads = extract_roads(osm, projection, RoadSettings(), clip_bounds=(-1000.0, -1000.0, 1000.0, 1000.0))
         assert len(roads) == 1
         pts = roads[0].points
         assert pts[:, 0].min() >= -1000.001 and pts[:, 0].max() <= 1000.001
@@ -411,9 +407,7 @@ class TestClipGeometry:
         """An S-shaped way leaves and re-enters; each piece must be clipped."""
         coords = [(-3000, 0), (3000, 0), (3000, 3000), (-3000, 3000)]
         osm = make_osm(projection, [(coords, {"highway": "primary"}, 1)])
-        roads = extract_roads(
-            osm, projection, RoadSettings(), clip_bounds=(-1000.0, -1000.0, 1000.0, 1000.0)
-        )
+        roads = extract_roads(osm, projection, RoadSettings(), clip_bounds=(-1000.0, -1000.0, 1000.0, 1000.0))
         # The longest surviving piece is returned; it must stay inside the box.
         assert len(roads) == 1
         pts = roads[0].points
@@ -423,9 +417,7 @@ class TestClipGeometry:
 
     def test_axis_aligned_road_along_the_boundary(self, projection) -> None:
         osm = make_osm(projection, [([(-1000, 500), (1000, 500)], {"highway": "primary"}, 1)])
-        roads = extract_roads(
-            osm, projection, RoadSettings(), clip_bounds=(-1000.0, -1000.0, 1000.0, 1000.0)
-        )
+        roads = extract_roads(osm, projection, RoadSettings(), clip_bounds=(-1000.0, -1000.0, 1000.0, 1000.0))
         assert len(roads) == 1
         assert roads[0].length_m == pytest.approx(2000.0, rel=1e-3)
 

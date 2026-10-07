@@ -49,6 +49,7 @@ def tmp_path(request: pytest.FixtureRequest) -> Iterator[Path]:
     finally:
         shutil.rmtree(directory, ignore_errors=True)
 
+
 #: Steam application id of BeamNG.drive.
 BEAMNG_STEAM_APPID = "284160"
 
@@ -72,10 +73,7 @@ def _candidate_installs() -> list[Path]:
     if env:
         candidates.append(Path(env))
     candidates.extend(Path(root) / "steamapps" / "common" / "BeamNG.drive" for root in _STEAM_ROOTS)
-    candidates.extend(
-        Path(f"{letter}:\\SteamLibrary\\steamapps\\common\\BeamNG.drive")
-        for letter in "DEFGH"
-    )
+    candidates.extend(Path(f"{letter}:\\SteamLibrary\\steamapps\\common\\BeamNG.drive") for letter in "DEFGH")
     return candidates
 
 

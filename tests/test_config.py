@@ -164,9 +164,7 @@ class TestProjectConfig:
         assert config.bbox.west == 39.0
         assert config.level is None
 
-    @pytest.mark.parametrize(
-        "name", ["ivanovo_oblast.yaml", "ivanovo_mvp.yaml", "test_sector.yaml"]
-    )
+    @pytest.mark.parametrize("name", ["ivanovo_oblast.yaml", "ivanovo_mvp.yaml", "test_sector.yaml"])
     def test_every_shipped_config_loads(self, name: str) -> None:
         config = ProjectConfig.load(CONFIGS / name)
         assert config.region_id
@@ -211,7 +209,7 @@ class TestProjectConfig:
     def test_missing_bbox_raises(self, tmp_path: Path) -> None:
         bad = tmp_path / "bad.yaml"
         bad.write_text(yaml.safe_dump({"region": {"id": "x"}}), encoding="utf-8")
-        with pytest.raises(ConfigError, match="region.bbox is required"):
+        with pytest.raises(ConfigError, match=r"region\.bbox is required"):
             ProjectConfig.load(bad)
 
     def test_sector_size_must_be_positive(self) -> None:
@@ -222,7 +220,7 @@ class TestProjectConfig:
             },
             "sectors": {"size_m": 0},
         }
-        with pytest.raises(ConfigError, match="sectors.size_m must be positive"):
+        with pytest.raises(ConfigError, match=r"sectors\.size_m must be positive"):
             ProjectConfig.from_mapping(raw)
 
     def test_relative_cache_and_build_dirs_resolve_against_root(self) -> None:

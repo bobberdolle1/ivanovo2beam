@@ -118,10 +118,7 @@ def merge_osm_data(
                 if existing != coord:
                     report.node_conflicts.append(node_id)
                     if strict:
-                        raise ValueError(
-                            f"node {node_id} has conflicting coordinates: "
-                            f"{existing} vs {coord}"
-                        )
+                        raise ValueError(f"node {node_id} has conflicting coordinates: {existing} vs {coord}")
                 continue
             nodes[node_id] = coord
             node_source[node_id] = extract.source

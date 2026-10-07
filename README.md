@@ -183,16 +183,20 @@ src/ivanovo2beam/
   cli.py       command line interface
 configs/       region and level definitions
 docs/          architecture, coordinates, data sources, research
-tests/         550+ tests, all offline except those marked `network`
+tests/         493 tests; 485 run offline, the rest need network or a BeamNG install
 ```
 
 ## Testing
 
 ```bash
-pytest -m "not network and not beamng"   # everything CI runs
+pytest -m "not network and not beamng"   # 485 tests, everything CI runs
 pytest -m network                        # live Overpass / DEM fetches
 pytest -m beamng                         # tests needing a BeamNG install
 ```
+
+The live-network tests are excluded from CI on purpose: Overpass is a donated
+service that rate-limits and goes down, and a red build caused by someone else's
+outage teaches nothing. They are run deliberately, by hand.
 
 Two test classes are worth calling out because they are the reason to trust the
 output beyond "it ran":
@@ -254,7 +258,7 @@ be added: their terms prohibit building derived mapping datasets.
 ## Documentation
 
 * [Coordinate system](docs/coordinate_system.md) — why this projection, and how accuracy is proven
-* [Architecture](docs/architecture.md) — pipeline stages and data flow
+* [Architecture](docs/architecture.md) — pipeline stages, data flow, and the decisions behind them
 * [Data sources](docs/data_sources.md) — datasets, licences, attribution obligations
 * [BeamNG install](docs/beamng_install.md) — getting a generated level into the game
 * [Development](docs/development.md) — setup, testing, and the sandbox gotchas

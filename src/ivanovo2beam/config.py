@@ -66,8 +66,7 @@ class TerrainGridSpec:
             raise ConfigError(f"terrain.grid_size must be an int, got {type(size).__name__}")
         if not (TER_MIN_SIZE <= size <= TER_MAX_SIZE):
             raise ConfigError(
-                f"terrain.grid_size {size} outside BeamNG's supported range "
-                f"[{TER_MIN_SIZE}, {TER_MAX_SIZE}]"
+                f"terrain.grid_size {size} outside BeamNG's supported range [{TER_MIN_SIZE}, {TER_MAX_SIZE}]"
             )
         if size & (size - 1):
             raise ConfigError(f"terrain.grid_size {size} must be a power of two")
@@ -291,9 +290,7 @@ class LevelSpec:
             center_lon=float(center[0]),
             center_lat=float(center[1]),
             grid=TerrainGridSpec.from_config(data.get("terrain", {})),
-            max_height_m=(
-                None if data.get("max_height_m") is None else float(data["max_height_m"])
-            ),
+            max_height_m=(None if data.get("max_height_m") is None else float(data["max_height_m"])),
             ground_margin_m=float(data.get("ground_margin_m", 5.0)),
         )
 

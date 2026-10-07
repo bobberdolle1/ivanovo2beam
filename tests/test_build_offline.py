@@ -97,9 +97,7 @@ def synthetic_osm(projection, extent: float) -> OsmData:
             )
         )
     # A bridge and a track, so those code paths are exercised too.
-    shapes.append(
-        ([(half - step, -half + step) for _ in range(2)], {"highway": "primary", "bridge": "yes"})
-    )
+    shapes.append(([(half - step, -half + step) for _ in range(2)], {"highway": "primary", "bridge": "yes"}))
     shapes.append(
         (
             [(-half + step, half - step / 2), (half - step, half - step / 2)],
@@ -132,15 +130,13 @@ def offline_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     object.__setattr__(config, "cache_dir", tmp_path / "cache")
     object.__setattr__(config, "build_dir", tmp_path / "build")
 
-    bbox, _, extent = build_module._level_geographic_bbox(config, margin_deg=0.0)
+    _bbox, _, extent = build_module._level_geographic_bbox(config, margin_deg=0.0)
 
-    def fake_fetch_dem(requested_bbox, *args, **kwargs) -> Path:  # noqa: ANN001, ANN002, ANN003
+    def fake_fetch_dem(requested_bbox, *args, **kwargs) -> Path:
         """Stand in for the real fetcher, covering exactly the requested area."""
-        return write_synthetic_dem(
-            tmp_path / "cache" / "dem" / "synthetic.tif", requested_bbox.as_tuple()
-        )
+        return write_synthetic_dem(tmp_path / "cache" / "dem" / "synthetic.tif", requested_bbox.as_tuple())
 
-    def fake_fetch_osm(cfg, box, **kwargs):  # noqa: ANN001, ANN003
+    def fake_fetch_osm(cfg, box, **kwargs):
         return synthetic_osm(cfg.projection, extent), {
             "tiles_requested": 1,
             "tiles_succeeded": 1,
@@ -180,7 +176,7 @@ class TestOfflineEndToEnd:
             assert (level_dir / relative).is_file(), relative
 
     def test_validation_passes(self, offline_build) -> None:
-        config, result = offline_build
+        config, _result = offline_build
         level_dir = config.build_dir / "levels" / config.level.id
         report = validate_level(level_dir, config)
         assert report.ok, report.describe()
@@ -191,7 +187,7 @@ class TestOfflineEndToEnd:
         terrain = read_ter(level_dir / "theTerrain.ter")
         assert terrain.size == config.level.grid.grid_size
 
-        scene = (level_dir / "main" / "MissionGroup" / "level_objects" / "terrain" / "items.level.json")
+        scene = level_dir / "main" / "MissionGroup" / "level_objects" / "terrain" / "items.level.json"
         block = None
         for line in scene.read_text(encoding="utf-8").splitlines():
             obj = json.loads(line)
@@ -225,7 +221,7 @@ class TestOfflineEndToEnd:
     def test_spawn_point_exists_and_sits_on_the_terrain(self, offline_build) -> None:
         config, _ = offline_build
         level_dir = config.build_dir / "levels" / config.level.id
-        terrain = read_ter(level_dir / "theTerrain.ter")
+        read_ter(level_dir / "theTerrain.ter")
         spawn_dir = level_dir / "main" / "MissionGroup" / "PlayerDropPoints" / "items.level.json"
         spawns = [json.loads(line) for line in spawn_dir.read_text().splitlines() if line.strip()]
         assert spawns, "a level with no spawn point cannot be entered"
@@ -233,7 +229,7 @@ class TestOfflineEndToEnd:
         assert spawn["class"] == "SpawnSphere"
 
     def test_roads_were_graded_into_the_terrain(self, offline_build) -> None:
-        config, result = offline_build
+        _config, result = offline_build
         stats = result.stats["terrain"]
         assert stats["graded_cells"] > 0
         assert stats["cells_touched"] > 0
@@ -275,16 +271,26 @@ class TestOfflineEndToEnd:
             object.__setattr__(config, "build_dir", tmp_path / tag / "build")
             _, _, extent = build_module._level_geographic_bbox(config, margin_deg=0.0)
 
-            def fake_fetch_dem(requested_bbox, *a, **k):  # noqa: ANN001, ANN002, ANN003
+            def fake_fetch_dem(requested_bbox, *a, **k):
                 return write_synthetic_dem(
                     tmp_path / tag / "cache" / "dem" / "s.tif", requested_bbox.as_tuple()
                 )
 
-            monkeypatch.setattr(build_module, "fetch_level_osm", lambda cfg, box, **kw: (
-                synthetic_osm(cfg.projection, extent),
-                {"tiles_requested": 1, "tiles_succeeded": 1, "tiles_failed": 0,
-                 "tiles_skipped": 0, "budget_exhausted": False, "merge_summary": ""},
-            ))
+            monkeypatch.setattr(
+                build_module,
+                "fetch_level_osm",
+                lambda cfg, box, **kw: (
+                    synthetic_osm(cfg.projection, extent),
+                    {
+                        "tiles_requested": 1,
+                        "tiles_succeeded": 1,
+                        "tiles_failed": 0,
+                        "tiles_skipped": 0,
+                        "budget_exhausted": False,
+                        "merge_summary": "",
+                    },
+                ),
+            )
             monkeypatch.setattr("ivanovo2beam.terrain.dem.fetch_dem", fake_fetch_dem)
             build_level(config, progress=None, make_zip=False)
             return config.build_dir / "levels" / config.level.id

@@ -43,7 +43,7 @@ class FlatDem:
         self.elevation = elevation
         self.calls = 0
 
-    def sample_array(self, lons, lats):  # noqa: ANN001, ANN201 - protocol
+    def sample_array(self, lons, lats):
         self.calls += 1
         return np.full(np.shape(lons), self.elevation, dtype=np.float64)
 
@@ -55,7 +55,7 @@ class SlopedDem:
         self.base = base
         self.per_degree_lat = per_degree_lat
 
-    def sample_array(self, lons, lats):  # noqa: ANN001, ANN201 - protocol
+    def sample_array(self, lons, lats):
         return self.base + (np.asarray(lats, dtype=np.float64) - 57.0) * self.per_degree_lat
 
 
@@ -67,7 +67,7 @@ class TestSampleDemOntoGrid:
             def __init__(self) -> None:
                 self.lats: list[float] = []
 
-            def sample_array(self, lons, lats):  # noqa: ANN001, ANN201
+            def sample_array(self, lons, lats):
                 self.lats.append(float(np.ravel(lats)[0]))
                 return np.zeros(np.shape(lons))
 
@@ -84,7 +84,7 @@ class TestSampleDemOntoGrid:
         captured: list[tuple[float, float]] = []
 
         class Capture:
-            def sample_array(self, lons, lats):  # noqa: ANN001, ANN201
+            def sample_array(self, lons, lats):
                 captured.append((float(np.ravel(lons)[0]), float(np.ravel(lats)[0])))
                 return np.zeros(np.shape(lons))
 
@@ -199,7 +199,7 @@ class TestDeriveRoadProfile:
 
     def test_profile_is_grade_limited_over_a_cliff(self, projection) -> None:
         class CliffDem:
-            def sample_array(self, lons, lats):  # noqa: ANN001, ANN201
+            def sample_array(self, lons, lats):
                 lats = np.asarray(lats, dtype=np.float64)
                 return np.where(lats > 57.0002, 400.0, 100.0)
 
@@ -211,7 +211,7 @@ class TestDeriveRoadProfile:
 
     def test_nan_gaps_are_interpolated(self, projection) -> None:
         class GapDem:
-            def sample_array(self, lons, lats):  # noqa: ANN001, ANN201
+            def sample_array(self, lons, lats):
                 out = np.full(np.shape(lons), 100.0)
                 out[..., ::3] = np.nan
                 return out
@@ -222,7 +222,7 @@ class TestDeriveRoadProfile:
 
     def test_all_nan_raises(self, projection) -> None:
         class NoDataDem:
-            def sample_array(self, lons, lats):  # noqa: ANN001, ANN201
+            def sample_array(self, lons, lats):
                 return np.full(np.shape(lons), np.nan)
 
         with pytest.raises(ValueError, match="no finite elevations"):
@@ -240,9 +240,7 @@ class TestRoadCorridorValidation:
 
     def test_rejects_non_positive_half_width(self) -> None:
         with pytest.raises(ValueError, match="half_width_m must be positive"):
-            RoadCorridor(
-                points=np.zeros((2, 2)), half_width_m=0.0, corridor_half_width_m=10.0
-            )
+            RoadCorridor(points=np.zeros((2, 2)), half_width_m=0.0, corridor_half_width_m=10.0)
 
     def test_rejects_corridor_narrower_than_the_road(self) -> None:
         with pytest.raises(ValueError, match="must be at least"):
@@ -530,23 +528,37 @@ class TestBuildTerrain:
 
     def test_base_z_sits_below_the_lowest_elevation(self, projection) -> None:
         build = build_terrain(
-            SlopedDem(100.0), projection, origin_x=0.0, origin_y=0.0,
-            grid_size=128, cell_size_m=60.0, ground_margin_m=5.0,
+            SlopedDem(100.0),
+            projection,
+            origin_x=0.0,
+            origin_y=0.0,
+            grid_size=128,
+            cell_size_m=60.0,
+            ground_margin_m=5.0,
         )
         assert build.base_z <= build.elevations.min()
         assert build.base_z + build.max_height >= build.elevations.max()
 
     def test_explicit_max_height_is_honoured(self, projection) -> None:
         build = build_terrain(
-            FlatDem(100.0), projection, origin_x=0.0, origin_y=0.0,
-            grid_size=128, cell_size_m=10.0, max_height_m=250.0,
+            FlatDem(100.0),
+            projection,
+            origin_x=0.0,
+            origin_y=0.0,
+            grid_size=128,
+            cell_size_m=10.0,
+            max_height_m=250.0,
         )
         assert build.max_height == pytest.approx(250.0)
 
     def test_vertical_step_is_millimetre_scale(self, projection) -> None:
         build = build_terrain(
-            FlatDem(100.0), projection, origin_x=0.0, origin_y=0.0,
-            grid_size=128, cell_size_m=10.0,
+            FlatDem(100.0),
+            projection,
+            origin_x=0.0,
+            origin_y=0.0,
+            grid_size=128,
+            cell_size_m=10.0,
         )
         assert build.max_height / 65536.0 < 0.01
 
@@ -554,29 +566,29 @@ class TestBuildTerrain:
     def test_rejects_invalid_grid_size(self, projection, grid: int) -> None:
         with pytest.raises(ValueError, match="power of two"):
             build_terrain(
-                FlatDem(), projection, origin_x=0.0, origin_y=0.0,
-                grid_size=grid, cell_size_m=10.0,
+                FlatDem(),
+                projection,
+                origin_x=0.0,
+                origin_y=0.0,
+                grid_size=grid,
+                cell_size_m=10.0,
             )
 
     def test_rejects_non_positive_cell_size(self, projection) -> None:
         with pytest.raises(ValueError, match="cell_size_m must be positive"):
-            build_terrain(
-                FlatDem(), projection, origin_x=0.0, origin_y=0.0, grid_size=128, cell_size_m=0.0
-            )
+            build_terrain(FlatDem(), projection, origin_x=0.0, origin_y=0.0, grid_size=128, cell_size_m=0.0)
 
     def test_all_nan_dem_is_rejected(self, projection) -> None:
         class NoData:
-            def sample_array(self, lons, lats):  # noqa: ANN001, ANN201
+            def sample_array(self, lons, lats):
                 return np.full(np.shape(lons), np.nan)
 
         with pytest.raises(ValueError, match="no finite elevations"):
-            build_terrain(
-                NoData(), projection, origin_x=0.0, origin_y=0.0, grid_size=128, cell_size_m=10.0
-            )
+            build_terrain(NoData(), projection, origin_x=0.0, origin_y=0.0, grid_size=128, cell_size_m=10.0)
 
     def test_gaps_are_filled(self, projection) -> None:
         class GapDem:
-            def sample_array(self, lons, lats):  # noqa: ANN001, ANN201
+            def sample_array(self, lons, lats):
                 out = np.full(np.shape(lons), 100.0)
                 out[..., 0] = np.nan
                 return out
@@ -610,7 +622,7 @@ class TestBuildTerrain:
         assert (build.layers == build.materials.index("Asphalt")).any()
 
     def test_deterministic(self, projection) -> None:
-        kwargs = dict(origin_x=0.0, origin_y=0.0, grid_size=128, cell_size_m=10.0)
+        kwargs = {"origin_x": 0.0, "origin_y": 0.0, "grid_size": 128, "cell_size_m": 10.0}
         a = build_terrain(FlatDem(110.0), projection, **kwargs)
         b = build_terrain(FlatDem(110.0), projection, **kwargs)
         np.testing.assert_array_equal(a.elevations, b.elevations)
@@ -621,7 +633,12 @@ class TestBuildTerrain:
     def test_progress_callback_is_invoked(self, projection) -> None:
         calls: list[tuple[float, str]] = []
         build_terrain(
-            FlatDem(), projection, origin_x=0.0, origin_y=0.0, grid_size=128, cell_size_m=10.0,
+            FlatDem(),
+            projection,
+            origin_x=0.0,
+            origin_y=0.0,
+            grid_size=128,
+            cell_size_m=10.0,
             progress=lambda f, m: calls.append((f, m)),
         )
         assert calls
@@ -648,8 +665,12 @@ class TestGeoreferencing:
 
     def test_origin_is_recorded_exactly(self, projection) -> None:
         build = build_terrain(
-            FlatDem(), projection, origin_x=-2559.375, origin_y=1234.5,
-            grid_size=128, cell_size_m=1.25,
+            FlatDem(),
+            projection,
+            origin_x=-2559.375,
+            origin_y=1234.5,
+            grid_size=128,
+            cell_size_m=1.25,
         )
         assert build.origin_x == pytest.approx(-2559.375)
         assert build.origin_y == pytest.approx(1234.5)

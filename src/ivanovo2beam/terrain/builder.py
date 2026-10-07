@@ -47,11 +47,10 @@ from ivanovo2beam.beamng.ter import TerrainFile
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Sequence
-    from pathlib import Path
 
     from numpy.typing import NDArray
 
-    from ivanovo2beam.gis.projection import BBox, RegionProjection
+    from ivanovo2beam.gis.projection import RegionProjection
 
 
 class DemSampler(Protocol):
@@ -244,7 +243,7 @@ def resample_polyline(
     if total <= 0:
         return points[:1].copy(), np.zeros(1)
 
-    n_steps = max(2, int(math.ceil(total / step_m)) + 1)
+    n_steps = max(2, math.ceil(total / step_m) + 1)
     targets = np.linspace(0.0, total, n_steps)
     xs = np.interp(targets, cumulative, points[:, 0])
     ys = np.interp(targets, cumulative, points[:, 1])
@@ -352,7 +351,7 @@ def derive_road_profile(
         indices = np.arange(raw.size)
         raw = np.interp(indices, indices[finite], raw[finite])
 
-    window = max(3, int(round(smooth_window_m / sample_step_m)))
+    window = max(3, round(smooth_window_m / sample_step_m))
     smoothed = smooth_profile(raw, window)
     limited = enforce_max_grade(smoothed, sample_step_m, max_grade)
     return resampled, limited
@@ -437,13 +436,13 @@ def grade_corridors(
             seg_len_sq = dx * dx + dy * dy
             if seg_len_sq <= 0:
                 continue
-            seg_len = math.sqrt(seg_len_sq)
+            math.sqrt(seg_len_sq)
 
             # Grid window covering the segment's corridor.
-            col_lo = max(0, int(math.floor((min(x0, x1) - corridor_half - origin_x) / cell_size_m)))
-            col_hi = min(n - 1, int(math.ceil((max(x0, x1) + corridor_half - origin_x) / cell_size_m)))
-            row_lo = max(0, int(math.floor((min(y0, y1) - corridor_half - origin_y) / cell_size_m)))
-            row_hi = min(n - 1, int(math.ceil((max(y0, y1) + corridor_half - origin_y) / cell_size_m)))
+            col_lo = max(0, math.floor((min(x0, x1) - corridor_half - origin_x) / cell_size_m))
+            col_hi = min(n - 1, math.ceil((max(x0, x1) + corridor_half - origin_x) / cell_size_m))
+            row_lo = max(0, math.floor((min(y0, y1) - corridor_half - origin_y) / cell_size_m))
+            row_hi = min(n - 1, math.ceil((max(y0, y1) + corridor_half - origin_y) / cell_size_m))
             if col_hi < col_lo or row_hi < row_lo:
                 continue
 
@@ -648,9 +647,7 @@ def build_terrain(
     material_index = {key: i for i, key in enumerate(materials)}
 
     report(0.05, f"sampling DEM onto a {grid_size}x{grid_size} grid")
-    elevations = sample_dem_onto_grid(
-        dem, projection, origin_x, origin_y, grid_size, cell_size_m
-    )
+    elevations = sample_dem_onto_grid(dem, projection, origin_x, origin_y, grid_size, cell_size_m)
     invalid = ~np.isfinite(elevations)
     if invalid.all():
         raise ValueError("DEM returned no finite elevations over the terrain extent")
@@ -720,9 +717,7 @@ def build_terrain(
     stats["max_height"] = max_height
     stats["vertical_step_m"] = max_height / 65536.0
     stats["materials"] = list(materials)
-    stats["layer_histogram"] = {
-        key: int((layers == idx).sum()) for idx, key in enumerate(materials)
-    }
+    stats["layer_histogram"] = {key: int((layers == idx).sum()) for idx, key in enumerate(materials)}
 
     report(0.95, "terrain ready")
     return TerrainBuild(

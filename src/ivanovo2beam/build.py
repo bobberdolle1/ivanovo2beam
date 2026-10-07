@@ -272,7 +272,7 @@ def fetch_level_osm(
         try:
             path = fetch_overpass(tile_bbox, cache_dir, force=force)
             extracts.append(parse_osm(path))
-        except Exception as exc:  # noqa: BLE001 - a failed tile must not kill the build
+        except Exception as exc:
             failures.append(f"tile {i + 1}/{len(tiles)} ({west:.4f},{south:.4f}): {exc}")
         if time.perf_counter() - started > budget_s and i + 1 < len(tiles):
             timed_out = True
@@ -431,7 +431,12 @@ def build_level(
     stage = time.perf_counter()
     report(0.33, "projecting and classifying roads")
     margin = ROAD_RENDER_MARGIN_M
-    clip_bounds = (origin_x - margin, origin_y - margin, origin_x + extent + margin, origin_y + extent + margin)
+    clip_bounds = (
+        origin_x - margin,
+        origin_y - margin,
+        origin_x + extent + margin,
+        origin_y + extent + margin,
+    )
     roads = extract_roads(osm_data, config.projection, config.roads, clip_bounds=clip_bounds)
     road_stats = road_network_stats(roads)
     durations["roads"] = time.perf_counter() - stage
@@ -514,37 +519,41 @@ def build_level(
     report(0.86, "writing level files")
     level_dir = config.build_path("levels", level.id)
     files = tree.render()
-    files["info.json"] = json.dumps(
-        build_info_json(
-            level.id,
-            level.title,
-            f"1:1 scale map of {config.region_title} generated from OpenStreetMap and "
-            f"Copernicus DEM. Build extent {extent / 1000:.2f} km, vertical range "
-            f"{build.max_height:.1f} m.",
-            extent_m=extent,
-        ),
-        indent=2,
-        ensure_ascii=False,
-    ) + "\n"
+    files["info.json"] = (
+        json.dumps(
+            build_info_json(
+                level.id,
+                level.title,
+                f"1:1 scale map of {config.region_title} generated from OpenStreetMap and "
+                f"Copernicus DEM. Build extent {extent / 1000:.2f} km, vertical range "
+                f"{build.max_height:.1f} m.",
+                extent_m=extent,
+            ),
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n"
+    )
     files["map.json"] = json.dumps({"segments": {}}, indent=2) + "\n"
-    files["main.decals.json"] = json.dumps(
-        {
-            "header": {
-                "name": "DecalData File",
-                "comments": "// Instances format: rectIdx, size, renderPriority, position.x, position.y, position.z, normal.x, normal.y, normal.z, tangent.x, tangent.y, tangent.z, uid",
-                "version": 2,
+    files["main.decals.json"] = (
+        json.dumps(
+            {
+                "header": {
+                    "name": "DecalData File",
+                    "comments": "// Instances format: rectIdx, size, renderPriority, position.x, position.y, position.z, normal.x, normal.y, normal.z, tangent.x, tangent.y, tangent.z, uid",
+                    "version": 2,
+                },
+                "instances": {},
             },
-            "instances": {},
-        },
-        indent=2,
-    ) + "\n"
+            indent=2,
+        )
+        + "\n"
+    )
     written = write_level_files(level_dir, files)
 
     write_json(
         level_dir / "theTerrain.terrain.json",
-        build_terrain_json(
-            level.id, "theTerrain", size=build.grid_size, materials=build.materials
-        ),
+        build_terrain_json(level.id, "theTerrain", size=build.grid_size, materials=build.materials),
     )
     write_json(
         level_dir / "art" / "terrains" / "main.materials.json",

@@ -325,7 +325,7 @@ def build_info_json(
     Returns:
         The ``info.json`` contents.
     """
-    size = int(round(extent_m))
+    size = round(extent_m)
     return {
         "defaultDate": default_date or {"year": 2026, "month": 6, "day": 20},
         "title": title,

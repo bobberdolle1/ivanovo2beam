@@ -21,8 +21,6 @@ from typing import TYPE_CHECKING
 from ivanovo2beam.beamng.ter import HOLE, TerrainFormatError, read_ter
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from collections.abc import Sequence
-
     from ivanovo2beam.config import ProjectConfig
 
 #: Files every generated level must contain. Collected from a shipped level.
@@ -97,8 +95,7 @@ class ValidationReport:
             "errors": [{"name": c.name, "detail": c.detail} for c in self.errors],
             "warnings": [{"name": c.name, "detail": c.detail} for c in self.warnings],
             "checks": [
-                {"name": c.name, "ok": c.ok, "severity": c.severity, "detail": c.detail}
-                for c in self.checks
+                {"name": c.name, "ok": c.ok, "severity": c.severity, "detail": c.detail} for c in self.checks
             ],
         }
 
@@ -114,16 +111,17 @@ class ValidationReport:
 
 
 def _check_required_files(report: ValidationReport) -> None:
-    """Every required file must exist and be non-empty."""
+    """Every required file must exist and be non-empty.
+
+    An empty ``items.level.json`` is legal — it describes a group with no
+    children — so emptiness is only flagged for files that must carry content.
+    """
     for relative in REQUIRED_FILES:
         path = report.level_dir / relative
         if not path.is_file():
             report.add("required_file", False, f"missing {relative}")
-        elif path.stat().st_size == 0:
-            # An empty items.level.json is legal (a group with no children), so
-            # only flag it for files that must carry content.
-            if relative != "main/items.level.json":
-                report.add("required_file", False, f"{relative} is empty")
+        elif path.stat().st_size == 0 and relative != "main/items.level.json":
+            report.add("required_file", False, f"{relative} is empty")
 
 
 def _check_scene_tree(report: ValidationReport) -> None:
@@ -248,7 +246,9 @@ def _check_materials(report: ValidationReport, install: Path | None) -> None:
         return
 
     materials = {k: v for k, v in doc.items() if isinstance(v, dict) and v.get("class") == "TerrainMaterial"}
-    sets = {k: v for k, v in doc.items() if isinstance(v, dict) and v.get("class") == "TerrainMaterialTextureSet"}
+    sets = {
+        k: v for k, v in doc.items() if isinstance(v, dict) and v.get("class") == "TerrainMaterialTextureSet"
+    }
     report.add(
         "materials_json",
         bool(materials) and bool(sets),
@@ -257,10 +257,9 @@ def _check_materials(report: ValidationReport, install: Path | None) -> None:
 
     paths: set[str] = set()
     for material in materials.values():
-        for key, value in material.items():
-            if isinstance(value, str) and value.startswith("/") and key.endswith(("Tex", "Tex_", "")):
-                if value.lower().endswith((".png", ".dds")):
-                    paths.add(value)
+        for value in material.values():
+            if isinstance(value, str) and value.startswith("/") and value.lower().endswith((".png", ".dds")):
+                paths.add(value)
     if install is None or not paths:
         return
 
@@ -272,8 +271,7 @@ def _check_materials(report: ValidationReport, install: Path | None) -> None:
     report.add(
         "asset_paths",
         not missing,
-        f"{len(paths)} referenced textures, {len(missing)} missing"
-        + (f": {missing[:5]}" if missing else ""),
+        f"{len(paths)} referenced textures, {len(missing)} missing" + (f": {missing[:5]}" if missing else ""),
     )
 
 

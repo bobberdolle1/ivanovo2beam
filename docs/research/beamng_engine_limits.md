@@ -1586,16 +1586,17 @@ Sketch of the two probes used, for anyone re-verifying:
 
 ```python
 import zipfile, struct
+
 # (1) decode a .ter header + exact payload accounting
 z = zipfile.ZipFile(r"F:\SteamLibrary\steamapps\common\BeamNG.drive\content\levels\italy.zip")
 b = z.read("levels/italy/theTerrain.ter")
-ver  = b[0]
+ver = b[0]
 size = struct.unpack("<I", b[1:5])[0]
-payload = len(b) - 5 - 166          # 166 = 4 + sum(1+len(name)) over the 15 italy materials
-print(ver, size, payload, payload / (size * size))   # -> 9 4096 50331648 3.0
+payload = len(b) - 5 - 166  # 166 = 4 + sum(1+len(name)) over the 15 italy materials
+print(ver, size, payload, payload / (size * size))  # -> 9 4096 50331648 3.0
 
 # (2) find an engine limit string and its neighbours
 data = open(r"F:\SteamLibrary\steamapps\common\BeamNG.drive\Bin64\BeamNG.drive.x64.exe", "rb").read()
 i = data.find(b"Height map must be between 128 and 8192 in size!")
-print(i, data[i-160:i+120])
+print(i, data[i - 160 : i + 120])
 ```

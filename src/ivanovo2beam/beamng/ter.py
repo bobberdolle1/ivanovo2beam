@@ -85,8 +85,7 @@ def _validate_size(size: int) -> None:
         raise TerrainFormatError(f"size must be an int, got {type(size).__name__}")
     if not (MIN_SIZE <= size <= MAX_SIZE):
         raise TerrainFormatError(
-            f"terrain size {size} outside the engine's supported range "
-            f"[{MIN_SIZE}, {MAX_SIZE}]"
+            f"terrain size {size} outside the engine's supported range [{MIN_SIZE}, {MAX_SIZE}]"
         )
     if size & (size - 1):
         raise TerrainFormatError(f"terrain size {size} must be a power of two")
@@ -317,9 +316,7 @@ def decode_ter(data: bytes) -> TerrainFile:
         raise TerrainFormatError(f"file too short: {len(data)} bytes")
     version, size = _HEADER.unpack_from(data, 0)
     if version != TER_VERSION:
-        raise TerrainFormatError(
-            f"unsupported .ter version {version}; this build supports {TER_VERSION}"
-        )
+        raise TerrainFormatError(f"unsupported .ter version {version}; this build supports {TER_VERSION}")
     _validate_size(size)
 
     n_cells = size * size

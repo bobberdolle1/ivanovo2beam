@@ -188,9 +188,7 @@ def _densify_with_z(
         return np.column_stack((points, z))
     deltas = np.diff(points, axis=0)
     lengths = np.hypot(deltas[:, 0], deltas[:, 1])
-    out: list[tuple[float, float, float]] = [
-        (float(points[0, 0]), float(points[0, 1]), float(z[0]))
-    ]
+    out: list[tuple[float, float, float]] = [(float(points[0, 0]), float(points[0, 1]), float(z[0]))]
     for i, length in enumerate(lengths):
         ax, ay = float(points[i, 0]), float(points[i, 1])
         bx, by = float(points[i + 1, 0]), float(points[i + 1, 1])
@@ -198,7 +196,7 @@ def _densify_with_z(
         if length <= max_spacing_m or length <= 0:
             out.append((bx, by, bz))
             continue
-        steps = max(2, int(math.ceil(length / max_spacing_m)))
+        steps = max(2, math.ceil(length / max_spacing_m))
         for step in range(1, steps + 1):
             t = step / steps
             out.append((ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t))

@@ -22,7 +22,8 @@ from ivanovo2beam.beamng.materials import (
     highway_to_material,
     referenced_asset_paths,
     resolve_materials,
-    surface_to_material)
+    surface_to_material,
+)
 
 
 class TestSpec:

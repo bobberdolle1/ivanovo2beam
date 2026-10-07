@@ -252,9 +252,7 @@ class RegionProjection:
     # ------------------------------------------------------------------ dunder
 
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
-        return (
-            f"RegionProjection(name={self._name!r}, origin=({self._origin_lon}, {self._origin_lat}))"
-        )
+        return f"RegionProjection(name={self._name!r}, origin=({self._origin_lon}, {self._origin_lat}))"
 
     # --------------------------------------------------------------- properties
 

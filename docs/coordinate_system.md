@@ -22,8 +22,8 @@ BeamNG world coordinates (metres)
 Implemented in [`src/ivanovo2beam/gis/projection.py`](../src/ivanovo2beam/gis/projection.py):
 
 ```python
-x, y = projection.geo_to_world(lon, lat)   # metres
-lon, lat = projection.world_to_geo(x, y)   # exact inverse
+x, y = projection.geo_to_world(lon, lat)  # metres
+lon, lat = projection.world_to_geo(x, y)  # exact inverse
 ```
 
 ## Why degrees will not do

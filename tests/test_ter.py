@@ -120,7 +120,7 @@ class TestDecodeValidation:
     def test_rejects_wrong_version(self) -> None:
         blob = bytearray(encode_ter(make_terrain(128)))
         blob[0] = 8
-        with pytest.raises(TerrainFormatError, match="unsupported .ter version 8"):
+        with pytest.raises(TerrainFormatError, match=r"unsupported \.ter version 8"):
             decode_ter(bytes(blob))
 
     def test_rejects_non_power_of_two_size(self) -> None:
@@ -216,7 +216,7 @@ class TestTerrainFileValidation:
             )
 
     def test_rejects_unsupported_version(self) -> None:
-        with pytest.raises(TerrainFormatError, match="unsupported .ter version 7"):
+        with pytest.raises(TerrainFormatError, match=r"unsupported \.ter version 7"):
             TerrainFile(
                 size=128,
                 heights=np.zeros((128, 128), dtype=np.uint16),
@@ -259,9 +259,7 @@ class TestHeightQuantisation:
         elevations[0, 0] = 10_000.0  # far above the range
         elevations[1, 1] = -10_000.0  # far below
         layers = np.zeros((size, size), dtype=np.uint8)
-        terrain = TerrainFile.from_elevations(
-            elevations, layers, MATERIALS, base_z=0.0, max_height=100.0
-        )
+        terrain = TerrainFile.from_elevations(elevations, layers, MATERIALS, base_z=0.0, max_height=100.0)
         assert terrain.heights[0, 0] == 65535
         assert terrain.heights[1, 1] == 0
 

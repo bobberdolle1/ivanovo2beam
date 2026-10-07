@@ -51,7 +51,7 @@ class Console:
             return
         self._last = fraction
         bar_width = 24
-        filled = int(round(bar_width * max(0.0, min(1.0, fraction))))
+        filled = round(bar_width * max(0.0, min(1.0, fraction)))
         bar = "#" * filled + "-" * (bar_width - filled)
         print(f"\r  [{bar}] {fraction * 100:5.1f}%  {message[:70]:<70}", end="", file=self.stream)
         if fraction >= 1.0:
@@ -150,9 +150,7 @@ def cmd_download(args: argparse.Namespace) -> int:
         force=args.force,
     )
     console(0.4, "fetching OSM")
-    _, osm_stats = fetch_level_osm(
-        config, bbox, tile_km=args.osm_tile_km, progress=console, force=args.force
-    )
+    _, osm_stats = fetch_level_osm(config, bbox, tile_km=args.osm_tile_km, progress=console, force=args.force)
     console(1.0, "download complete")
     _emit(
         {
