@@ -1,0 +1,5 @@
+Generated output goes here and is gitignored. This placeholder keeps the
+directory present so tooling (pytest's basetemp, the build pipeline) can rely
+on it existing without creating parents.
+
+Nothing in build/ is ever committed except this file.

@@ -1,8 +1,12 @@
 # Generated output — never commit generated assets
-build/
+build/*
+!build/.gitkeep
 dist/
 *.egg-info/
 .eggs/
+
+# Sandbox/pytest scratch directories (also created by failed atomic renames)
+pytest-cache-files-*/
 
 # Cache of downloaded / derived geodata
 .cache/
