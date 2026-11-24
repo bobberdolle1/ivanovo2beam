@@ -689,3 +689,266 @@ class TestGeoreferencing:
         terrain: TerrainFile = build.to_terrain_file()
         trailer = 4 + sum(1 + len(m.encode()) for m in terrain.materials)
         assert terrain.payload_size() == 5 + 3 * 256 * 256 + trailer
+
+
+class TestWaterCarvingAndBankPainting:
+    def test_carve_river_channel(self, projection) -> None:
+        """River channel must depress terrain to z_water - depth and paint bed materials."""
+        from ivanovo2beam.beamng.materials import DEFAULT_MATERIAL_ORDER
+        from ivanovo2beam.water.extract import RiverChannel, WaterNetwork
+
+        mat_idx = {key: i for i, key in enumerate(DEFAULT_MATERIAL_ORDER)}
+        elevations = np.full((128, 128), 120.0, dtype=np.float64)
+        layers = np.zeros((128, 128), dtype=np.uint8)
+
+        # River running along y = 160 m across the grid from x = 0 to 320 m
+        river = RiverChannel(
+            osm_id=1,
+            name="Test River",
+            waterway_type="river",
+            points=np.array([[0.0, 160.0], [320.0, 160.0]], dtype=np.float64),
+            width_m=20.0,  # hw = 10m
+            depth_m=2.5,
+            z_water=np.array([120.0, 120.0], dtype=np.float64),
+        )
+        network = WaterNetwork(rivers=[river])
+
+        from ivanovo2beam.terrain.builder import carve_water
+        touched, stats = carve_water(
+            elevations,
+            layers,
+            mat_idx,
+            network,
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=2.5,
+            bank_transition_m=10.0,
+        )
+
+        assert touched > 0
+        assert stats["rivers_carved"] == 1
+
+        # Check centreline cell at row 64 (y=160m with cell_size=2.5m)
+        center_elev = elevations[64, :]
+        assert np.allclose(center_elev, 120.0 - 2.5), "River bed should be depressed to z_water - depth"
+
+        # Check materials: center must be Pebbles (submerged bed)
+        pebbles_idx = mat_idx["Pebbles"]
+        assert (layers[64, :] == pebbles_idx).all(), "Channel bed must be painted as Pebbles"
+
+        # Check banks: Sand (beach) and RiverbankSoil (wet bank) must be present
+        sand_idx = mat_idx["Sand"]
+        soil_idx = mat_idx["RiverbankSoil"]
+        assert (layers == sand_idx).any(), "Shallow banks must include Sand"
+        assert (layers == soil_idx).any(), "Wet banks must include RiverbankSoil"
+
+    def test_carve_lake_basin_with_island(self, projection) -> None:
+        """Lake basin must depress terrain while strictly preserving island rings."""
+        from ivanovo2beam.beamng.materials import DEFAULT_MATERIAL_ORDER
+        from ivanovo2beam.water.extract import WaterBody, WaterNetwork
+
+        mat_idx = {k: i for i, k in enumerate(DEFAULT_MATERIAL_ORDER)}
+        elevations = np.full((128, 128), 100.0, dtype=np.float64)
+        layers = np.zeros((128, 128), dtype=np.uint8)
+
+        # Outer lake ring from 200..800m
+        outer = np.array([
+            [200.0, 200.0],
+            [800.0, 200.0],
+            [800.0, 800.0],
+            [200.0, 800.0],
+            [200.0, 200.0],
+        ], dtype=np.float64)
+
+        # Island ring in the center from 450..550m
+        island = np.array([
+            [450.0, 450.0],
+            [550.0, 450.0],
+            [550.0, 550.0],
+            [450.0, 550.0],
+            [450.0, 450.0],
+        ], dtype=np.float64)
+
+        lake = WaterBody(
+            osm_id=99,
+            name="Test Lake with Island",
+            water_type="lake",
+            outer_ring=outer,
+            inner_rings=[island],
+            depth_m=3.5,
+            z_water=100.0,
+        )
+        network = WaterNetwork(water_bodies=[lake])
+
+        from ivanovo2beam.terrain.builder import carve_water
+        touched, stats = carve_water(
+            elevations,
+            layers,
+            mat_idx,
+            network,
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=10.0,
+            bank_transition_m=10.0,
+        )
+
+        assert touched > 0
+        assert stats["water_bodies_carved"] == 1
+
+        # Lake basin at row 30, col 30 (y=300, x=300) should be depressed to 100 - 3.5 = 96.5
+        assert elevations[30, 30] == pytest.approx(96.5)
+        assert layers[30, 30] == mat_idx["Pebbles"]
+
+        # Island center at row 50, col 50 (y=500, x=500) must NOT be submerged!
+        assert elevations[50, 50] == pytest.approx(100.0), "Island elevation must be preserved"
+        assert layers[50, 50] != mat_idx["Pebbles"], "Island center must not be painted as submerged pebbles"
+
+    def test_build_terrain_with_water_network(self, projection) -> None:
+        from ivanovo2beam.water.extract import RiverChannel, WaterNetwork
+
+        river = RiverChannel(
+            osm_id=42,
+            name="Uvod",
+            waterway_type="river",
+            points=np.array([[100.0, 500.0], [900.0, 500.0]], dtype=np.float64),
+            width_m=25.0,
+            depth_m=2.5,
+            z_water=np.array([120.0, 120.0], dtype=np.float64),
+        )
+        network = WaterNetwork(rivers=[river])
+
+        build = build_terrain(
+            FlatDem(120.0),
+            projection,
+            origin_x=0.0,
+            origin_y=0.0,
+            grid_size=128,
+            cell_size_m=10.0,
+            water_network=network,
+        )
+        assert build.stats.get("water_cells", 0) > 0
+
+
+class TestForestCanopyStripping:
+    def test_strips_canopy_jump_inside_woods(self, projection) -> None:
+        """Forest canopy stripping must measure edge jump and subtract canopy height."""
+        from ivanovo2beam.beamng.materials import DEFAULT_MATERIAL_ORDER
+        from ivanovo2beam.terrain.builder import strip_forest_canopy
+
+        mat_idx = {key: i for i, key in enumerate(DEFAULT_MATERIAL_ORDER)}
+
+        # Create a synthetic DEM where woods sit 14m above open ground
+        elevations = np.full((128, 128), 100.0, dtype=np.float64)
+        # Woods from row 40..80, col 40..80 (x=400..800, y=400..800)
+        elevations[40:81, 40:81] = 114.0
+        layers = np.zeros((128, 128), dtype=np.uint8)
+
+        wood_poly = np.array([
+            [395.0, 395.0],
+            [805.0, 395.0],
+            [805.0, 805.0],
+            [395.0, 805.0],
+            [395.0, 395.0],
+        ], dtype=np.float64)
+
+        cells, stats = strip_forest_canopy(
+            elevations,
+            layers,
+            mat_idx,
+            [wood_poly],
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=10.0,
+        )
+
+        assert cells > 0
+        assert stats["canopy_height_m"] == pytest.approx(14.0, abs=0.5)
+
+        # Elevation inside woods should now be stripped back to ~100m ground level!
+        assert elevations[60, 60] == pytest.approx(100.0, abs=0.5)
+        assert layers[60, 60] == mat_idx["ForestFloor"]
+
+    def test_build_terrain_with_forest_canopy_and_road_grading(self, projection) -> None:
+        """Road cut through woods must not sit in a 20m trench when canopy is stripped."""
+        wood_poly = np.array([
+            [200.0, 200.0],
+            [600.0, 200.0],
+            [600.0, 600.0],
+            [200.0, 600.0],
+            [200.0, 200.0],
+        ], dtype=np.float64)
+
+        # Sloped DEM with forest
+        dem = FlatDem(115.0)
+
+        build = build_terrain(
+            dem,
+            projection,
+            origin_x=0.0,
+            origin_y=0.0,
+            grid_size=128,
+            cell_size_m=10.0,
+            forest_polygons=[wood_poly],
+            canopy_height_m=15.0,
+        )
+        assert build.stats.get("forest_cells", 0) > 0
+
+
+class TestLandcoverAndSatelliteSupport:
+    def test_paint_landcover(self, projection) -> None:
+        from ivanovo2beam.beamng.materials import DEFAULT_MATERIAL_ORDER
+        from ivanovo2beam.terrain.builder import paint_landcover
+
+        mat_idx = {key: i for i, key in enumerate(DEFAULT_MATERIAL_ORDER)}
+        layers = np.zeros((128, 128), dtype=np.uint8)
+
+        field_poly = np.array([
+            [100.0, 100.0],
+            [300.0, 100.0],
+            [300.0, 300.0],
+            [100.0, 300.0],
+            [100.0, 100.0],
+        ], dtype=np.float64)
+
+        painted = paint_landcover(
+            layers,
+            mat_idx,
+            {"Field": [field_poly]},
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=10.0,
+        )
+        assert painted > 0
+        assert layers[20, 20] == mat_idx["Field"]
+
+    def test_satellite_base_texture_support(self, projection) -> None:
+        sat_path = "/levels/ivanovo_mvp/art/textures/satellite_ortho.dds"
+        build = build_terrain(
+            FlatDem(110.0),
+            projection,
+            origin_x=0.0,
+            origin_y=0.0,
+            grid_size=128,
+            cell_size_m=10.0,
+            satellite_tex=sat_path,
+        )
+        assert build.satellite_image == sat_path
+        assert build.stats.get("satellite_tex") == sat_path
+
+    def test_terrain_placement_with_base_color_base_tex(self) -> None:
+        from ivanovo2beam.beamng.level import TerrainPlacement
+
+        sat_path = "/levels/ivanovo_mvp/art/textures/satellite_ortho.dds"
+        placement = TerrainPlacement(
+            name="theTerrain",
+            origin_x=-1000.0,
+            origin_y=-1000.0,
+            base_z=100.0,
+            max_height=50.0,
+            square_size=1.0,
+            grid_size=1024,
+            terrain_file="levels/ivanovo_mvp/theTerrain.ter",
+            base_color_base_tex=sat_path,
+        )
+        obj = placement.to_object("ivanovo_mvp")
+        assert obj["baseColorBaseTex"] == sat_path

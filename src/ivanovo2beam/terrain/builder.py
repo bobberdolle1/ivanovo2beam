@@ -41,6 +41,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
+import shapely
+from shapely.geometry import Polygon
+from shapely.validation import make_valid
 
 from ivanovo2beam.beamng.materials import DEFAULT_MATERIAL_ORDER
 from ivanovo2beam.beamng.ter import TerrainFile
@@ -150,6 +153,7 @@ class TerrainBuild:
     cell_size_m: float
     graded_cells: int = 0
     stats: dict[str, Any] = field(default_factory=dict)
+    satellite_image: str | None = None
 
     @property
     def grid_size(self) -> int:
@@ -593,6 +597,365 @@ def _fill_dem_gaps(
     return (total_filled, float(leftover))
 
 
+# ---------------------------------------------------------------------------
+# Hydrology carving and landcover painting
+# ---------------------------------------------------------------------------
+
+
+def carve_water(
+    elevations: NDArray[np.float64],
+    layers: NDArray[np.uint8],
+    material_index: dict[str, int],
+    water_network: Any,
+    *,
+    origin_x: float,
+    origin_y: float,
+    cell_size_m: float,
+    bank_transition_m: float = 8.0,
+) -> tuple[int, dict[str, Any]]:
+    """Carve water channels, rivers, lakes, and basins into the terrain.
+
+    Depresses terrain inside water channels and polygons down to z_water - depth_m
+    with smoothstep bank transitions (6-12m) and paints bank materials:
+    - Submerged bed: Pebbles (idx 11)
+    - Shallow beaches: Sand (idx 10)
+    - Wet banks: RiverbankSoil (idx 4)
+    Preserves island rings inside water bodies.
+
+    Args:
+        elevations: (n, n) elevation grid, modified in place.
+        layers: (n, n) material index grid, modified in place.
+        material_index: Mapping of material keys to uint8 indices.
+        water_network: WaterNetwork containing rivers and water_bodies.
+        origin_x: World X of minimum corner.
+        origin_y: World Y of minimum corner.
+        cell_size_m: Ground spacing in metres.
+        bank_transition_m: Bank slope transition width in metres (6-12m).
+
+    Returns:
+        (touched_cells_count, stats_dict).
+    """
+    n = elevations.shape[0]
+    idx_pebbles = material_index.get("Pebbles", 11)
+    idx_sand = material_index.get("Sand", 10)
+    idx_riverbank_soil = material_index.get("RiverbankSoil", 4)
+
+    bw = max(6.0, min(12.0, float(bank_transition_m)))
+    touched_mask = np.zeros((n, n), dtype=bool)
+
+    # 1. Carve linear river channels
+    rivers = getattr(water_network, "rivers", ())
+    for river in rivers:
+        pts = river.points
+        zw = river.z_water
+        depth_m = float(river.depth_m)
+        hw = float(river.width_m) / 2.0
+        total_reach = hw + bw
+
+        for i in range(pts.shape[0] - 1):
+            x0, y0 = pts[i]
+            x1, y1 = pts[i + 1]
+            z0, z1 = zw[i], zw[i + 1]
+            dx, dy = x1 - x0, y1 - y0
+            seg_len_sq = dx * dx + dy * dy
+            if seg_len_sq <= 0:
+                continue
+
+            col_lo = max(0, math.floor((min(x0, x1) - total_reach - origin_x) / cell_size_m))
+            col_hi = min(n - 1, math.ceil((max(x0, x1) + total_reach - origin_x) / cell_size_m))
+            row_lo = max(0, math.floor((min(y0, y1) - total_reach - origin_y) / cell_size_m))
+            row_hi = min(n - 1, math.ceil((max(y0, y1) + total_reach - origin_y) / cell_size_m))
+            if col_hi < col_lo or row_hi < row_lo:
+                continue
+
+            cols = np.arange(col_lo, col_hi + 1, dtype=np.float64)
+            rows = np.arange(row_lo, row_hi + 1, dtype=np.float64)
+            cx = origin_x + cols * cell_size_m
+            cy = origin_y + rows * cell_size_m
+            grid_x, grid_y = np.meshgrid(cx, cy)
+
+            rel_x = grid_x - x0
+            rel_y = grid_y - y0
+            t = np.clip((rel_x * dx + rel_y * dy) / seg_len_sq, 0.0, 1.0)
+            closest_x = x0 + t * dx
+            closest_y = y0 + t * dy
+            dist = np.hypot(grid_x - closest_x, grid_y - closest_y)
+            water_z = z0 + t * (z1 - z0)
+
+            inside_channel = dist <= hw
+            in_bank = (dist > hw) & (dist <= total_reach)
+            affected = dist <= total_reach
+
+            if not affected.any():
+                continue
+
+            # Channel bed: depress to water_z - depth_m
+            sub_elev = elevations[row_lo : row_hi + 1, col_lo : col_hi + 1]
+            sub_layers = layers[row_lo : row_hi + 1, col_lo : col_hi + 1]
+            sub_touched = touched_mask[row_lo : row_hi + 1, col_lo : col_hi + 1]
+
+            if inside_channel.any():
+                bed_z = water_z - depth_m
+                sub_elev[inside_channel] = np.minimum(sub_elev[inside_channel], bed_z[inside_channel])
+                sub_layers[inside_channel] = idx_pebbles
+                sub_touched[inside_channel] = True
+
+            if in_bank.any():
+                frac = (dist[in_bank] - hw) / bw
+                smooth = frac * frac * (3.0 - 2.0 * frac)
+                bank_z = (water_z[in_bank] - depth_m) + smooth * depth_m
+                sub_elev[in_bank] = np.minimum(sub_elev[in_bank], bank_z)
+                sub_touched[in_bank] = True
+
+                sub_layers[in_bank] = np.where(frac <= 0.45, idx_sand, idx_riverbank_soil)
+
+    # 2. Carve standing water bodies (lakes, reservoirs, ponds)
+    bodies = getattr(water_network, "water_bodies", ())
+    for body in bodies:
+        outer = body.outer_ring
+        inners = [h for h in body.inner_rings if len(h) >= 4]
+        z_water = float(body.z_water)
+        depth_m = float(body.depth_m)
+
+        poly = Polygon(outer, holes=inners)
+        if not poly.is_valid:
+            poly = make_valid(poly)
+            if poly.is_empty:
+                continue
+
+        min_x, min_y, max_x, max_y = poly.bounds
+        col_lo = max(0, math.floor((min_x - bw - origin_x) / cell_size_m))
+        col_hi = min(n - 1, math.ceil((max_x + bw - origin_x) / cell_size_m))
+        row_lo = max(0, math.floor((min_y - bw - origin_y) / cell_size_m))
+        row_hi = min(n - 1, math.ceil((max_y + bw - origin_y) / cell_size_m))
+        if col_hi < col_lo or row_hi < row_lo:
+            continue
+
+        cols = np.arange(col_lo, col_hi + 1, dtype=np.float64)
+        rows = np.arange(row_lo, row_hi + 1, dtype=np.float64)
+        cx = origin_x + cols * cell_size_m
+        cy = origin_y + rows * cell_size_m
+        grid_x, grid_y = np.meshgrid(cx, cy)
+
+        # Vectorized containment: True for lake basin, False for islands (holes)
+        inside = shapely.contains_xy(poly, grid_x.ravel(), grid_y.ravel()).reshape(grid_x.shape)
+        if not inside.any():
+            continue
+
+        sub_elev = elevations[row_lo : row_hi + 1, col_lo : col_hi + 1]
+        sub_layers = layers[row_lo : row_hi + 1, col_lo : col_hi + 1]
+        sub_touched = touched_mask[row_lo : row_hi + 1, col_lo : col_hi + 1]
+
+        # Calculate distance to shoreline (boundary includes both outer ring and island rings)
+        pts_inside = shapely.points(grid_x[inside], grid_y[inside])
+        dist_to_shore = shapely.distance(poly.boundary, pts_inside)
+
+        deep_mask = dist_to_shore >= bw
+        shallow_mask = ~deep_mask
+
+        # Deep basin bed
+        inside_indices = np.where(inside)
+        deep_rows = inside_indices[0][deep_mask]
+        deep_cols = inside_indices[1][deep_mask]
+        sub_elev[deep_rows, deep_cols] = np.minimum(sub_elev[deep_rows, deep_cols], z_water - depth_m)
+        sub_layers[deep_rows, deep_cols] = idx_pebbles
+        sub_touched[deep_rows, deep_cols] = True
+
+        # Shallow bank transition towards shore / island
+        shallow_rows = inside_indices[0][shallow_mask]
+        shallow_cols = inside_indices[1][shallow_mask]
+        t = dist_to_shore[shallow_mask] / bw
+        smooth = t * t * (3.0 - 2.0 * t)
+        bed_z = z_water - depth_m * smooth
+        sub_elev[shallow_rows, shallow_cols] = np.minimum(sub_elev[shallow_rows, shallow_cols], bed_z)
+        sub_touched[shallow_rows, shallow_cols] = True
+
+        pebbles_sub = t > 0.4
+        sand_sub = ~pebbles_sub
+        sub_layers[shallow_rows[pebbles_sub], shallow_cols[pebbles_sub]] = idx_pebbles
+        sub_layers[shallow_rows[sand_sub], shallow_cols[sand_sub]] = idx_sand
+
+        # Paint wet bank immediately outside shoreline (e.g. within 0.75 * bw)
+        outside = ~inside
+        if outside.any():
+            pts_outside = shapely.points(grid_x[outside], grid_y[outside])
+            dist_out = shapely.distance(poly.boundary, pts_outside)
+            wet_out_mask = dist_out <= (0.75 * bw)
+            if wet_out_mask.any():
+                out_indices = np.where(outside)
+                wet_rows = out_indices[0][wet_out_mask]
+                wet_cols = out_indices[1][wet_out_mask]
+                sub_layers[wet_rows, wet_cols] = idx_riverbank_soil
+                sub_touched[wet_rows, wet_cols] = True
+
+    touched_count = int(touched_mask.sum())
+    stats = {
+        "carved_cells": touched_count,
+        "rivers_carved": len(rivers),
+        "water_bodies_carved": len(bodies),
+    }
+    return touched_count, stats
+
+
+def strip_forest_canopy(
+    elevations: NDArray[np.float64],
+    layers: NDArray[np.uint8],
+    material_index: dict[str, int],
+    forest_polygons: Sequence[Any],
+    *,
+    origin_x: float,
+    origin_y: float,
+    cell_size_m: float,
+    fallback_canopy_m: float = 12.0,
+) -> tuple[int, dict[str, Any]]:
+    """Rasterize forest mask, measure canopy jump across boundary, and subtract canopy height.
+
+    Central Russian forests (birch, pine, spruce) add 10-15m of elevation in DSMs
+    such as Copernicus DEM. Stripping this canopy height (clipped to 0-15m) inside
+    woods before road grading prevents roads cut through forests from sitting in
+    artificial 20m trenches.
+
+    Args:
+        elevations: (n, n) elevation grid, modified in place.
+        layers: (n, n) material index grid, modified in place.
+        material_index: Material key to index dictionary.
+        forest_polygons: Sequence of forest polygons (coordinates or shapely Polygons).
+        origin_x: World X of minimum corner.
+        origin_y: World Y of minimum corner.
+        cell_size_m: Ground spacing in metres.
+        fallback_canopy_m: Default canopy height if boundary jump cannot be measured.
+
+    Returns:
+        (forest_cell_count, stats_dict).
+    """
+    n = elevations.shape[0]
+    forest_mask = np.zeros((n, n), dtype=bool)
+
+    for shape in forest_polygons:
+        if isinstance(shape, Polygon):
+            poly = shape
+        else:
+            pts = np.asarray(shape, dtype=np.float64)
+            if pts.shape[0] < 3:
+                continue
+            poly = Polygon(pts)
+        if not poly.is_valid:
+            poly = make_valid(poly)
+            if poly.is_empty:
+                continue
+
+        min_x, min_y, max_x, max_y = poly.bounds
+        col_lo = max(0, math.floor((min_x - origin_x) / cell_size_m))
+        col_hi = min(n - 1, math.ceil((max_x - origin_x) / cell_size_m))
+        row_lo = max(0, math.floor((min_y - origin_y) / cell_size_m))
+        row_hi = min(n - 1, math.ceil((max_y - origin_y) / cell_size_m))
+        if col_hi < col_lo or row_hi < row_lo:
+            continue
+
+        cols = np.arange(col_lo, col_hi + 1, dtype=np.float64)
+        rows = np.arange(row_lo, row_hi + 1, dtype=np.float64)
+        cx = origin_x + cols * cell_size_m
+        cy = origin_y + rows * cell_size_m
+        grid_x, grid_y = np.meshgrid(cx, cy)
+
+        inside = shapely.contains_xy(poly, grid_x.ravel(), grid_y.ravel()).reshape(grid_x.shape)
+        forest_mask[row_lo : row_hi + 1, col_lo : col_hi + 1] |= inside
+
+    if not forest_mask.any():
+        return 0, {"forest_cells": 0, "canopy_height_m": 0.0}
+
+    # Morphological boundary detection: 1-cell inside vs 1-cell outside
+    pad = np.pad(forest_mask, 1, mode="edge")
+    has_outside_neighbor = (
+        ~pad[:-2, 1:-1] | ~pad[2:, 1:-1] | ~pad[1:-1, :-2] | ~pad[1:-1, 2:]
+    )
+    inside_edge = forest_mask & has_outside_neighbor
+
+    has_inside_neighbor = (
+        pad[:-2, 1:-1] | pad[2:, 1:-1] | pad[1:-1, :-2] | pad[1:-1, 2:]
+    )
+    outside_edge = (~forest_mask) & has_inside_neighbor
+
+    if inside_edge.any() and outside_edge.any():
+        z_in = elevations[inside_edge]
+        z_out = elevations[outside_edge]
+        jump = float(np.mean(z_in) - np.mean(z_out))
+    else:
+        jump = fallback_canopy_m
+
+    canopy_height = float(np.clip(jump, 0.0, 15.0))
+    if canopy_height > 0.0:
+        elevations[forest_mask] -= canopy_height
+
+    idx_forest_floor = material_index.get("ForestFloor", 2)
+    layers[forest_mask] = idx_forest_floor
+
+    forest_cells = int(forest_mask.sum())
+    stats = {
+        "forest_cells": forest_cells,
+        "canopy_height_m": canopy_height,
+    }
+    return forest_cells, stats
+
+
+def paint_landcover(
+    layers: NDArray[np.uint8],
+    material_index: dict[str, int],
+    polygons_by_material: dict[str, Sequence[Any]],
+    *,
+    origin_x: float,
+    origin_y: float,
+    cell_size_m: float,
+) -> int:
+    """Paint landcover polygons onto the terrain layer map.
+
+    Args:
+        layers: (n, n) material index grid, modified in place.
+        material_index: Mapping of material keys to layer indices.
+        polygons_by_material: Mapping of material key to list of polygon shapes/rings.
+        origin_x: World X of minimum corner.
+        origin_y: World Y of minimum corner.
+        cell_size_m: Ground spacing in metres.
+
+    Returns:
+        Total cells painted.
+    """
+    total_painted = 0
+    n = layers.shape[0]
+    for mat_key, poly_list in polygons_by_material.items():
+        mat_idx = material_index.get(mat_key)
+        if mat_idx is None:
+            continue
+        for shape in poly_list:
+            if isinstance(shape, Polygon):
+                poly = shape
+            else:
+                pts = np.asarray(shape, dtype=np.float64)
+                if pts.shape[0] < 3:
+                    continue
+                poly = Polygon(pts)
+            if not poly.is_valid:
+                poly = make_valid(poly)
+                if poly.is_empty:
+                    continue
+            min_x, min_y, max_x, max_y = poly.bounds
+            col_lo = max(0, math.floor((min_x - origin_x) / cell_size_m))
+            col_hi = min(n - 1, math.ceil((max_x - origin_x) / cell_size_m))
+            row_lo = max(0, math.floor((min_y - origin_y) / cell_size_m))
+            row_hi = min(n - 1, math.ceil((max_y - origin_y) / cell_size_m))
+            if col_hi < col_lo or row_hi < row_lo:
+                continue
+            cols = np.arange(col_lo, col_hi + 1, dtype=np.float64)
+            rows = np.arange(row_lo, row_hi + 1, dtype=np.float64)
+            cx = origin_x + cols * cell_size_m
+            cy = origin_y + rows * cell_size_m
+            gx, gy = np.meshgrid(cx, cy)
+            inside = shapely.contains_xy(poly, gx.ravel(), gy.ravel()).reshape(gx.shape)
+            layers[row_lo : row_hi + 1, col_lo : col_hi + 1][inside] = mat_idx
+            total_painted += int(inside.sum())
+    return total_painted
+
+
 def build_terrain(
     dem: DemSampler,
     projection: RegionProjection,
@@ -609,6 +972,13 @@ def build_terrain(
     smooth_window_m: float = 120.0,
     max_grade: float = 0.12,
     progress: Any = None,
+    water_network: Any | None = None,
+    forest_polygons: Sequence[Any] | None = None,
+    landcover_polygons: dict[str, Sequence[Any]] | None = None,
+    satellite_tex: str | None = None,
+    canopy_height_m: float | None = None,
+    carve_water_fn: Any | None = None,
+    paint_landcover_fn: Any | None = None,
 ) -> TerrainBuild:
     """Build a complete terrain grid from a DEM plus optional road corridors.
 
@@ -629,6 +999,13 @@ def build_terrain(
         smooth_window_m: Road profile smoothing window.
         max_grade: Maximum road gradient.
         progress: Optional callable ``progress(fraction, message)``.
+        water_network: Extracted WaterNetwork for channel and basin carving.
+        forest_polygons: Sequence of forest polygons for canopy stripping before grading.
+        landcover_polygons: Mapping of material keys to polygon lists.
+        satellite_tex: Optional path to satellite imagery / orthophoto base texture.
+        canopy_height_m: Fixed canopy height override in metres.
+        carve_water_fn: Optional custom water carving callable.
+        paint_landcover_fn: Optional custom landcover painting callable.
 
     Returns:
         The completed :class:`TerrainBuild`.
@@ -678,6 +1055,45 @@ def build_terrain(
 
     layers = np.zeros((grid_size, grid_size), dtype=np.uint8)
 
+    # 1. Forest canopy stripping filter (BEFORE road grading!)
+    if forest_polygons:
+        report(0.38, f"stripping canopy from {len(forest_polygons)} forest polygons")
+        fallback_h = canopy_height_m if canopy_height_m is not None else 12.0
+        forest_cells, forest_stats = strip_forest_canopy(
+            elevations,
+            layers,
+            material_index,
+            forest_polygons,
+            origin_x=origin_x,
+            origin_y=origin_y,
+            cell_size_m=cell_size_m,
+            fallback_canopy_m=fallback_h,
+        )
+        stats["forest_cells"] = forest_cells
+        stats.update(forest_stats)
+
+    # 2. Landcover material painting
+    if landcover_polygons or paint_landcover_fn is not None:
+        report(0.39, "painting landcover polygons")
+        if paint_landcover_fn is not None:
+            paint_landcover_fn(
+                layers,
+                material_index,
+                origin_x=origin_x,
+                origin_y=origin_y,
+                cell_size_m=cell_size_m,
+            )
+        elif landcover_polygons:
+            paint_landcover(
+                layers,
+                material_index,
+                landcover_polygons,
+                origin_x=origin_x,
+                origin_y=origin_y,
+                cell_size_m=cell_size_m,
+            )
+
+    # 3. Road corridor grading
     graded_cells = 0
     if corridors:
         report(0.40, f"deriving profiles for {len(corridors)} road corridors")
@@ -710,6 +1126,31 @@ def build_terrain(
         stats.update(grade_stats)
         stats["road_corridors"] = len(prepared)
 
+    # 4. Water channel and basin carving
+    if water_network is not None or carve_water_fn is not None:
+        report(0.75, "carving water channels and basins")
+        if carve_water_fn is not None:
+            carve_water_fn(
+                elevations,
+                layers,
+                material_index,
+                origin_x=origin_x,
+                origin_y=origin_y,
+                cell_size_m=cell_size_m,
+            )
+        elif water_network is not None:
+            water_cells, water_stats = carve_water(
+                elevations,
+                layers,
+                material_index,
+                water_network,
+                origin_x=origin_x,
+                origin_y=origin_y,
+                cell_size_m=cell_size_m,
+            )
+            stats["water_cells"] = water_cells
+            stats.update(water_stats)
+
     report(0.80, "choosing the vertical range")
     if max_height_m is not None:
         base_z = float(np.floor(elevations.min())) - ground_margin_m
@@ -722,6 +1163,8 @@ def build_terrain(
     stats["vertical_step_m"] = max_height / 65536.0
     stats["materials"] = list(materials)
     stats["layer_histogram"] = {key: int((layers == idx).sum()) for idx, key in enumerate(materials)}
+    if satellite_tex:
+        stats["satellite_tex"] = satellite_tex
 
     report(0.95, "terrain ready")
     return TerrainBuild(
@@ -735,4 +1178,5 @@ def build_terrain(
         cell_size_m=float(cell_size_m),
         graded_cells=graded_cells,
         stats=stats,
+        satellite_image=satellite_tex,
     )

@@ -259,6 +259,7 @@ class TerrainPlacement:
     base_tex_size: int = 2048
     material_texture_set: str | None = None
     minimap_image: str | None = None
+    base_color_base_tex: str | None = None
 
     @property
     def extent_m(self) -> float:
@@ -288,6 +289,8 @@ class TerrainPlacement:
             obj["materialTextureSet"] = self.material_texture_set
         if self.minimap_image:
             obj["minimapImage"] = self.minimap_image
+        if self.base_color_base_tex:
+            obj["baseColorBaseTex"] = self.base_color_base_tex
         return obj
 
 
@@ -305,6 +308,10 @@ def build_info_json(
     supports_traffic: bool = True,
     supports_time_of_day: bool = True,
     default_date: dict[str, int] | None = None,
+    region: str = "europe",
+    road_rules: dict[str, bool] | None = None,
+    spawn_points: Sequence[dict[str, Any]] | dict[str, Any] | None = None,
+    default_spawn_point_name: str | None = None,
 ) -> dict[str, Any]:
     """Build a level's ``info.json``.
 
@@ -321,25 +328,36 @@ def build_info_json(
         supports_traffic: Whether AI traffic may be enabled.
         supports_time_of_day: Whether time of day may be changed.
         default_date: Default in-game date.
+        region: Geographic region code, defaults to "europe".
+        road_rules: Road rules dict, defaults to {"rightHandDrive": False, "turnOnRed": False}.
+        spawn_points: Named spawn point definitions.
+        default_spawn_point_name: Object name of the default spawn point.
 
     Returns:
         The ``info.json`` contents.
     """
     size = round(extent_m)
-    return {
+    info: dict[str, Any] = {
         "defaultDate": default_date or {"year": 2026, "month": 6, "day": 20},
         "title": title,
         "description": description,
         "previews": [f"{level_id}_preview.png"],
         "size": [size, size],
         "biome": biome,
+        "region": region,
         "roads": roads,
         "suitablefor": suitable_for,
         "features": features,
         "authors": authors,
         "supportsTraffic": supports_traffic,
         "supportsTimeOfDay": supports_time_of_day,
+        "roadRules": road_rules if road_rules is not None else {"rightHandDrive": False, "turnOnRed": False},
     }
+    if default_spawn_point_name:
+        info["defaultSpawnPointName"] = default_spawn_point_name
+    if spawn_points is not None:
+        info["spawnPoints"] = spawn_points
+    return info
 
 
 def build_sun_and_sky(
