@@ -1,0 +1,50 @@
+"""Vegetation and forest generation for BeamNG.drive.
+
+Pipeline:
+    osm -> extract.extract_vegetation      extract forests, scrub, meadows from ways & multipolygons
+        -> forest.build_keepout_mask       rasterize roads, rail, water, and building clearance
+        -> forest.export_vegetation        deterministic PCG64(osm_id) placement
+        -> forest.build_managed_item_data_json  emit art/forest/managedItemData.json
+        -> forest.build_forest_materials_json   emit art/forest/main.materials.json
+        -> forest.<item>.forest4.json      native BeamNG 0.39 high-FPS instancing
+"""
+
+from __future__ import annotations
+
+from ivanovo2beam.vegetation.extract import (
+    FOREST_TAGS,
+    MEADOW_TAGS,
+    SCRUB_TAGS,
+    VegetationArea,
+    VegetationStats,
+    extract_vegetation,
+)
+from ivanovo2beam.vegetation.forest import (
+    FOREST_SPECIES_DISTRIBUTION,
+    SCRUB_SPECIES_DISTRIBUTION,
+    SPECIES_DATA,
+    STOCK_TREE_MATERIALS,
+    VegetationExportStats,
+    build_forest_materials_json,
+    build_keepout_mask,
+    build_managed_item_data_json,
+    export_vegetation,
+)
+
+__all__ = [
+    "FOREST_SPECIES_DISTRIBUTION",
+    "FOREST_TAGS",
+    "MEADOW_TAGS",
+    "SCRUB_SPECIES_DISTRIBUTION",
+    "SCRUB_TAGS",
+    "SPECIES_DATA",
+    "STOCK_TREE_MATERIALS",
+    "VegetationArea",
+    "VegetationExportStats",
+    "VegetationStats",
+    "build_forest_materials_json",
+    "build_keepout_mask",
+    "build_managed_item_data_json",
+    "export_vegetation",
+    "extract_vegetation",
+]
