@@ -19,8 +19,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from PIL import Image, ImageDraw
 from shapely.geometry import Point, Polygon
+
+try:
+    from PIL import Image, ImageDraw
+
+    # Quick probe to ensure C extension (_imaging) is actually usable
+    _probe = Image.new("1", (1, 1), 0)
+    _HAS_PIL = True
+except (ImportError, OSError, Exception):
+    Image = None  # type: ignore[assignment]
+    ImageDraw = None  # type: ignore[assignment]
+    _HAS_PIL = False
 
 from ivanovo2beam.beamng.level import stable_uuid
 
@@ -340,6 +350,120 @@ class VegetationExportStats:
         }
 
 
+def _rasterize_disk(mask: np.ndarray, cx: float, cy: float, r_px: float) -> None:
+    """Rasterize a filled circle of radius r_px at (cx, cy) onto mask."""
+    if r_px <= 0:
+        return
+    sz_r, sz_c = mask.shape
+    min_r = max(0, math.floor(cy - r_px))
+    max_r = min(sz_r - 1, math.ceil(cy + r_px))
+    r2 = r_px * r_px
+    for r in range(min_r, max_r + 1):
+        dy = (r + 0.5) - cy
+        rem = r2 - dy * dy
+        if rem >= 0:
+            dx = math.sqrt(rem)
+            c_start = max(0, math.ceil(cx - dx - 0.5))
+            c_end = min(sz_c - 1, math.floor(cx + dx - 0.5))
+            if c_start <= c_end:
+                mask[r, c_start : c_end + 1] = True
+
+
+def _rasterize_polygon(mask: np.ndarray, poly_pts: Sequence[tuple[float, float]]) -> None:
+    """Rasterize a 2D polygon (given as [(col, row), ...]) onto mask using scanline fill."""
+    n = len(poly_pts)
+    if n < 3:
+        return
+    sz_r, sz_c = mask.shape
+    min_r = max(0, math.floor(min(p[1] for p in poly_pts)))
+    max_r = min(sz_r - 1, math.ceil(max(p[1] for p in poly_pts)))
+    if min_r > max_r:
+        return
+
+    # Collect non-horizontal edges
+    edges: list[tuple[float, float, float, float]] = []
+    for i in range(n):
+        p1 = poly_pts[i]
+        p2 = poly_pts[(i + 1) % n]
+        if p1[1] == p2[1]:
+            continue
+        if p1[1] < p2[1]:
+            edges.append((p1[0], p1[1], p2[0], p2[1]))
+        else:
+            edges.append((p2[0], p2[1], p1[0], p1[1]))
+
+    for r in range(min_r, max_r + 1):
+        y = r + 0.5
+        nodes: list[float] = []
+        for x1, y1, x2, y2 in edges:
+            if y1 <= y < y2:
+                nodes.append(x1 + (y - y1) * (x2 - x1) / (y2 - y1))
+        nodes.sort()
+        for i in range(0, len(nodes) - 1, 2):
+            c_start = max(0, math.ceil(nodes[i] - 0.5))
+            c_end = min(sz_c - 1, math.floor(nodes[i + 1] - 0.5))
+            if c_start <= c_end:
+                mask[r, c_start : c_end + 1] = True
+
+
+def _rasterize_polyline(
+    mask: np.ndarray, pts: Sequence[tuple[float, float]], width_px: int | float
+) -> None:
+    """Rasterize a thick polyline onto mask using capsule segments."""
+    if len(pts) < 2:
+        return
+    h = max(0.5, float(width_px) / 2.0)
+    for i in range(len(pts) - 1):
+        c1, r1 = pts[i]
+        c2, r2 = pts[i + 1]
+        _rasterize_disk(mask, c1, r1, h)
+        _rasterize_disk(mask, c2, r2, h)
+        dc = c2 - c1
+        dr = r2 - r1
+        dist = math.hypot(dc, dr)
+        if dist > 1e-6:
+            nc = -dr / dist
+            nr = dc / dist
+            p0 = (c1 + nc * h, r1 + nr * h)
+            p1 = (c2 + nc * h, r2 + nr * h)
+            p2 = (c2 - nc * h, r2 - nr * h)
+            p3 = (c1 - nc * h, r1 - nr * h)
+            _rasterize_polygon(mask, [p0, p1, p2, p3])
+
+
+class _RasterCanvas:
+    """Unified raster canvas supporting PIL (if available) with pure-NumPy fallback."""
+
+    def __init__(self, sz: int) -> None:
+        if _HAS_PIL and Image is not None and ImageDraw is not None:
+            self._img: Any | None = Image.new("1", (sz, sz), 0)
+            self._draw: Any | None = ImageDraw.Draw(self._img)
+            self._mask: np.ndarray | None = None
+        else:
+            self._img = None
+            self._draw = None
+            self._mask = np.zeros((sz, sz), dtype=bool)
+
+    def line(self, pts: list[tuple[float, float]], width: int) -> None:
+        if self._draw is not None:
+            self._draw.line(pts, fill=1, width=width)
+        elif self._mask is not None:
+            _rasterize_polyline(self._mask, pts, width)
+
+    def polygon(self, pts: list[tuple[float, float]]) -> None:
+        if self._draw is not None:
+            self._draw.polygon(pts, fill=1)
+        elif self._mask is not None:
+            _rasterize_polygon(self._mask, pts)
+
+    def to_mask(self) -> np.ndarray:
+        if self._img is not None:
+            return np.asarray(self._img, dtype=bool)
+        if self._mask is not None:
+            return self._mask
+        return np.zeros((1, 1), dtype=bool)
+
+
 def build_keepout_mask(
     build: Any,
     roads: Sequence[Any] | None = None,
@@ -369,8 +493,7 @@ def build_keepout_mask(
         oy = origin_y or 0.0
         cell = cell_size_m or 1.25
 
-    img = Image.new("1", (sz, sz), 0)
-    draw = ImageDraw.Draw(img)
+    canvas = _RasterCanvas(sz)
 
     def to_pixel(wx: float, wy: float) -> tuple[float, float]:
         col = (wx - ox) / cell
@@ -389,7 +512,7 @@ def build_keepout_mask(
             clearance_m = width_m + 6.0  # includes shoulders
             width_px = max(1, round(clearance_m / cell))
             pix_pts = [to_pixel(float(p[0]), float(p[1])) for p in pts]
-            draw.line(pix_pts, fill=1, width=width_px)
+            canvas.line(pix_pts, width=width_px)
 
     # 2. Railways
     if railways:
@@ -401,7 +524,7 @@ def build_keepout_mask(
                 continue
             width_px = max(1, round(8.0 / cell))
             pix_pts = [to_pixel(float(p[0]), float(p[1])) for p in pts]
-            draw.line(pix_pts, fill=1, width=width_px)
+            canvas.line(pix_pts, width=width_px)
 
     # 3. Buildings
     if buildings:
@@ -412,7 +535,7 @@ def build_keepout_mask(
             if ring is None or len(ring) < 3:
                 continue
             pix_pts = [to_pixel(float(p[0]), float(p[1])) for p in ring]
-            draw.polygon(pix_pts, fill=1)
+            canvas.polygon(pix_pts)
 
     # 4. Water
     if water:
@@ -422,15 +545,15 @@ def build_keepout_mask(
                 ring = w
             if ring is not None and len(ring) >= 3:
                 pix_pts = [to_pixel(float(p[0]), float(p[1])) for p in ring]
-                draw.polygon(pix_pts, fill=1)
+                canvas.polygon(pix_pts)
             pts = getattr(w, "points", None)
             if pts is not None and len(pts) >= 2:
                 width_m = getattr(w, "width_m", 8.0)
                 width_px = max(1, round((width_m + 4.0) / cell))
                 pix_pts = [to_pixel(float(p[0]), float(p[1])) for p in pts]
-                draw.line(pix_pts, fill=1, width=width_px)
+                canvas.line(pix_pts, width=width_px)
 
-    mask = np.asarray(img, dtype=bool)
+    mask = canvas.to_mask()
     return mask, ox, oy, cell
 
 

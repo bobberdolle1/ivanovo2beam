@@ -197,6 +197,41 @@ class TestKeepoutMask:
         open_row = round((350.0 - oy) / cell)
         assert bool(mask[open_row, open_col]) is False
 
+    def test_keepout_mask_pure_numpy_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import ivanovo2beam.vegetation.forest as forest_mod
+
+        monkeypatch.setattr(forest_mod, "_HAS_PIL", False)
+        build = _MockBuild(size=256, elevation=100.0)
+
+        road = self._MockRoad(points=[(0.0, 100.0), (500.0, 100.0)], width_m=8.0)
+        ring = rectangle(50.0, 50.0, 200.0, 200.0)
+        bld = BuildingFootprint(
+            osm_id=1,
+            ring=ring,
+            klass="house",
+            height_m=6.0,
+            levels=2.0,
+            name="",
+            area_m2=2500.0,
+            height_source="default",
+        )
+
+        mask, ox, oy, cell = build_keepout_mask(
+            build, roads=[road], buildings=[bld]
+        )
+
+        road_col = round((100.0 - ox) / cell)
+        road_row = round((100.0 - oy) / cell)
+        assert bool(mask[road_row, road_col]) is True
+
+        bld_col = round((225.0 - ox) / cell)
+        bld_row = round((225.0 - oy) / cell)
+        assert bool(mask[bld_row, bld_col]) is True
+
+        open_col = round((350.0 - ox) / cell)
+        open_row = round((350.0 - oy) / cell)
+        assert bool(mask[open_row, open_col]) is False
+
 
 class TestForestExport:
     @dataclass
