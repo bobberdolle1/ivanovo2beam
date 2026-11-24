@@ -37,6 +37,7 @@ from ivanovo2beam.osm.fetch import (
     read_cache_meta,
 )
 from ivanovo2beam.osm.parse import parse_osm, parse_osm_pbf
+from ivanovo2beam.osm.pbf import encode_osm_pbf, write_osm_pbf
 from ivanovo2beam.osm.types import (
     OsmData,
     OsmError,
@@ -63,8 +64,10 @@ __all__ = [
     "cache_key",
     "cache_paths",
     "default_query",
+    "encode_osm_pbf",
     "fetch_overpass",
     "parse_osm",
     "parse_osm_pbf",
     "read_cache_meta",
+    "write_osm_pbf",
 ]

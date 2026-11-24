@@ -44,7 +44,7 @@ import logging
 import math
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from xml.sax.saxutils import quoteattr
 
 from ivanovo2beam.osm.types import (
@@ -312,7 +312,10 @@ def parse_osm(path: Path, *, strict: bool = False) -> OsmData:
     path = Path(path)
     suffix = path.suffix.lower()
     if suffix == ".pbf":
-        return parse_osm_pbf(path)
+        raise NotImplementedError(
+            f"cannot parse {path.name}: parse_osm() is for OSM XML files; "
+            "for .osm.pbf files call parse_osm_pbf() directly (supports pure-Python and pyosmium)."
+        )
     if not path.exists():
         raise FileNotFoundError(f"OSM extract not found: {path}")
     if path.is_dir():
@@ -396,29 +399,22 @@ def _stream_osm(fh: io.TextIOBase, source: str) -> tuple[OsmData, int, ET.ParseE
     return data, parsed, parse_error
 
 
-def parse_osm_pbf(path: Path) -> OsmData:  # pragma: no cover - always raises here
-    """Parse an ``.osm.pbf`` extract -- **not available in this build**.
-
-    The PBF container needs a protobuf/zlib decoder with the OSM schema, which
-    means a new dependency. Rather than shipping a half-working parser this
-    function refuses, and the pipeline is expected to convert PBF to XML with
-    an external tool first::
-
-        osmium cat -o extract.osm extract.osm.pbf
-        # or:  osmconvert extract.osm.pbf -o=extract.osm
+def parse_osm_pbf(
+    path: Path | str,
+    bbox: Any = None,
+) -> OsmData:
+    """Parse an ``.osm.pbf`` extract using pure-Python or accelerated osmium reader.
 
     Args:
-        path: Path to the ``.osm.pbf`` file (unused).
+        path: Path to the ``.osm.pbf`` file.
+        bbox: Optional bounding box filter (``BBox`` or tuple/sequence).
 
-    Raises:
-        NotImplementedError: Always, naming the missing ``pyosmium`` extra.
+    Returns:
+        The parsed :class:`OsmData`.
     """
-    raise NotImplementedError(
-        f"cannot parse {Path(path).name}: reading .osm.pbf requires the optional 'pyosmium' "
-        "dependency, which is not installed. Install it with "
-        "`pip install 'ivanovo2beam[pbf]'`, or convert the extract to XML first "
-        "(`osmium cat -o extract.osm extract.osm.pbf`) and call parse_osm() instead."
-    )
+    from ivanovo2beam.osm.pbf import parse_osm_pbf as _parse_pbf
+
+    return _parse_pbf(path, bbox=bbox)
 
 
 def dumps_minimal(data: OsmData) -> str:

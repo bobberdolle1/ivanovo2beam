@@ -66,10 +66,23 @@ level:
     square_size_m: 4.0
   ground_margin_m: 8.0
 
+# Feature flags
 buildings:
   enabled: true
 
 vegetation:
+  enabled: true
+
+water:
+  enabled: true
+
+railways:
+  enabled: true
+
+bridges:
+  enabled: true
+
+satellite:
   enabled: false
 
 cache:

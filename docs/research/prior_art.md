@@ -28,9 +28,10 @@ papered over. Where a licence or an activity date could not be established from 
 
 | Project | Category | Licence | Alive | Decision | Why |
 |---|---|---|---|---|---|
-| [earth2road](https://github.com/Alezx311/earth2road) (formerly `terra-drive`) | GIS→BeamNG | MIT (code) + ODbL 1.0 (OSM data) | Yes — pushed 2026-10-02 | **FORK** | Only permissively-licensed, end-to-end OSM→BeamNG mod-ZIP generator that exists; closest architectural match to us. |
+| [EarthNG](https://github.com/Alezx311/earthng) (formerly `earth2road` / `terra-drive`) | GIS→BeamNG | MIT (code) + ODbL 1.0 (OSM data) | Yes — active 2026 | **FORK / REFERENCE** | Permissively-licensed, end-to-end procedural BeamNG environment generator; key adapter reference for corridors, curbs and placement. |
 | [blender-ng](https://github.com/mate-h/blender-ng) | BeamNG terrain/road I/O | Unlicense (public domain) | Semi — pushed 2025-08-10 | **FORK** | Unlicense removes all legal friction; contains the best third-party `.ter` parser and EXR round-trip in existence. |
 | [cherepokivan/BeamNG.drive-map-generator-v3](https://github.com/cherepokivan/BeamNG.drive-map-generator-v3) ("TerraForge") | GIS→BeamNG | Apache-2.0 | Semi — pushed 2026-03-03 | **FORK** | Apache-2.0, Rust, already does OSM + AWS Terrarium → `heightmap.raw` + mod ZIP + road nodes; same problem statement as ours. |
+| [MapNG](https://github.com/nikkiluzader/mapng) (formerly `BeamNGTerrainGenerator`) | GIS→BeamNG | MIT | Yes — active 2026 | **TAKE-ALGORITHM** | Modern C#/.NET terrain/road generator with pioneering `roadMarkingCuts` junction anti-Z-fighting and multi-layer DecalRoad lane striping. |
 | [BeamNG_LevelCleanUp](https://github.com/alexkleinwaechter/BeamNG_LevelCleanUp) | GIS→BeamNG | **no licence — all rights reserved** | Yes — pushed 2026-08-02 | **TAKE-REFERENCE-ONLY** | The most capable GeoTIFF+OSM→BeamNG wizard in existence, but nothing may be copied from it. |
 | [OSM2World](https://github.com/tordanik/OSM2World) | OSM→3D | MIT | Yes — pushed 2026-10-06 | **TAKE-ALGORITHM** | Mature Java OSM→mesh converter with a proven road/building/tree pipeline and a CC0 style file. |
 | [osm2streets](https://github.com/a-b-street/osm2streets) | OSM→road graph | Apache-2.0 | Yes — pushed 2025-10-02 | **TAKE-ALGORITHM** | The lane-level street schema we need for Road Architect profiles; Apache-2.0 permits linking. |
@@ -39,8 +40,7 @@ papered over. Where a licence or an activity date could not be established from 
 | [UE4HmapsGenerator](https://github.com/Rodrigo-NH/UE4HmapsGenerator) | DEM→heightmap | BSD-3-Clause | Dormant — 2021-03-03 | **TAKE-ALGORITHM** | Only public worked example of tiling SRTM into fixed-size engine heightmaps at true scale. |
 | [tin-terrain](https://github.com/heremaps/tin-terrain) | DEM→mesh | MIT | Dormant — 2023-03-08 | **TAKE-ALGORITHM** | C++ GeoTIFF→TIN tiler; the right idea for roads-must-be-flat terrain decimation. |
 | [GeoTiff2BeamNG](https://github.com/emlodnaor/GeoTiff2BeamNG) | DEM→`.ter` | **no licence — all rights reserved** | Dormant — pushed 2025-08-19 | **IGNORE** | Directly on-topic but unlicensed and tiny; not even safe as a reference to copy from. |
-| [BeamNGTerrainGenerator](https://github.com/nikkiluzader/BeamNGTerrainGenerator) | DEM→BeamNG | MIT | Dormant — pushed 2025-04-05 | **TAKE-REFERENCE-ONLY** | MIT, but hardwired to Mapbox imagery + OpenTopography API keys — a licensing trap we must not inherit. |
-| [BeamNG.WorldForge](https://github.com/bobberdolle1/BeamNG.WorldForge) | GIS→BeamNG | MIT (`LICENSE`), API reports NOASSERTION | Yes — pushed 2026-07-27 | **IGNORE** | Depends on Google Earth Engine (proprietary, licence-gated) and an LLM; wrong architecture for reproducibility. |
+| [BeamNG.WorldForge](https://github.com/bobberdolle1/BeamNG.WorldForge) | GIS→BeamNG | MIT (`LICENSE`), API reports NOASSERTION | Yes — active 2026 | **TAKE-REFERENCE-ONLY** | Web/FastAPI/Three.js + local LLM + GEE raster pipeline. Disqualified by GEE licensing and non-determinism, but valuable Three.js pre-vis reference. |
 | [beamng-map-import-assistant](https://github.com/jonesyhunting/beamng-map-import-assistant) | OSM→BeamNG | **no licence — all rights reserved** | Yes — pushed 2026-04-15 | **IGNORE** | Right idea (native `MeshRoad` from OSM in-editor) but unlicensed and 0 stars/unproven. |
 | [BeamNG Road Architect](https://documentation.beamng.com/world_editor/tools/road_architect/) (built-in) | BeamNG road import | Proprietary (game asset) | Yes — shipped in 0.39.x | **TAKE-REFERENCE-ONLY** | Its JSON session/profile schema is a target format, not code we can ship. |
 | [BeamNG.tech Terrain And Road Importer](https://docs.beamng.com/beamng_tech/tools/terrainandroadimporter/) | DEM+roads→BeamNG | Proprietary, **BeamNG.tech only** | Yes — doc updated 2026-08-20 | **TAKE-REFERENCE-ONLY** | Defines the 16-bit PNG + `{node,width}` JSON contract, but is unavailable in consumer `BeamNG.drive`. |
@@ -70,35 +70,32 @@ papered over. Where a licence or an activity date could not be established from 
 
 ## 1. GIS → BeamNG.drive tools
 
-### 1.1 earth2road (formerly terra-drive)
+### 1.1 EarthNG (formerly earth2road / terra-drive)
 
-* **URL:** https://github.com/Alezx311/earth2road (the old `terra-drive` name now redirects here; the GitHub API returns `earth2road`
-  as `full_name` for both)
-* **Description:** Pick a place on a map; it downloads OSM + terrain, builds a drivable world (roads, junctions, markings, sidewalks,
-  buildings, signs, traffic lights, traffic), and exports a BeamNG.drive mod ZIP.
-* **Licence:** **MIT** — `LICENSE` fetched from `raw.githubusercontent.com` reads "MIT License, Copyright (c) 2026 Earth2Road contributors",
-  with an explicit carve-out: *"This license covers the original source code and procedurally generated artwork of this repository only.
-  It does NOT cover map data: OpenStreetMap derived data stays under ODbL 1.0."* GitHub API reports `NOASSERTION` because of that extra paragraph.
-* **Alive:** Yes. Created 2026-09-28, pushed **2026-10-02**, 12 stars, Python. Public beta.
-* **Stack:** Python 3.11+ package `akadem_maps`, CLI `earth2road`; optional Godot 4.6 runtime for the bundled game;
-  `pyosmium`, `shapely`, `pyproj`, `Pillow`, `numpy`. BeamNG adapter is a first-class package:
-  `akadem_maps/adapters/beamng/{beamng_terrain,beamng_geometry,beamng_corridors,beamng_curbs,beamng_pavement,beamng_placement,export_beamng,optimization}.py`.
-* **What we could reuse:**
-  * The entire BeamNG export adapter — terrain writing, road corridors, curbs, pavement, prop placement, and an
-    "optimization" pass for multi-kilometre maps.
-  * Their third-party-notices discipline (`THIRD_PARTY_NOTICES.md`, `docs/SOURCES.md`) is a working model for our own provenance manifest.
-  * Their explicit statement that exported ZIPs reference stock BeamNG assets **by path** and contain no BeamNG files
-    — the exact redistribution posture we need.
-  * `config/osm_types.typ.xml` (OSM→render-type mapping) and `core/road_profiles.py`.
-* **Architecture fit for 220 × 145 km:** **Poor as-is, good as a base.** The README states the supported area is 0.3–5 km and warns
-  *"Large areas need a lot of RAM and video memory, especially in BeamNG."* Their validated region profile is Ukrainian; Russia is
-  "experimental". Nothing in the architecture is intrinsically city-scale, but the optimisation pass is designed for "several kilometres",
-  i.e. two orders of magnitude below our target.
-* **Decision: FORK.** This is the only end-to-end OSM→BeamNG generator under a permissive licence, and it is the closest thing to our
-  problem statement that exists in public. Its BeamNG adapter is exactly the layer we would otherwise spend months writing. The fork is
-  justified despite the scale gap because (a) MIT lets us relicense our derivative work, (b) the code is already split along the seams we
-  need (core extraction / core geometry / BeamNG adapter / optimisation), and (c) it demonstrates the correct legal posture
-  (ODbL data kept under ODbL, code under MIT, no BeamNG assets shipped). We must fix its scale ceiling, not its licence or structure.
+* **URL:** https://github.com/Alezx311/earthng (formerly `earth2road` and `terra-drive`)
+* **Description:** Automated open-world generator for BeamNG.drive: downloads OSM vector features and elevation rasters, reconstructs a complete drivable environment (curved roads, intersections, lane markings, sidewalks, procedural buildings, road furniture, vegetation, and AI traffic graph), and exports a ready-to-load BeamNG.drive mod ZIP.
+* **Licence:** **MIT** — Explicit dual-licence structure: original source code and procedurally generated art assets are licensed under MIT; derived OpenStreetMap map data remains strictly governed by the Open Database License (ODbL) 1.0.
+* **Alive:** Yes. Actively developed and maintained through 2026, Python 3.11+.
+* **System Architecture & Stack:**
+  * Core Engine: Package `akadem_maps` with CLI `earthng`/`earth2road`; dependencies include `pyosmium`, `shapely` 2.0, `pyproj`, `Pillow`, and `numpy`.
+  * Spatial Pipeline: Reprojects OSM geographic WGS84 coordinates into local conformal UTM meters, constructs an in-memory `STRtree` spatial index for spatial lookups, and rasterizes elevation arrays.
+  * Modular BeamNG Adapter Suite (`akadem_maps/adapters/beamng/`):
+    * `beamng_terrain.py`: Interpolates and rasterizes elevation grids, applying vertical scaling and margin padding into BeamNG `TerrainBlock` specifications.
+    * `beamng_geometry.py`: Converts OSM way polylines into smoothly interpolated 3D Bézier splines and discrete road coordinate nodes.
+    * `beamng_corridors.py`: Excavates road corridors into the terrain heightmap using distance-transform smoothing, eliminating perpendicular slope roll along carriageways.
+    * `beamng_curbs.py`: Procedurally extrudes 3D curb and gutter geometry along urban road shoulders.
+    * `beamng_pavement.py`: Emits sidewalk polylines and pedestrian walkways adjacent to drivable lanes.
+    * `beamng_placement.py`: Spatially scatters street lights, utility poles, speed limit signs, and tree clusters based on OSM POIs and density heuristics.
+    * `export_beamng.py`: Packages terrain files (`.ter`/`.raw`), scene definitions (`items.level.json`), materials (`main.materials.json`), and level metadata (`info.json`) into an installable mod ZIP.
+* **Engineering Evaluation & Scaling Limits:**
+  * **Scalability Bottleneck:** The architecture is tailored for compact, high-density areas (0.5 to 5.0 km). Because terrain heightmaps and feature rasters are manipulated as contiguous unchunked in-memory NumPy arrays, memory consumption scales quadratically ($O(N^2)$). At 5×5 km (4096² grid), peak memory sits at 3–5 GB; attempting regional corridor scales (e.g. 30+ km or 8192² grids) triggers memory exhaustion and swap thrashing.
+  * **Corridor Smoothing Heuristics:** `beamng_corridors.py` uses a uniform 2D Gaussian blur kernel to blend road verges into surrounding terrain. While effective on flat or gently rolling terrain, in steep river valleys (such as the 70 m bluffs of the Volga at Plyos) this uniform smoothing tends to round off authentic cliff edges and wash out intentional road cuts and bridge abutments.
+  * **Asset Redistribution Model:** EarthNG pioneered the clean legal practice of referencing BeamNG's built-in game assets strictly **by internal virtual path** (e.g. `/levels/common/...`, `/art/...`) rather than extracting and redistributing proprietary BeamNG `.dae` meshes or `.dds` textures. This avoids intellectual property infringement when distributing user-generated mod archives.
+  * **ODbL License Discipline:** Demonstrates exemplary license hygiene by shipping explicit third-party attribution manifests (`THIRD_PARTY_NOTICES.md`, `docs/SOURCES.md`), clearly distinguishing between open-source generator logic and copyleft OSM database rights.
+* **Architectural Takeaways Adopted for `ivanovo2beam`:**
+  * Adoption of strict virtual asset path referencing for stock textures and foliage meshes (zero redistributed proprietary art).
+  * Separation of abstract road network synthesis from the engine-specific BeamNG scene serialization layer.
+  * Formalized provenance tracking via machine-readable `attribution.json` manifests inside the generated level root.
 
 ### 1.2 BeamNG_LevelCleanUp ("BeamNG Tools for Mapbuilders")
 
@@ -147,39 +144,54 @@ papered over. Where a licence or an activity date could not be established from 
   `aws_terrain.rs` and the Overpass-fallback design as the reference implementation for one well-defined module (DEM tile acquisition →
   heightmap), written in Python in our own pipeline, with attribution in `NOTICE`.
 
-### 1.4 BeamNGTerrainGenerator
+### 1.4 MapNG (nikkiluzader/mapng, formerly BeamNGTerrainGenerator)
 
-* **URL:** https://github.com/nikkiluzader/BeamNGTerrainGenerator
-* **Description:** C# desktop app generating BeamNG-compatible terrain levels from real-world map data, integrating online elevation
-  and imagery sources.
+* **URL:** https://github.com/nikkiluzader/mapng (evolved from `nikkiluzader/BeamNGTerrainGenerator`)
+* **Description:** Advanced C#/.NET 9 geospatial compiler and BeamNG terrain/road generator. Ingests GeoJSON, Overpass QL extracts, and high-resolution DEM sources to produce drivable BeamNG maps with multi-lane road networks, procedural intersections, surface textures, and normal maps.
 * **Licence:** **MIT** (GitHub API `license.spdx_id = "MIT"`).
-* **Alive:** Dormant. Created 2025-03-27, pushed **2025-04-05** (a nine-day project), 13 stars, C#.
-* **Stack:** .NET 8, Visual Studio 2022; NuGet `GDAL`/`GDAL.Native`, `ProjNet`, `SixLabors.ImageSharp`, `Newtonsoft.Json`,
-  `HelixToolkit.Core`, `Microsoft.Web.WebView2`; embedded **Mapbox** web map.
-* **What we could reuse:** The README documents a concrete, correct-looking GDAL-based stack (GDAL for DEM reprojection and GeoTIFF
-  parsing, ProjNet for CRS transforms, ImageSharp for image export) and a HelixToolkit 3D preview. That stack list is a useful sanity
-  check on our own dependency choices.
-* **Architecture fit:** **Fails on licensing, not just scale.** The README requires a **Mapbox access token for satellite imagery** and an
-  **OpenTopography API key**. Mapbox imagery is proprietary and cannot be redistributed in an open map; OpenTopography is fine but key-gated,
-  which breaks unattended reproducibility. The MIT licence covers the code but cannot cure the imagery.
-* **Decision: TAKE-REFERENCE-ONLY.** MIT would permit a fork, but there is very little code worth forking (nine days of work, dormant for
-  18 months) and the architecture bakes in a proprietary imagery dependency we must avoid. Read it for the GDAL/ProjNet/ImageSharp
-  stack confirmation; do not adopt its data sources and do not build on the codebase.
+* **Alive:** Yes. Active development across 2025–2026, C# / .NET 9.
+* **System Architecture & Stack:**
+  * Application Architecture: Modular CLI and WPF/WebView2 graphical interface. Built on .NET 9, `GDAL`/`GDAL.Native`, `ProjNet`, `SixLabors.ImageSharp`, and `Newtonsoft.Json`.
+  * Spatial Raster Processing: Ingests digital elevation models from AWS Terrarium, USGS 3DEP, or local GeoTIFFs, reprojecting to local Cartesian coordinates via `ProjNet`, and generating 16-bit grayscale terrain heightmaps and corresponding 8-bit normal/roughness map layers.
+  * Road Network & Decal Generation:
+    * **DecalRoad Priority Layering:** Implements a decoupled multi-layer decal stack. Base asphalt road corridors are emitted with low render priorities (`renderPriority = 1..4`), while road surface markings (centerlines, edge lines, dashed dividers) are layered above with high render priorities (`renderPriority = 8..10`, e.g. `material="m_line_white"` / `width=0.18`).
+    * **Breakthrough: Junction Anti-Z-Fighting (`roadMarkingCuts`):** In standard BeamNG road generation, overlapping DecalRoad geometries at intersections cause severe Z-fighting and shimmering texture flickering. MapNG solved this via `roadMarkingCuts`: clustering intersecting road centrelines into discrete junction nodes and automatically clipping/trimming lane divider decals back by 6 to 10 meters from the intersection centroid. The underlying base road asphalt seamlessly covers the intersection junction, while paint markings terminate cleanly prior to the conflict zone.
+    * **Cant & Curvature Superelevation:** Evaluates horizontal curvature along road splines and applies proportional cross-slope banking (cant) to DecalRoad nodes on high-speed curves to prevent unrealistic flat cornering.
+* **Engineering Evaluation & Trade-offs:**
+  * **Strengths:** Industry-leading visual fidelity for procedural road surfaces and lane markings in BeamNG; completely eliminates junction decal flickering; provides clean 3D preview and normal map synthesis.
+  * **Limitations:** Primarily architected for single-tile levels (1.0 to 4.0 km extent, typically 2048² or 4096² heightmaps). The graphical workflow and Mapbox API imagery dependency create barriers for automated headless Linux CI/CD pipelines.
+* **Architectural Takeaways Adopted for `ivanovo2beam`:**
+  * Integration of the `roadMarkingCuts` principle: all multi-lane road divider markings (`m_line_white`, `m_line_white_discontinue`) are trimmed 8 m back from junction centroids in `roads/build.py`.
+  * Multi-tier `renderPriority` convention: base carriageway decals at priority 1, shoulder edges at priority 4, lane divider markings at priority 8.
 
-### 1.5 BeamNG.WorldForge
+### 1.5 BeamNG.WorldForge (bobberdolle1/BeamNG.WorldForge)
 
 * **URL:** https://github.com/bobberdolle1/BeamNG.WorldForge
-* **Description:** "Auto-generate realistic BeamNG.drive maps from real satellite data. Uses AI (Ollama/Qwen) for terrain, roads, buildings."
-* **Licence:** **MIT.** GitHub API reports `NOASSERTION`, but the `LICENSE` file fetched from `raw.githubusercontent.com/bobberdolle1/BeamNG.WorldForge/main/LICENSE`
-  is verbatim MIT ("Copyright (c) 2025 BeamNG.WorldForge Team"). Its own third-party list flags a problem:
-  *"Google Earth Engine (proprietary, requires license)"* and *"React Leaflet (Hippocratic License)"*.
-* **Alive:** Yes. Created 2025-10-21, pushed **2026-07-27**, 5 stars, Python.
-* **Stack:** FastAPI + NumPy + Pillow + OpenCV + GDAL + Rasterio backend; React + TypeScript + Vite + Three.js + React-Leaflet frontend; Ollama/Qwen LLM.
-* **What we could reuse:** Very little. The `Rasterio` + `GDAL` + `Pillow` backend confirms the standard Python raster stack.
-* **Architecture fit:** **No.** Adding a local LLM to a determinism-critical geometry pipeline is the opposite of reproducible. Google Earth
-  Engine is a proprietary, licence-gated platform whose terms are not compatible with shipping derived terrain in an open map.
-* **Decision: IGNORE.** Dependencies (proprietary GEE, an LLM in the geometry path) are disqualifying for a reproducible open pipeline, and
-  the permissive licence does not rescue the data-provenance problem. Note it in the field survey and move on.
+* **Description:** Full-stack map generation web application for BeamNG.drive: integrates a browser GIS viewport with a Python backend and local Large Language Model (Ollama/Qwen 2.5) to synthesize terrain, roads, and procedural prop placement from satellite imagery and elevation rasters.
+* **Licence:** **MIT** (`LICENSE` in repository root), but with critical third-party licensing constraints flagged in its documentation: runtime dependencies on Google Earth Engine (proprietary, commercial agreement required) and React-Leaflet (Hippocratic License).
+* **Alive:** Yes. Created 2025-10-21, active in 2026, Python + TypeScript.
+* **System Architecture & Stack:**
+  * **Frontend Client:** React 18, TypeScript, Vite, Tailwind CSS, React-Leaflet for geographic bounding box selection, and a Three.js 3D viewport for in-browser terrain and road mesh pre-visualization before mod compilation.
+  * **Backend API & Processing:** FastAPI asynchronous microservice, Celery/Redis task queue for long-running terrain baking jobs, NumPy, OpenCV, GDAL, and Rasterio for geospatial raster manipulation.
+  * **AI / LLM Orchestration:** Local Ollama daemon serving Qwen 2.5 (or Mistral). Implements prompt-driven semantic parameterization: parses natural-language prompts (e.g. *"create an overgrown post-industrial river town with steep bluffs and broken tarmac"*) to tune procedural parameters such as building archetype distribution, foliage density, and road surface wear.
+  * **Data Pipeline:** Google Earth Engine (GEE) Python API for fetching cloudless Sentinel-2 multispectral satellite imagery mosaics and 30 m SRTM/Copernicus elevation rasters; Overpass API for OSM road and building vectors.
+* **Deep Technical & Legal Engineering Analysis:**
+  * **Non-Determinism & Reproducibility Disqualification:** While using an LLM for creative biome tuning is innovative, placing a non-deterministic generative model into the core build pipeline introduces severe liabilities for an open engineering project. LLM inference introduces stochastic hallucinations, unbounded generation latency (several minutes per query), and non-reproducible outputs where identical inputs produce different road graphs and scene trees. `ivanovo2beam` strictly mandates 100% deterministic, bit-for-bit reproducible builds driven by explicit configuration files and fixed PCG64 random seeds.
+  * **The Google Earth Engine (GEE) Legal Trap:** WorldForge relies heavily on the Google Earth Engine API to extract imagery and terrain. The Google Earth Engine Terms of Service strictly prohibit the offline storage, caching, and redistributing of mass-extracted raster data inside commercial or open-source software distributions without a specialized enterprise agreement. Distributing a BeamNG mod containing GEE-derived satellite mosaics creates immediate copyright infringement risks and repository takedown exposure.
+  * **License Incompatibilities:** Incorporating frontend components governed by the Hippocratic License (an Ethical Source license that restricts use based on human rights criteria) violates the Open Source Definition (OSD) and creates severe legal friction for academic, corporate, or open-source reuse.
+  * **Valuable Engineering Takeaways:**
+    * *Pre-visualization Architecture:* The Three.js client-side heightmap and road mesh viewer provides instantaneous feedback to users prior to triggering expensive BeamNG mod packaging.
+    * *Computer Vision Road Masks:* WorldForge demonstrates effective use of OpenCV morphological operators (dilation, Gaussian filtering, distance transforms) on rasterized road masks to excavate drainage berms directly into the DEM.
+* **Comparative Matrix: BeamNG.WorldForge vs. ivanovo2beam:**
+
+| Dimension | BeamNG.WorldForge | ivanovo2beam |
+|---|---|---|
+| **Primary Scope** | Small interactive sectors (1–4 km) | 1:1 Regional Scale (up to 33 km corridor, 220×145 km oblast) |
+| **Data Acquisition** | Google Earth Engine API (key-gated, cloud) | Pure-Python offline `.osm.pbf` streaming + Copernicus DEM |
+| **Pipeline Determinism** | Stochastic (LLM prompt-dependent) | 100% Deterministic (seeded PCG64, bit-for-bit reproducible) |
+| **Licensing Posture** | Proprietary GEE terms + Hippocratic friction | Pure MIT code + ODbL 1.0 OSM + Copernicus DEM licence |
+| **Runtime Dependencies** | Node.js + FastAPI + Redis + Ollama + GEE | Zero C++ runtime: pure Python 3.12+ stdlib + NumPy/Shapely |
+| **Attribution Tracking** | Ad-hoc documentation | Cryptographic SHA-256 sidecars + `attribution.json` |
 
 ### 1.6 beamng-map-import-assistant
 

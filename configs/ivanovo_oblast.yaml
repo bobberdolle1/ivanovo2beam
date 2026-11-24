@@ -72,11 +72,23 @@ roads:
     service:        {width_m: 4.5,  lanes: 2, shoulder_m: 0.0, surface: asphalt, speed_kph: 20,  priority: 30}
     track:          {width_m: 3.5,  lanes: 1, shoulder_m: 0.0, surface: gravel,  speed_kph: 30,  priority: 20}
 
+# Feature flags
 buildings:
   enabled: true
 
 vegetation:
-  # Off for the MVP. The Forest system and density tuning are milestone M3+.
+  enabled: true
+
+water:
+  enabled: true
+
+railways:
+  enabled: true
+
+bridges:
+  enabled: true
+
+satellite:
   enabled: false
 
 cache:
