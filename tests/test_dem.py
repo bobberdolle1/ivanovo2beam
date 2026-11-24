@@ -25,12 +25,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import rasterio
-from pyproj import Geod
-from rasterio.transform import Affine
 
-from ivanovo2beam.gis.projection import BBox
-from ivanovo2beam.terrain import dem
+from ivanovo2beam.gis.projection import WGS84_GEOD, BBox
+from ivanovo2beam.terrain import _geotiff, dem
 from ivanovo2beam.terrain.dem import (
     DemFetchError,
     DemReader,
@@ -40,6 +37,16 @@ from ivanovo2beam.terrain.dem import (
     fetch_dem,
     read_sidecar,
 )
+
+try:
+    import rasterio
+    from rasterio.transform import Affine
+
+    _open_raster = rasterio.open
+except ImportError:  # pragma: no cover - optional rasterio / sandbox fallback
+    rasterio = None  # type: ignore[assignment]
+    Affine = _geotiff.FallbackAffine  # type: ignore[assignment,misc]
+    _open_raster = _geotiff.open_geotiff
 
 #: Ivanovo city centre (OpenStreetMap), WGS84 degrees.
 IVANOVO = (40.97393, 56.99987)
@@ -51,7 +58,7 @@ SMALL_BBOX = BBox(west=40.95, south=56.98, east=41.00, north=57.02)
 #: The oblast-scale box used for resolution reasoning only.
 OBLAST_BBOX = BBox(west=39.00, south=56.10, east=43.20, north=57.80)
 
-_GEOD = Geod(ellps="WGS84")
+_GEOD = WGS84_GEOD
 
 
 # --------------------------------------------------------------------------- #
@@ -77,7 +84,7 @@ def write_synthetic_geotiff(
     """
     height, width = array.shape
     transform = Affine.translation(west, north) @ Affine.scale(res, -res)
-    with rasterio.open(
+    with _open_raster(
         path,
         "w",
         driver="GTiff",

@@ -44,4 +44,7 @@ desktop.ini
 *.cdae
 *.dae
 *.dds
+*.forest4.json
 !tests/fixtures/**/*.ter
+!tests/fixtures/**/*.dae
+!tests/fixtures/**/*.forest4.json

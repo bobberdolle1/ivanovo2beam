@@ -18,14 +18,23 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import rasterio
-from rasterio.transform import from_bounds
 
 from ivanovo2beam.beamng.ter import read_ter
 from ivanovo2beam.build import build_level
 from ivanovo2beam.config import ProjectConfig
 from ivanovo2beam.osm.types import OsmData, OsmWay
+from ivanovo2beam.terrain import _geotiff
 from ivanovo2beam.validation.level import validate_level
+
+try:
+    import rasterio
+    from rasterio.transform import from_bounds
+
+    _open_raster = rasterio.open
+except ImportError:  # pragma: no cover - optional rasterio / sandbox fallback
+    rasterio = None  # type: ignore[assignment]
+    from_bounds = _geotiff.fallback_from_bounds
+    _open_raster = _geotiff.open_geotiff
 
 #: Elevation of Ivanovo, in metres. The city sits around 120 m ASL.
 IVANOVO_ELEVATION_M = 120.0
@@ -48,7 +57,7 @@ def write_synthetic_dem(path: Path, bbox: tuple[float, float, float, float]) -> 
     data = IVANOVO_ELEVATION_M + (lats - south) * 500.0
     data = np.broadcast_to(data, (height, width)).astype(np.float32)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with rasterio.open(
+    with _open_raster(
         path,
         "w",
         driver="GTiff",

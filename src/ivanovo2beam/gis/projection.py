@@ -53,7 +53,18 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from pyproj import CRS, Geod, Transformer
+
+from ivanovo2beam.gis._wgs84 import FallbackCRS, FallbackGeod, FallbackTMerc
+
+try:
+    from pyproj import CRS, Geod, Transformer
+
+    _HAS_PYPROJ = True
+except ImportError:  # pragma: no cover - restricted Windows sandbox fallback
+    CRS = None  # type: ignore[assignment,misc]
+    Geod = None  # type: ignore[assignment,misc]
+    Transformer = None  # type: ignore[assignment,misc]
+    _HAS_PYPROJ = False
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Sequence
@@ -61,7 +72,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from numpy.typing import NDArray
 
 #: WGS84 ellipsoid, used for authoritatively measuring real-world distances.
-WGS84_GEOD = Geod(ellps="WGS84")
+WGS84_GEOD: Any = Geod(ellps="WGS84") if _HAS_PYPROJ else FallbackGeod(ellps="WGS84")
 
 #: Distance used when probing the local scale factor, in metres. 1 km is long
 #: enough that geodesic curvature is negligible and short enough that the
@@ -236,15 +247,24 @@ class RegionProjection:
         self._origin_lon = float(origin_lon)
         self._origin_lat = float(origin_lat)
 
-        crs = CRS.from_proj4(proj_string)
-        if not crs.is_projected:
-            raise ValueError("proj_string must describe a projected (metric) CRS")
-        units = crs.axis_info[0].unit_name if crs.axis_info else ""
-        if units not in {"metre", "meter", "m"}:
-            raise ValueError(f"proj_string must be metric, got units={units!r}")
+        if _HAS_PYPROJ:
+            crs = CRS.from_proj4(proj_string)
+            if not crs.is_projected:
+                raise ValueError("proj_string must describe a projected (metric) CRS")
+            units = crs.axis_info[0].unit_name if crs.axis_info else ""
+            if units not in {"metre", "meter", "m"}:
+                raise ValueError(f"proj_string must be metric, got units={units!r}")
 
-        self._to_world = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
-        self._to_geo = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+            self._to_world: Any = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+            self._to_geo: Any = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+        else:
+            fb_crs = FallbackCRS.from_proj4(proj_string)
+            if not fb_crs.is_projected:
+                raise ValueError("proj_string must describe a projected (metric) CRS")
+            if fb_crs.units not in {"metre", "meter", "m"}:
+                raise ValueError(f"proj_string must be metric, got units={fb_crs.units!r}")
+            self._to_world = FallbackTMerc(fb_crs, forward=True)
+            self._to_geo = FallbackTMerc(fb_crs, forward=False)
 
         # Cache the projected origin so the common path is a subtraction.
         self._origin_x, self._origin_y = self._to_world.transform(origin_lon, origin_lat)
@@ -282,9 +302,11 @@ class RegionProjection:
         return (self._origin_x, self._origin_y)
 
     @property
-    def crs(self) -> CRS:
-        """The underlying :class:`pyproj.CRS`."""
-        return CRS.from_proj4(self._proj_string)
+    def crs(self) -> Any:
+        """The underlying :class:`pyproj.CRS` (or fallback CRS descriptor)."""
+        if _HAS_PYPROJ:
+            return CRS.from_proj4(self._proj_string)
+        return FallbackCRS.from_proj4(self._proj_string)
 
     # ---------------------------------------------------------------- transform
 

@@ -402,9 +402,15 @@ def grade_corridors(
         ``(graded_cell_count, statistics)``.
     """
     n = elevations.shape[0]
-    influence = np.zeros((n, n), dtype=np.float64)
-    weighted_z = np.zeros((n, n), dtype=np.float64)
-    weight_sum = np.zeros((n, n), dtype=np.float64)
+    # The accumulator planes are float32 rather than float64. At 8192^2 that is
+    # the difference between 1.6 GB and 800 MB of scratch, which is what makes a
+    # region-scale grid fit in memory at all. The precision cost is immaterial
+    # for this use: influence is a 0..1 blend weight, and the weighted elevation
+    # sum is around 100-300 m, where float32 resolves about 1e-5 m -- five orders
+    # of magnitude below the 0.9 mm the .ter format itself can store.
+    influence = np.zeros((n, n), dtype=np.float32)
+    weighted_z = np.zeros((n, n), dtype=np.float32)
+    weight_sum = np.zeros((n, n), dtype=np.float32)
     # Material ownership, resolved by "which road has the most influence here".
     # Painting cannot be done inside the segment loop: a cell lying on the
     # centreline of one segment is beyond the endpoints of many others, and
@@ -436,7 +442,6 @@ def grade_corridors(
             seg_len_sq = dx * dx + dy * dy
             if seg_len_sq <= 0:
                 continue
-            math.sqrt(seg_len_sq)
 
             # Grid window covering the segment's corridor.
             col_lo = max(0, math.floor((min(x0, x1) - corridor_half - origin_x) / cell_size_m))
@@ -493,17 +498,16 @@ def grade_corridors(
 
     blended = influence > 0
     if blended.any():
-        safe_weight = np.where(weight_sum > 0, weight_sum, 1.0)
-        surface_z = weighted_z / safe_weight
-        elevations[blended] = (
-            elevations[blended] * (1.0 - influence[blended]) + surface_z[blended] * influence[blended]
-        )
+        inf_b = influence[blended].astype(np.float64)
+        w_b = weight_sum[blended].astype(np.float64)
+        surface_z = weighted_z[blended].astype(np.float64) / np.where(w_b > 0.0, w_b, 1.0)
+        elevations[blended] = elevations[blended] * (1.0 - inf_b) + surface_z * inf_b
 
         # Paint materials from the accumulated influence. In the graded band
-        # ``alpha`` reaches exactly 1 only inside a carriageway, so the same
-        # field that drives the blend also classifies the surface. A tolerance
-        # is used because the two are computed by different expressions.
-        carriageway = influence >= 1.0 - 1e-9
+        # ``alpha`` reaches 1 only inside a carriageway, so the same field that
+        # drives the blend also classifies the surface. Because ``influence``
+        # is float32 (ULP ~6e-8), the tolerance must exceed float32 rounding.
+        carriageway = influence >= np.float32(1.0 - 1e-6)
         shoulder = blended & ~carriageway
         layers[carriageway] = owner_material[carriageway]
         layers[shoulder] = owner_shoulder[shoulder]

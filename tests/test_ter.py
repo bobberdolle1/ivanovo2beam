@@ -342,7 +342,7 @@ class TestAgainstShippedBeamNGTerrain:
         self, beamng_levels_dir, level: str, member: str
     ) -> None:
         """The format description is correct iff real files survive a round trip."""
-        from tests.conftest import open_shipped_level
+        from conftest import open_shipped_level
 
         with open_shipped_level(beamng_levels_dir, level) as archive:
             original = archive.read(member)
@@ -363,7 +363,7 @@ class TestAgainstShippedBeamNGTerrain:
         """Cross-check the material list in the .ter against its descriptor."""
         import json
 
-        from tests.conftest import open_shipped_level
+        from conftest import open_shipped_level
 
         with open_shipped_level(beamng_levels_dir, "template") as archive:
             terrain = decode_ter(archive.read("levels/template/theTerrain.ter"))

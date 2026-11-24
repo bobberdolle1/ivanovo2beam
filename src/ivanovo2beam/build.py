@@ -19,6 +19,7 @@ no stage uses an unseeded random number generator.
 from __future__ import annotations
 
 import json
+import shutil
 import time
 import zipfile
 from dataclasses import dataclass, field
@@ -41,6 +42,8 @@ from ivanovo2beam.beamng.materials import (
     referenced_asset_paths,
 )
 from ivanovo2beam.beamng.ter import write_ter
+from ivanovo2beam.buildings.export import export_buildings
+from ivanovo2beam.buildings.footprints import extract_buildings
 from ivanovo2beam.osm.merge import merge_osm_data, osm_bbox_tiles
 from ivanovo2beam.roads.build import add_network_to_scene, roads_to_corridors
 from ivanovo2beam.roads.network import extract_roads, road_network_stats
@@ -112,6 +115,12 @@ class BuildResult:
         if "export" in stats:
             e = stats["export"]
             lines.append(f"  decals      {e['exported']} DecalRoads, {e['nodes']} nodes")
+        if stats.get("buildings", {}).get("buildings"):
+            b = stats["buildings"]
+            lines.append(
+                f"  buildings   {b['buildings']} placed "
+                f"({b.get('archetypes', 0)} archetypes, {b.get('unique_meshes', 0)} unique)"
+            )
         for warning in self.warnings:
             lines.append(f"  WARNING: {warning}")
         return "\n".join(lines)
@@ -350,6 +359,8 @@ def build_level(
     osm_tile_km: float = 1.5,
     osm_budget_s: float = 240.0,
     max_decal_node_spacing_m: float = 40.0,
+    max_buildings: int | None = None,
+    building_simplify_m: float = 1.0,
     force_download: bool = False,
 ) -> BuildResult:
     """Build a complete BeamNG level from open geodata.
@@ -364,6 +375,9 @@ def build_level(
         max_decal_node_spacing_m: Maximum DecalRoad node spacing. Larger values
             mean far fewer nodes; the default keeps roads glued to the terrain
             on the gentle gradients of the Russian plain.
+        max_buildings: Optional cap on exported buildings, largest first.
+            Useful for keeping a first look at a large level tractable.
+        building_simplify_m: Footprint simplification tolerance in metres.
         force_download: Ignore caches and re-download geodata.
 
     Returns:
@@ -443,6 +457,27 @@ def build_level(
     if not roads:
         warnings.append("no drivable roads were found in the OSM extract")
 
+    # -- building footprints -----------------------------------------------
+    stage = time.perf_counter()
+    buildings: list[Any] = []
+    footprint_stats: dict[str, Any] = {}
+    if config.buildings_enabled:
+        report(0.35, "extracting building footprints")
+        buildings, footprints = extract_buildings(
+            osm_data,
+            config.projection,
+            clip_bounds=clip_bounds,
+            simplify_tolerance_m=building_simplify_m,
+            max_buildings=max_buildings,
+        )
+        footprint_stats = footprints.as_dict()
+        if footprints.skipped_relations:
+            warnings.append(
+                f"{footprints.skipped_relations} multipolygon buildings were skipped; "
+                "only closed ways are assembled into footprints"
+            )
+    durations["buildings"] = time.perf_counter() - stage
+
     # -- terrain -----------------------------------------------------------
     stage = time.perf_counter()
     report(0.38, "building terrain and grading road corridors")
@@ -470,6 +505,7 @@ def build_level(
     stage = time.perf_counter()
     report(0.74, "assembling the level scene")
     tree = SceneTree(level_id=level.id)
+    level_dir = config.build_path("levels", level.id)
     ground_z = float(np.median(build.elevations))
     terrain_placement = TerrainPlacement(
         name="theTerrain",
@@ -503,21 +539,53 @@ def build_level(
         max_node_spacing_m=max_decal_node_spacing_m,
     )
 
-    spawn = _choose_spawn(roads, build, fallback=(origin_x + extent / 2, origin_y + extent / 2))
+    # -- buildings ---------------------------------------------------------
+    building_stats: dict[str, Any] = {"enabled": config.buildings_enabled}
+    if config.buildings_enabled and buildings:
+        report(0.80, f"generating {len(buildings)} buildings")
+        building_objects, building_export = export_buildings(
+            buildings,
+            build,
+            level_id=level.id,
+            level_dir=level_dir,
+            max_instances=max_buildings,
+        )
+        for obj in building_objects:
+            tree.add_object(("level_objects", "buildings"), obj)
+        building_stats.update(building_export.as_dict())
+        if building_export.placements_skipped:
+            warnings.append(
+                f"{building_export.placements_skipped} buildings could not be placed"
+            )
+    elif config.buildings_enabled:
+        stale_shapes = level_dir / "art" / "shapes" / "buildings"
+        if stale_shapes.exists():
+            shutil.rmtree(stale_shapes)
+        warnings.append("buildings are enabled but the OSM extract contained no footprints")
+    else:
+        stale_shapes = level_dir / "art" / "shapes" / "buildings"
+        if stale_shapes.exists():
+            shutil.rmtree(stale_shapes)
+
+    anchor_x, anchor_y = level.spawn_anchor(config.projection)
+    spawn = _choose_spawn(roads, build, anchor=(anchor_x, anchor_y))
     add_spawn_point(
         tree,
         ("PlayerDropPoints",),
-        key="ivanovo_centre",
+        key="player_spawn",
         x=spawn[0],
         y=spawn[1],
         z=spawn[2] + 1.5,
     )
-    if spawn[3]:
-        warnings.append(f"spawn point placed {spawn[3]:.0f} m from the level centre (nearest road)")
+    stats_spawn_anchor = [round(anchor_x, 1), round(anchor_y, 1)]
+    if spawn[3] > 250.0:
+        warnings.append(
+            f"spawn point is {spawn[3]:.0f} m from the configured anchor "
+            f"({anchor_x:.0f}, {anchor_y:.0f}); the nearest drivable road is that far away"
+        )
 
     # -- files -------------------------------------------------------------
     report(0.86, "writing level files")
-    level_dir = config.build_path("levels", level.id)
     files = tree.render()
     files["info.json"] = (
         json.dumps(
@@ -549,7 +617,7 @@ def build_level(
         )
         + "\n"
     )
-    written = write_level_files(level_dir, files)
+    write_level_files(level_dir, files)
 
     write_json(
         level_dir / "theTerrain.terrain.json",
@@ -576,8 +644,16 @@ def build_level(
         "roads": road_stats,
         "osm": osm_stats,
         "export": export_stats,
-        "spawn": {"x": spawn[0], "y": spawn[1], "z": spawn[2]},
-        "files": len(written) + 3,
+        "footprints": footprint_stats,
+        "buildings": building_stats,
+        "spawn": {
+            "x": spawn[0],
+            "y": spawn[1],
+            "z": spawn[2],
+            "anchor": stats_spawn_anchor,
+            "distance_from_anchor_m": round(spawn[3], 1),
+        },
+        "files": sum(1 for p in level_dir.rglob("*") if p.is_file()),
         "terrain_bytes": terrain_bytes,
         "asset_references": len(referenced_asset_paths(DEFAULT_MATERIAL_ORDER)),
         "total_seconds": time.perf_counter() - start,
@@ -597,27 +673,30 @@ def _choose_spawn(
     roads: Sequence[Any],
     build: Any,
     *,
-    fallback: tuple[float, float],
+    anchor: tuple[float, float],
 ) -> tuple[float, float, float, float]:
-    """Choose a spawn point on the best road near the level centre.
+    """Choose a spawn point on the drivable road nearest an anchor.
 
     Spawning on a road matters: a drop point in a field gives a poor first
     impression and, worse, makes it hard to tell whether the road network
-    actually works.
+    actually works. Placing it near a configured anchor rather than the
+    geometric centre matters just as much for a corridor level, whose centre
+    would otherwise be farmland halfway between two cities.
 
     Args:
         roads: Extracted roads.
         build: The built terrain.
-        fallback: ``(x, y)`` to use when no road is available.
+        anchor: ``(x, y)`` world point the spawn should be as close to as
+            possible, normally the region's world origin (Ivanovo centre).
 
     Returns:
-        ``(x, y, z, distance_from_centre_m)``. Distance is ``0`` when the
-        fallback was used.
+        ``(x, y, z, distance_from_anchor_m)``.
     """
     elevations = build.elevations
     origin_x, origin_y = build.origin_x, build.origin_y
     cell = build.cell_size_m
     n = elevations.shape[0]
+    anchor_x, anchor_y = anchor
 
     def sample(x: float, y: float) -> float:
         col = int(np.clip(round((x - origin_x) / cell), 0, n - 1))
@@ -628,12 +707,15 @@ def _choose_spawn(
     for road in roads:
         if not road.drivable or road.bridge or road.tunnel:
             continue
-        midpoint = road.points[road.points.shape[0] // 2]
-        distance = float(np.hypot(midpoint[0], midpoint[1]))
+        # Use the vertex nearest the anchor rather than the road's midpoint, so
+        # a long road passing through the anchor is not penalised for being long.
+        distances = np.hypot(road.points[:, 0] - anchor_x, road.points[:, 1] - anchor_y)
+        index = int(np.argmin(distances))
+        distance = float(distances[index])
         if best is None or distance < best[3]:
-            best = (float(midpoint[0]), float(midpoint[1]), sample(*midpoint), distance)
+            point = road.points[index]
+            best = (float(point[0]), float(point[1]), sample(float(point[0]), float(point[1])), distance)
 
     if best is None:
-        x, y = fallback
-        return (x, y, sample(x, y), 0.0)
+        return (anchor_x, anchor_y, sample(anchor_x, anchor_y), 0.0)
     return best

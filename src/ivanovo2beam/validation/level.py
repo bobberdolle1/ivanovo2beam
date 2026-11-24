@@ -179,6 +179,28 @@ def _check_scene_tree(report: ValidationReport) -> None:
         + (f", dangling parents: {sorted(dangling)}" if dangling else ""),
     )
 
+    level_prefix = f"/levels/{report.level_dir.name}/"
+    local_shapes = {
+        str(obj["shapeName"])
+        for _, obj in objects
+        if obj.get("class") == "TSStatic"
+        and isinstance(obj.get("shapeName"), str)
+        and str(obj["shapeName"]).startswith(level_prefix)
+    }
+    if local_shapes:
+        missing_shapes = sorted(
+            shape
+            for shape in local_shapes
+            if not (report.level_dir / shape.removeprefix(level_prefix)).is_file()
+            or (report.level_dir / shape.removeprefix(level_prefix)).stat().st_size == 0
+        )
+        report.add(
+            "local_shapes",
+            not missing_shapes,
+            f"{len(local_shapes)} local shape meshes, {len(missing_shapes)} missing"
+            + (f": {missing_shapes[:5]}" if missing_shapes else ""),
+        )
+
 
 def _check_terrain(report: ValidationReport) -> None:
     """The .ter must parse, and must agree with its .terrain.json."""

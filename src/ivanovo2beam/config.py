@@ -255,6 +255,11 @@ class LevelSpec:
             the builder derives it from the DEM.
         ground_margin_m: Headroom added above and below the real elevation
             range when choosing the vertical range.
+        spawn_lon: Longitude the player spawn should be placed near. Defaults
+            to the level's own centre ``center_lon``. A corridor level sets
+            this explicitly to start at one city rather than in farmland at the
+            bounding-box midpoint.
+        spawn_lat: Latitude the player spawn should be placed near.
     """
 
     id: str
@@ -264,6 +269,8 @@ class LevelSpec:
     grid: TerrainGridSpec
     max_height_m: float | None = None
     ground_margin_m: float = 5.0
+    spawn_lon: float | None = None
+    spawn_lat: float | None = None
 
     def __post_init__(self) -> None:
         if not self.id or not self.id.replace("_", "").isalnum():
@@ -275,6 +282,31 @@ class LevelSpec:
             raise ConfigError(f"level center_lon out of range: {self.center_lon}")
         if not -90.0 <= self.center_lat <= 90.0:
             raise ConfigError(f"level center_lat out of range: {self.center_lat}")
+        if (self.spawn_lon is None) != (self.spawn_lat is None):
+            raise ConfigError("level.spawn needs both a longitude and a latitude")
+        if self.spawn_lon is not None and not -180.0 <= self.spawn_lon <= 180.0:
+            raise ConfigError(f"level spawn_lon out of range: {self.spawn_lon}")
+        if self.spawn_lat is not None and not -90.0 <= self.spawn_lat <= 90.0:
+            raise ConfigError(f"level spawn_lat out of range: {self.spawn_lat}")
+
+    def spawn_anchor(
+        self,
+        projection: RegionProjection,
+    ) -> tuple[float, float]:
+        """Return the world point the player spawn should be placed near.
+
+        Args:
+            projection: The region's world plane, used to convert the explicit
+                spawn coordinate (or the level's centre when omitted).
+
+        Returns:
+            ``(x, y)`` in metres.
+        """
+        if self.spawn_lon is not None and self.spawn_lat is not None:
+            return projection.geo_to_world(self.spawn_lon, self.spawn_lat)
+        # Default to the level's own centre so a standalone town sector (e.g.
+        # Plyos or Kineshma) never anchors its spawn in a different city.
+        return projection.geo_to_world(self.center_lon, self.center_lat)
 
     @classmethod
     def from_config(cls, data: Any) -> LevelSpec:
@@ -284,6 +316,9 @@ class LevelSpec:
         center = data.get("center")
         if center is None:
             raise ConfigError("level.center [lon, lat] is required")
+        spawn = data.get("spawn")
+        if spawn is not None and len(spawn) != 2:
+            raise ConfigError("level.spawn must be [lon, lat]")
         return cls(
             id=str(data["id"]),
             title=str(data.get("title", data["id"])),
@@ -292,6 +327,8 @@ class LevelSpec:
             grid=TerrainGridSpec.from_config(data.get("terrain", {})),
             max_height_m=(None if data.get("max_height_m") is None else float(data["max_height_m"])),
             ground_margin_m=float(data.get("ground_margin_m", 5.0)),
+            spawn_lon=None if spawn is None else float(spawn[0]),
+            spawn_lat=None if spawn is None else float(spawn[1]),
         )
 
 

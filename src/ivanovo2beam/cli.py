@@ -150,7 +150,14 @@ def cmd_download(args: argparse.Namespace) -> int:
         force=args.force,
     )
     console(0.4, "fetching OSM")
-    _, osm_stats = fetch_level_osm(config, bbox, tile_km=args.osm_tile_km, progress=console, force=args.force)
+    _, osm_stats = fetch_level_osm(
+        config,
+        bbox,
+        tile_km=args.osm_tile_km,
+        budget_s=args.osm_budget_s,
+        progress=console,
+        force=args.force,
+    )
     console(1.0, "download complete")
     _emit(
         {
@@ -175,6 +182,7 @@ def cmd_build(args: argparse.Namespace) -> int:
         make_zip=not args.no_zip,
         osm_tile_km=args.osm_tile_km,
         osm_budget_s=args.osm_budget_s,
+        max_buildings=args.max_buildings,
         force_download=args.force,
     )
     if args.json:
@@ -313,6 +321,12 @@ def build_parser() -> argparse.ArgumentParser:
     download = sub.add_parser("download", help="fetch and cache DEM and OSM data")
     download.add_argument("--force", action="store_true", help="ignore existing caches")
     download.add_argument("--osm-tile-km", type=float, default=1.5, help="OSM fetch tile size in km")
+    download.add_argument(
+        "--osm-budget-s",
+        type=float,
+        default=240.0,
+        help="seconds to spend on OSM before stopping with partial data",
+    )
     download.set_defaults(func=cmd_download)
 
     build = sub.add_parser("build", help="build the level end to end")
@@ -324,6 +338,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=240.0,
         help="seconds to spend on OSM before continuing with partial data",
+    )
+    build.add_argument(
+        "--max-buildings",
+        type=int,
+        default=None,
+        help="optional cap on exported buildings, largest first",
     )
     build.set_defaults(func=cmd_build)
 

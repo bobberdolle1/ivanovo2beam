@@ -114,6 +114,42 @@ class TestLevelSpec:
         with pytest.raises(ConfigError, match=r"center \[lon, lat\] is required"):
             LevelSpec.from_config({"id": "x", "terrain": {"grid_size": 2048, "square_size_m": 1}})
 
+    def test_spawn_requires_both_coordinates_and_valid_range(self) -> None:
+        with pytest.raises(ConfigError, match=r"spawn needs both"):
+            LevelSpec(
+                id="x",
+                title="x",
+                center_lon=41.0,
+                center_lat=57.0,
+                grid=TerrainGridSpec(2048, 1.0),
+                spawn_lon=41.0,
+            )
+        with pytest.raises(ConfigError, match="spawn_lon out of range"):
+            LevelSpec(
+                id="x",
+                title="x",
+                center_lon=41.0,
+                center_lat=57.0,
+                grid=TerrainGridSpec(2048, 1.0),
+                spawn_lon=200.0,
+                spawn_lat=57.0,
+            )
+
+    def test_spawn_anchor_defaults_to_level_centre_not_region_origin(self) -> None:
+        config = ProjectConfig.load(CONFIGS / "ivanovo_oblast.yaml")
+        # Plyos is ~65 km from the Ivanovo region origin.
+        plyos = LevelSpec(
+            id="plyos",
+            title="Plyos",
+            center_lon=41.51,
+            center_lat=57.46,
+            grid=TerrainGridSpec(2048, 1.0),
+        )
+        ax, ay = plyos.spawn_anchor(config.projection)
+        cx, cy = config.projection.geo_to_world(41.51, 57.46)
+        assert ax == pytest.approx(cx, abs=1e-6)
+        assert ay == pytest.approx(cy, abs=1e-6)
+
 
 class TestRoadSettings:
     def test_defaults_cover_the_required_classes(self) -> None:
@@ -164,7 +200,10 @@ class TestProjectConfig:
         assert config.bbox.west == 39.0
         assert config.level is None
 
-    @pytest.mark.parametrize("name", ["ivanovo_oblast.yaml", "ivanovo_mvp.yaml", "test_sector.yaml"])
+    @pytest.mark.parametrize(
+        "name",
+        ["ivanovo_oblast.yaml", "ivanovo_mvp.yaml", "ivanovo_shuya.yaml", "test_sector.yaml"],
+    )
     def test_every_shipped_config_loads(self, name: str) -> None:
         config = ProjectConfig.load(CONFIGS / name)
         assert config.region_id

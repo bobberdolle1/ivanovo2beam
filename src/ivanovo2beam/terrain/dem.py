@@ -100,16 +100,29 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import rasterio
-from pyproj import Geod
-from rasterio.crs import CRS
-from rasterio.transform import Affine
-from rasterio.warp import Resampling, transform_bounds
-from rasterio.warp import reproject as warp_reproject
-from rasterio.windows import Window
 
 from ivanovo2beam import __version__
-from ivanovo2beam.gis.projection import BBox
+from ivanovo2beam.gis.projection import WGS84_GEOD, BBox
+from ivanovo2beam.terrain import _geotiff
+
+try:
+    import rasterio
+    from rasterio.crs import CRS
+    from rasterio.transform import Affine
+    from rasterio.warp import Resampling, transform_bounds
+    from rasterio.warp import reproject as warp_reproject
+    from rasterio.windows import Window
+
+    _open_raster: Any = rasterio.open
+except ImportError:  # pragma: no cover - optional rasterio / sandbox fallback
+    rasterio = None  # type: ignore[assignment]
+    CRS = _geotiff.FallbackGeoCRS  # type: ignore[assignment,misc]
+    Affine = _geotiff.FallbackAffine  # type: ignore[assignment,misc]
+    Resampling = _geotiff.FallbackResampling  # type: ignore[assignment,misc]
+    transform_bounds = _geotiff.fallback_transform_bounds
+    warp_reproject = _geotiff.fallback_warp_reproject
+    Window = _geotiff.FallbackWindow  # type: ignore[assignment,misc]
+    _open_raster = _geotiff.open_geotiff
 
 __all__ = [
     "COPERNICUS_ENDPOINTS",
@@ -198,7 +211,7 @@ _PIXEL_TOL = 1e-9
 #: The provider chain, in preference order.
 SOURCE_CHAIN: tuple[str, ...] = ("copernicus_glo30", "aws_terrain_tiles", "srtm_gl1")
 
-_GEOD = Geod(ellps="WGS84")
+_GEOD = WGS84_GEOD
 
 _ATTRIBUTION_COPERNICUS = (
     "(c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 "
@@ -660,7 +673,7 @@ def _read_tile_grid(path: Path) -> _TileGrid:
     Raises:
         DemSourceUnavailable: If the file is not a single-band geographic raster.
     """
-    with rasterio.open(path) as dataset:
+    with _open_raster(path) as dataset:
         if dataset.count != 1:
             raise DemSourceUnavailable(f"{path.name}: expected 1 band, got {dataset.count}")
         if dataset.crs is None or not dataset.crs.is_geographic:
@@ -694,7 +707,7 @@ def _apply_nodata(data: np.ndarray, nodata: float | None) -> np.ndarray:
 
 def _read_tile_window(tile: _TileGrid, col: int, row: int, width: int, height: int) -> np.ndarray:
     """Read a window of a tile, as float64 with NaN for nodata."""
-    with rasterio.open(tile.path) as dataset:
+    with _open_raster(tile.path) as dataset:
         data = dataset.read(1, window=Window(col, row, width, height))
     return _apply_nodata(data, tile.nodata)
 
@@ -742,7 +755,7 @@ def _write_geotiff(
     if width >= 512 and height >= 512:
         profile |= {"tiled": True, "blockxsize": 512, "blockysize": 512}
     path.parent.mkdir(parents=True, exist_ok=True)
-    with rasterio.open(path, "w", **profile) as dataset:
+    with _open_raster(path, "w", **profile) as dataset:
         dataset.write(data, 1)
         if point_registered:
             dataset.update_tags(AREA_OR_POINT="Point")
@@ -1137,7 +1150,7 @@ def _fetch_terrain_tiles(
             url = f"{TERRAIN_TILE_BASE}/geotiff/{zoom}/{x_index}/{y_index}.tif"
             payload = _download(url, work / f"{zoom}_{x_index}_{y_index}.tif", timeout)
             payloads.append(payload)
-            with rasterio.open(payload.path) as dataset:
+            with _open_raster(payload.path) as dataset:
                 if dataset.crs is None or dataset.crs.to_epsg() != 3857:
                     raise DemSourceUnavailable(f"{payload.path.name}: expected EPSG:3857, got {dataset.crs}")
                 if (dataset.width, dataset.height) != (
@@ -1394,7 +1407,7 @@ def _build_sidecar(
 ) -> dict[str, Any]:
     """Assemble the provenance sidecar written next to a cached GeoTIFF."""
     info = source_info(resolved_source)
-    with rasterio.open(tif_path) as dataset:
+    with _open_raster(tif_path) as dataset:
         xres, yres = (float(abs(value)) for value in dataset.res)
         actual_bounds = dataset.bounds
     return {
@@ -1572,7 +1585,7 @@ class DemReader:
         self._path = Path(path)
         if not self._path.is_file():
             raise FileNotFoundError(f"DEM raster not found: {self._path}")
-        with rasterio.open(self._path) as dataset:
+        with _open_raster(self._path) as dataset:
             if dataset.count < 1:
                 raise ValueError(f"{self._path.name}: raster has no bands")
             if dataset.crs is None or not dataset.crs.is_geographic:
@@ -1594,7 +1607,7 @@ class DemReader:
             east=self._left + (self._width - 1) * self._xres,
             north=self._top,
         )
-        self._dataset: rasterio.DatasetReader | None = None
+        self._dataset: Any = None
         self._metadata = read_sidecar(self._path)
 
     # ------------------------------------------------------------- lifecycle
@@ -1618,10 +1631,10 @@ class DemReader:
         self.close()
 
     @property
-    def _handle(self) -> rasterio.DatasetReader:
-        """The lazily opened rasterio dataset."""
+    def _handle(self) -> Any:
+        """The lazily opened raster dataset."""
         if self._dataset is None:
-            self._dataset = rasterio.open(self._path)
+            self._dataset = _open_raster(self._path)
         return self._dataset
 
     # ------------------------------------------------------------ properties

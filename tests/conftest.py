@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import os
+import platform
 import shutil
+import sys
 import uuid
 import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+
+if sys.platform == "win32":
+    # Avoid Python 3.13 _wmi delay-load SEH faults in restricted sandboxes
+    # before pytest's faulthandler or test modules call platform.system().
+    platform._wmi = None  # type: ignore[attr-defined]
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Iterator
