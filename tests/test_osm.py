@@ -521,12 +521,12 @@ class TestParseRobustness:
         )
         assert sorted(parse_osm(path).nodes) == [1]
 
-    def test_pbf_is_refused_with_a_clear_message(self, work: Path) -> None:
+    def test_pbf_corrupted_raises_clear_parse_error(self, work: Path) -> None:
         path = work / "extract.osm.pbf"
         path.write_bytes(b"\x00\x00\x00\x0dOSMHeader")
-        with pytest.raises(NotImplementedError, match="pyosmium"):
+        with pytest.raises(NotImplementedError, match="parse_osm_pbf"):
             parse_osm(path)
-        with pytest.raises(NotImplementedError, match="pyosmium"):
+        with pytest.raises(OsmParseError, match="Truncated block header"):
             parse_osm_pbf(path)
 
     def test_invalid_utf8_bytes_are_replaced_not_fatal(self, work: Path) -> None:
