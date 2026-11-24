@@ -56,11 +56,8 @@ level:
   # Spawn on Ivanovo-Shuya Highway (Кохомское шоссе / выезд на Шую).
   spawn: [41.0370, 56.9530]
   terrain:
-    # 8191 * 4.0 = 32764 m. A power-of-two grid is required by the engine; 8192
-    # is its maximum, and 4.0 m spacing is the finest that still covers the
-    # 29 km route in a single terrain block.
-    grid_size: 8192
-    square_size_m: 4.0
+    grid_size: 4096
+    square_size_m: 8.0
   ground_margin_m: 8.0
 
 # Feature flags

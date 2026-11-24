@@ -649,7 +649,7 @@ def export_vegetation(
     buildings: Sequence[BuildingFootprint] | None = None,
     water: Sequence[Any] | None = None,
     railways: Sequence[Any] | None = None,
-    max_trees: int = 80000,
+    max_trees: int = 15000,
     target_density_trees_per_ha: float = 120.0,
 ) -> tuple[list[dict[str, Any]], VegetationExportStats]:
     """Generate BeamNG .forest4.json, managedItemData.json, materials, and scene objects.
