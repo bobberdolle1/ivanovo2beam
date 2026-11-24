@@ -99,6 +99,8 @@ class Road:
         drivable: Whether the way should be rendered as a drivable road.
         material_key: Terrain material painted on the carriageway.
         decal_material: BeamNG decal material name.
+        access: Access restrictions (e.g. "private", "no").
+        service: Service road classification (e.g. "driveway", "parking_aisle").
     """
 
     osm_id: int
@@ -117,6 +119,8 @@ class Road:
     drivable: bool
     material_key: str
     decal_material: str
+    access: str = ""
+    service: str = ""
 
     @property
     def half_width_m(self) -> float:
@@ -385,6 +389,10 @@ def extract_roads(
         surface = (way.tags.get("surface") or spec.surface).strip().lower()
         maxspeed = parse_maxspeed_kph(way.tags.get("maxspeed")) or spec.speed_kph
         oneway_tag = (way.tags.get("oneway") or "").strip().lower()
+        if oneway_tag == "-1":
+            clipped = np.ascontiguousarray(clipped[::-1])
+        access = (way.tags.get("access") or "").strip().lower()
+        service = (way.tags.get("service") or "").strip().lower()
         layer_text = way.tags.get("layer") or "0"
         layer_match = _INT_RE.search(layer_text)
 
@@ -407,6 +415,8 @@ def extract_roads(
             drivable=spec.drivable,
             material_key=surface_to_material_key(surface, highway),
             decal_material=decal_material_for(highway, surface),
+            access=access,
+            service=service,
         )
         if road.length_m < min_length_m:
             continue

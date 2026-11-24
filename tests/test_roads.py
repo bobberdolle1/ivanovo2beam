@@ -10,7 +10,13 @@ import pytest
 from ivanovo2beam.config import DEFAULT_ROAD_CLASSES, RoadSettings
 from ivanovo2beam.gis.projection import BBox, make_projection
 from ivanovo2beam.osm.types import OsmData, OsmWay
-from ivanovo2beam.roads.build import corridor_half_width_for, roads_to_corridors
+from ivanovo2beam.roads.build import (
+    corridor_half_width_for,
+    generate_lane_markings,
+    road_to_decal_object,
+    road_to_decal_objects,
+    roads_to_corridors,
+)
 from ivanovo2beam.roads.network import (
     Road,
     decal_material_for,
@@ -426,3 +432,361 @@ class TestClipGeometry:
         road = extract_roads(osm, projection, RoadSettings())[0]
         assert road.length_m == pytest.approx(10_000.0, rel=1e-4)
         assert math.isclose(road.points[0, 0], -5000.0, abs_tol=0.01)
+
+
+class TestRoadWidthAndDirection:
+    def test_decal_nodes_receive_full_width(self) -> None:
+        road = Road(
+            osm_id=42,
+            highway="primary",
+            points=np.array([[0.0, 0.0], [50.0, 0.0]]),
+            width_m=8.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=False,
+            bridge=False,
+            tunnel=False,
+            layer=0,
+            name="Test St",
+            maxspeed_kph=60.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        obj = road_to_decal_object(road, "test_level")
+        assert obj is not None
+        nodes = obj["nodes"]
+        # In DecalRoad nodes [x, y, z, width], width must be full road.width_m (8.0), not half width (4.0)
+        for node in nodes:
+            assert node[3] == pytest.approx(8.0)
+
+    def test_oneway_negative_one_reverses_points(self, projection) -> None:
+        osm = make_osm(
+            projection,
+            [([(0, 0), (100, 50), (200, 100)], {"highway": "residential", "oneway": "-1"}, 1)],
+        )
+        roads = extract_roads(osm, projection, RoadSettings())
+        assert len(roads) == 1
+        road = roads[0]
+        assert road.oneway is True
+        # First point should now be at x ~ 200 (reversed from OSM order)
+        assert road.points[0, 0] > road.points[-1, 0]
+        assert road.points[0, 0] == pytest.approx(200.0, abs=1.0)
+        assert road.points[-1, 0] == pytest.approx(0.0, abs=1.0)
+
+    def test_oneway_yes_preserves_point_order(self, projection) -> None:
+        osm = make_osm(
+            projection,
+            [([(0, 0), (100, 50), (200, 100)], {"highway": "residential", "oneway": "yes"}, 1)],
+        )
+        roads = extract_roads(osm, projection, RoadSettings())
+        assert len(roads) == 1
+        road = roads[0]
+        assert road.oneway is True
+        assert road.points[0, 0] < road.points[-1, 0]
+        assert road.points[0, 0] == pytest.approx(0.0, abs=1.0)
+
+
+class TestAITrafficAndNavgraph:
+    def test_gated_road_defaults_and_overrides(self) -> None:
+        base_kwargs = {
+            "osm_id": 100,
+            "highway": "residential",
+            "points": np.array([[0.0, 0.0], [50.0, 0.0]]),
+            "width_m": 6.0,
+            "lanes": 2,
+            "surface": "asphalt",
+            "oneway": False,
+            "bridge": False,
+            "tunnel": False,
+            "layer": 0,
+            "name": "",
+            "maxspeed_kph": 60.0,
+            "priority": 50,
+            "drivable": True,
+            "material_key": "Asphalt",
+            "decal_material": "road_asphalt_2lane",
+        }
+        # Public road -> not gated
+        public_road = Road(**base_kwargs)
+        obj_pub = road_to_decal_object(public_road, "test_level")
+        assert obj_pub is not None
+        assert obj_pub["gatedRoad"] is False
+
+        # Private access -> gated
+        priv_road = Road(**{**base_kwargs, "access": "private"})
+        obj_priv = road_to_decal_object(priv_road, "test_level")
+        assert obj_priv is not None
+        assert obj_priv["gatedRoad"] is True
+
+        # Driveway service -> gated
+        driveway_road = Road(**{**base_kwargs, "service": "driveway"})
+        obj_drive = road_to_decal_object(driveway_road, "test_level")
+        assert obj_drive is not None
+        assert obj_drive["gatedRoad"] is True
+
+    def test_ai_traffic_properties(self) -> None:
+        road = Road(
+            osm_id=101,
+            highway="primary",
+            points=np.array([[0.0, 0.0], [100.0, 0.0]]),
+            width_m=14.0,
+            lanes=4,
+            surface="asphalt",
+            oneway=False,
+            bridge=False,
+            tunnel=False,
+            layer=0,
+            name="Main Ave",
+            maxspeed_kph=90.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        obj = road_to_decal_object(road, "test_level")
+        assert obj is not None
+        assert obj["drivability"] == 1.0
+        assert obj["oneWay"] is False
+        assert obj["autoLanes"] is False
+        assert obj["lanesLeft"] == 2
+        assert obj["lanesRight"] == 2
+        assert obj["autoJunction"] is True
+        assert obj["speedLimit"] == pytest.approx(25.0)  # 90 / 3.6
+
+    def test_oneway_lanes_distribution(self) -> None:
+        road = Road(
+            osm_id=102,
+            highway="motorway",
+            points=np.array([[0.0, 0.0], [100.0, 0.0]]),
+            width_m=12.0,
+            lanes=3,
+            surface="asphalt",
+            oneway=True,
+            bridge=False,
+            tunnel=False,
+            layer=0,
+            name="M7",
+            maxspeed_kph=110.0,
+            priority=100,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        obj = road_to_decal_object(road, "test_level")
+        assert obj is not None
+        assert obj["oneWay"] is True
+        assert obj["lanesLeft"] == 0
+        assert obj["lanesRight"] == 3
+        assert obj["speedLimit"] == pytest.approx(30.56)  # 110 / 3.6
+
+    def test_track_drivability(self) -> None:
+        road = Road(
+            osm_id=103,
+            highway="track",
+            points=np.array([[0.0, 0.0], [50.0, 0.0]]),
+            width_m=4.0,
+            lanes=1,
+            surface="dirt",
+            oneway=False,
+            bridge=False,
+            tunnel=False,
+            layer=0,
+            name="",
+            maxspeed_kph=30.0,
+            priority=20,
+            drivable=True,
+            material_key="Dirt",
+            decal_material="m_dirt_road",
+        )
+        obj = road_to_decal_object(road, "test_level")
+        assert obj is not None
+        assert obj["drivability"] == 0.5
+
+    def test_bridge_decal_properties(self) -> None:
+        road = Road(
+            osm_id=104,
+            highway="primary",
+            points=np.array([[0.0, 0.0], [50.0, 0.0]]),
+            width_m=10.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=False,
+            bridge=True,
+            tunnel=False,
+            layer=1,
+            name="Volga Bridge",
+            maxspeed_kph=60.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        obj = road_to_decal_object(road, "test_level", ground_z=np.array([15.0, 15.0]))
+        assert obj is not None
+        assert obj["overObjects"] is True
+        assert obj["decalBias"] == 0.02
+        assert obj["autoJunction"] is False
+        # Node elevations must be lifted by +0.02
+        for node in obj["nodes"]:
+            assert node[2] == pytest.approx(15.02)
+
+
+class TestRoadSplittingAndMarkings:
+    def test_road_longer_than_1500m_is_split(self) -> None:
+        # 3000m long highway
+        pts = np.array([[0.0, 0.0], [1000.0, 0.0], [2000.0, 0.0], [3000.0, 0.0]])
+        road = Road(
+            osm_id=200,
+            highway="motorway",
+            points=pts,
+            width_m=14.0,
+            lanes=4,
+            surface="asphalt",
+            oneway=True,
+            bridge=False,
+            tunnel=False,
+            layer=0,
+            name="M7 Long",
+            maxspeed_kph=110.0,
+            priority=100,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        objs = road_to_decal_objects(road, "test_level", max_segment_length_m=1500.0)
+        assert len(objs) >= 2
+        # Verify naming pattern way<id>_0, way<id>_1
+        assert objs[0].get("name") == "way200_0"
+        assert objs[1].get("name") == "way200_1"
+
+        # Verify continuity: end node of segment 0 equals start node of segment 1
+        seg0_end = objs[0]["nodes"][-1][:2]
+        seg1_start = objs[1]["nodes"][0][:2]
+        assert seg0_end == seg1_start
+
+    def test_short_road_not_split(self) -> None:
+        pts = np.array([[0.0, 0.0], [500.0, 0.0]])
+        road = Road(
+            osm_id=201,
+            highway="primary",
+            points=pts,
+            width_m=10.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=False,
+            bridge=False,
+            tunnel=False,
+            layer=0,
+            name="Short",
+            maxspeed_kph=60.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        objs = road_to_decal_objects(road, "test_level", max_segment_length_m=1500.0)
+        assert len(objs) == 1
+        assert objs[0].get("name") == "way201"
+
+    def test_multi_lane_gost_markings(self) -> None:
+        pts = np.array([[0.0, 0.0], [100.0, 0.0]])
+        road = Road(
+            osm_id=202,
+            highway="primary",
+            points=pts,
+            width_m=14.0,
+            lanes=4,
+            surface="asphalt",
+            oneway=False,
+            bridge=False,
+            tunnel=False,
+            layer=0,
+            name="Avenue",
+            maxspeed_kph=60.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        # 100m straight road in 3D
+        pts_3d = np.array([[0.0, 0.0, 0.0], [100.0, 0.0, 0.0]])
+        markings = generate_lane_markings(
+            road,
+            "test_level",
+            pts_3d,
+            is_start_junction=True,
+            is_end_junction=True,
+            clip_distance_m=8.0,
+        )
+        # 4 lanes -> 3 divider markings (1 center, 2 lane dividers)
+        assert len(markings) == 3
+
+        materials = [m["material"] for m in markings]
+        # Two-way road: center divider is solid white, side dividers are dashed white
+        assert "m_line_white" in materials
+        assert "m_line_white_discontinue" in materials
+
+        # Clipped 8m from both ends: length must be 100 - 16 = 84m
+        for m in markings:
+            nodes = m["nodes"]
+            start_x = nodes[0][0]
+            end_x = nodes[-1][0]
+            assert start_x == pytest.approx(8.0, abs=0.5)
+            assert end_x == pytest.approx(92.0, abs=0.5)
+
+    def test_no_markings_for_narrow_roads(self) -> None:
+        pts_3d = np.array([[0.0, 0.0, 0.0], [100.0, 0.0, 0.0]])
+        road = Road(
+            osm_id=203,
+            highway="residential",
+            points=np.array([[0.0, 0.0], [100.0, 0.0]]),
+            width_m=6.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=False,
+            bridge=False,
+            tunnel=False,
+            layer=0,
+            name="",
+            maxspeed_kph=40.0,
+            priority=40,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        markings = generate_lane_markings(road, "test_level", pts_3d)
+        assert markings == []
+
+
+class TestTunnelSuppression:
+    def test_tunnel_suppresses_decal_and_grading(self) -> None:
+        road = Road(
+            osm_id=300,
+            highway="primary",
+            points=np.array([[0.0, 0.0], [100.0, 0.0]]),
+            width_m=10.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=False,
+            bridge=False,
+            tunnel=True,
+            layer=-1,
+            name="Metro Tunnel",
+            maxspeed_kph=60.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        # road_to_decal_object returns None
+        assert road_to_decal_object(road, "test_level") is None
+        # road_to_decal_objects returns empty list
+        assert road_to_decal_objects(road, "test_level") == []
+
+        # Terrain corridor carries grade_terrain=False
+        corridors = roads_to_corridors([road], RoadSettings())
+        assert len(corridors) == 1
+        assert corridors[0].grade_terrain is False
+

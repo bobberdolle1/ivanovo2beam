@@ -1,7 +1,26 @@
-"""Bridge between the extracted road network and BeamNG level data."""
+"""Roads, bridges, tunnels, and railways for BeamNG level generation."""
 
 from __future__ import annotations
 
+from ivanovo2beam.roads.bridges import (
+    BRIDGE_DECAL_MATERIAL,
+    BridgeGeometry,
+    build_bridge_geometry,
+    build_bridge_scene_object,
+    compute_bridge_deck_profile,
+    create_bridgehead_ramps,
+    emit_bridges_materials,
+    export_bridge_dae,
+)
+from ivanovo2beam.roads.build import (
+    add_network_to_scene,
+    corridor_half_width_for,
+    generate_lane_markings,
+    road_to_decal_object,
+    road_to_decal_objects,
+    roads_to_corridors,
+    sample_surface_z,
+)
 from ivanovo2beam.roads.network import (
     DECAL_MATERIALS,
     DEFAULT_LANE_WIDTH_M,
@@ -18,20 +37,61 @@ from ivanovo2beam.roads.network import (
     surface_to_material_key,
     total_network_length_km,
 )
+from ivanovo2beam.roads.railways import (
+    MATERIAL_RAIL_BALLAST,
+    MATERIAL_RAIL_STEEL,
+    RUSSIAN_GAUGE_M,
+    Railway,
+    RailwayMesh,
+    build_railway_geometry,
+    build_railway_scene_object,
+    emit_railways_materials,
+    export_railway_dae,
+    extract_railways,
+    railways_to_corridors,
+    smooth_rail_grades,
+)
 
 __all__ = [
+    "BRIDGE_DECAL_MATERIAL",
     "DECAL_MATERIALS",
     "DEFAULT_LANE_WIDTH_M",
+    "MATERIAL_RAIL_BALLAST",
+    "MATERIAL_RAIL_STEEL",
+    "RUSSIAN_GAUGE_M",
+    "BridgeGeometry",
+    "Railway",
+    "RailwayMesh",
     "Road",
+    "add_network_to_scene",
+    "build_bridge_geometry",
+    "build_bridge_scene_object",
+    "build_railway_geometry",
+    "build_railway_scene_object",
+    "compute_bridge_deck_profile",
+    "corridor_half_width_for",
+    "create_bridgehead_ramps",
     "decal_material_for",
     "densify",
+    "emit_bridges_materials",
+    "emit_railways_materials",
+    "export_bridge_dae",
+    "export_railway_dae",
+    "extract_railways",
     "extract_roads",
+    "generate_lane_markings",
     "is_truthy",
     "parse_lanes",
     "parse_maxspeed_kph",
     "parse_width",
+    "railways_to_corridors",
     "road_network_stats",
+    "road_to_decal_object",
+    "road_to_decal_objects",
     "road_width_m",
+    "roads_to_corridors",
+    "sample_surface_z",
+    "smooth_rail_grades",
     "surface_to_material_key",
     "total_network_length_km",
 ]
