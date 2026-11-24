@@ -489,7 +489,8 @@ def add_spawn_point(
     x: float,
     y: float,
     z: float,
-    radius: float = 1.0,
+    radius: float = 5.0,
+    heading_rad: float = 0.0,
 ) -> dict[str, Any]:
     """Add a player drop point.
 
@@ -502,10 +503,26 @@ def add_spawn_point(
         y: World Y in metres.
         z: World Z in metres.
         radius: Spawn sphere radius in metres.
+        heading_rad: Forward yaw rotation angle in radians.
 
     Returns:
         The created object.
     """
+    import math
+
+    cos_h = math.cos(heading_rad)
+    sin_h = math.sin(heading_rad)
+    rot_matrix = [
+        round(cos_h, 6),
+        round(-sin_h, 6),
+        0.0,
+        round(sin_h, 6),
+        round(cos_h, 6),
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ]
     return tree.add_object(
         group_path,
         {
@@ -521,6 +538,7 @@ def add_spawn_point(
             "lockCount": "0",
             "outdoorWeight": "1",
             "radius": radius,
+            "rotationMatrix": rot_matrix,
             "sphereWeight": "1",
         },
     )

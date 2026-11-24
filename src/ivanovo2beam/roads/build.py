@@ -502,9 +502,25 @@ def sample_surface_z(road: Road, build: object) -> np.ndarray:
     cell = build.cell_size_m  # type: ignore[attr-defined]
     n = elevations.shape[0]
 
-    cols = np.clip(np.rint((road.points[:, 0] - origin_x) / cell).astype(np.int64), 0, n - 1)
-    rows = np.clip(np.rint((road.points[:, 1] - origin_y) / cell).astype(np.int64), 0, n - 1)
-    return elevations[rows, cols]
+    gx = (road.points[:, 0] - origin_x) / cell
+    gy = (road.points[:, 1] - origin_y) / cell
+
+    c0 = np.clip(np.floor(gx).astype(np.int64), 0, n - 2)
+    r0 = np.clip(np.floor(gy).astype(np.int64), 0, n - 2)
+    c1 = c0 + 1
+    r1 = r0 + 1
+
+    tx = np.clip(gx - c0, 0.0, 1.0)
+    ty = np.clip(gy - r0, 0.0, 1.0)
+
+    z00 = elevations[r0, c0]
+    z01 = elevations[r0, c1]
+    z10 = elevations[r1, c0]
+    z11 = elevations[r1, c1]
+
+    z0 = z00 * (1.0 - tx) + z01 * tx
+    z1 = z10 * (1.0 - tx) + z11 * tx
+    return z0 * (1.0 - ty) + z1 * ty
 
 
 def add_network_to_scene(

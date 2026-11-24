@@ -43,21 +43,18 @@ sectors:
   size_m: 4000
 
 roads:
-  # Roads here are mostly rural: two-lane asphalt between settlements, gravel
-  # and dirt tracks in between. Keep the graded corridor tight so it does not
-  # erase the verges and drainage ditches that define a Russian intercity road.
   simplify_tolerance_m: 0.75
   junction_snap_m: 0.5
-  corridor_half_width_m: 14.0
-  max_grade: 0.12
+  corridor_half_width_m: 16.0
+  max_grade: 0.08
 
 level:
   id: ivanovo_shuya
-  title: "Ivanovo 1:1 - Ivanovo to Shuya"
+  title: "Ivanovo 1:1 - Ivanovo to Shuya Highway (Р152)"
   # Midpoint of Ivanovo (40.97393, 56.99987) and Shuya (41.36444, 56.84861).
   center: [41.16958, 56.92439]
-  # Spawn in Ivanovo, at the region's world origin.
-  spawn: [40.97393, 56.99987]
+  # Spawn on Ivanovo-Shuya Highway (Кохомское шоссе / выезд на Шую).
+  spawn: [41.0370, 56.9530]
   terrain:
     # 8191 * 4.0 = 32764 m. A power-of-two grid is required by the engine; 8192
     # is its maximum, and 4.0 m spacing is the finest that still covers the
@@ -68,7 +65,7 @@ level:
 
 # Feature flags
 buildings:
-  enabled: true
+  enabled: false
 
 vegetation:
   enabled: true

@@ -826,13 +826,22 @@ def build_level(
     durations["vegetation"] = time.perf_counter() - stage
 
     # -- spawn points ------------------------------------------------------
-    spawn_presets = [
-        {"key": "player_spawn", "name": "spawn_default", "title": "City Centre (Площадь Революции)", "geo": (40.97393, 56.99987)},
-        {"key": "spawn_pushkin", "name": "spawn_pushkin", "title": "Pushkin Square & Uvod (Площадь Пушкина)", "geo": (40.9740, 56.9935)},
-        {"key": "spawn_bim", "name": "spawn_bim", "title": "BIM Textile Factory (БИМ / Река Уводь)", "geo": (40.9765, 57.0035)},
-        {"key": "spawn_sheremetev", "name": "spawn_sheremetev", "title": "Sheremetevsky Prospekt (Шереметевский проспект)", "geo": (40.9850, 57.0050)},
-        {"key": "spawn_embankment", "name": "spawn_embankment", "title": "Uvod Embankment (Набережная Уводи / Серебряный Город)", "geo": (40.9690, 57.0010)},
-    ]
+    if level.id == "ivanovo_shuya":
+        spawn_presets = [
+            {"key": "player_spawn", "name": "spawn_default", "title": "Ivanovo-Shuya Highway (Кохомское шоссе / Выезд на Шую)", "geo": (41.0370, 56.9530)},
+            {"key": "spawn_kitovo", "name": "spawn_kitovo", "title": "Kitovo Highway Straightaway (Скоростная прямая у Китово)", "geo": (41.3000, 56.8650)},
+            {"key": "spawn_shuya", "name": "spawn_shuya", "title": "Entrance to Shuya (Въезд в г. Шуя, Р152)", "geo": (41.3500, 56.8500)},
+            {"key": "spawn_forest", "name": "spawn_forest", "title": "Forest Highway Section (Лесной участок трассы)", "geo": (41.1700, 56.9150)},
+            {"key": "spawn_ivanovo", "name": "spawn_ivanovo", "title": "Ivanovo City Origin (Площадь Революции)", "geo": (40.97393, 56.99987)},
+        ]
+    else:
+        spawn_presets = [
+            {"key": "player_spawn", "name": "spawn_default", "title": "City Centre (Площадь Революции)", "geo": (40.97393, 56.99987)},
+            {"key": "spawn_pushkin", "name": "spawn_pushkin", "title": "Pushkin Square & Uvod (Площадь Пушкина)", "geo": (40.9740, 56.9935)},
+            {"key": "spawn_bim", "name": "spawn_bim", "title": "BIM Textile Factory (БИМ / Река Уводь)", "geo": (40.9765, 57.0035)},
+            {"key": "spawn_sheremetev", "name": "spawn_sheremetev", "title": "Sheremetevsky Prospekt (Шереметевский проспект)", "geo": (40.9850, 57.0050)},
+            {"key": "spawn_embankment", "name": "spawn_embankment", "title": "Uvod Embankment (Набережная Уводи / Серебряный Город)", "geo": (40.9690, 57.0010)},
+        ]
 
     spawn_points_info: list[dict[str, Any]] = []
     stats_spawn_anchor = [0.0, 0.0]
@@ -847,7 +856,9 @@ def build_level(
             name=sp["name"],
             x=spawn[0],
             y=spawn[1],
-            z=spawn[2] + 1.5,
+            z=spawn[2] + 0.35,
+            radius=5.0,
+            heading_rad=spawn[4] if len(spawn) > 4 else 0.0,
         )
         spawn_points_info.append({
             "objectname": sp["name"],
@@ -998,7 +1009,9 @@ def _choose_spawn(
         row = int(np.clip(round((y - origin_y) / cell), 0, n - 1))
         return float(elevations[row, col])
 
-    best: tuple[float, float, float, float] | None = None
+    import math
+
+    best: tuple[float, float, float, float, float] | None = None
     for road in roads:
         if not road.drivable or road.bridge or road.tunnel:
             continue
@@ -1009,8 +1022,17 @@ def _choose_spawn(
         distance = float(distances[index])
         if best is None or distance < best[3]:
             point = road.points[index]
-            best = (float(point[0]), float(point[1]), sample(float(point[0]), float(point[1])), distance)
+            if index < road.points.shape[0] - 1:
+                dx = float(road.points[index + 1, 0] - road.points[index, 0])
+                dy = float(road.points[index + 1, 1] - road.points[index, 1])
+            elif index > 0:
+                dx = float(road.points[index, 0] - road.points[index - 1, 0])
+                dy = float(road.points[index, 1] - road.points[index - 1, 1])
+            else:
+                dx, dy = 1.0, 0.0
+            heading = math.atan2(dy, dx)
+            best = (float(point[0]), float(point[1]), sample(float(point[0]), float(point[1])), distance, heading)
 
     if best is None:
-        return (anchor_x, anchor_y, sample(anchor_x, anchor_y), 0.0)
+        return (anchor_x, anchor_y, sample(anchor_x, anchor_y), 0.0, 0.0)
     return best
