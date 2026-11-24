@@ -10,6 +10,7 @@ count for its footprint.
 
 from __future__ import annotations
 
+import json
 import math
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -142,30 +143,28 @@ class TestRingGeometry:
         assert np.array_equal(ensure_counter_clockwise(original), original)
 
 
-class TestExtraction:
-    def _osm(self, projection, shapes):
-        """Build OsmData, sharing node ids between coincident coordinates.
+def _make_osm(projection, shapes):
+    """Build OsmData, sharing node ids between coincident coordinates."""
+    nodes: dict[int, tuple[float, float]] = {}
+    node_ids: dict[tuple[float, float], int] = {}
+    ways: list[OsmWay] = []
+    next_id = 1
+    for osm_id, (coords, tags) in enumerate(shapes, start=1):
+        refs = []
+        for x, y in coords:
+            key = (round(float(x), 6), round(float(y), 6))
+            if key not in node_ids:
+                lon, lat = projection.world_to_geo(x, y)
+                nodes[next_id] = (lon, lat)
+                node_ids[key] = next_id
+                next_id += 1
+            refs.append(node_ids[key])
+        ways.append(OsmWay(id=osm_id, nodes=tuple(refs), tags=dict(tags)))
+    return OsmData(nodes=nodes, node_tags={}, ways=ways, relations=[], source="test")
 
-        The deduplication is what makes a closed ring genuinely closed: OSM
-        expresses "closed" as the first and last node ids being equal, so giving
-        the repeated final coordinate its own node would make every ring open.
-        """
-        nodes: dict[int, tuple[float, float]] = {}
-        node_ids: dict[tuple[float, float], int] = {}
-        ways: list[OsmWay] = []
-        next_id = 1
-        for osm_id, (coords, tags) in enumerate(shapes, start=1):
-            refs = []
-            for x, y in coords:
-                key = (round(float(x), 6), round(float(y), 6))
-                if key not in node_ids:
-                    lon, lat = projection.world_to_geo(x, y)
-                    nodes[next_id] = (lon, lat)
-                    node_ids[key] = next_id
-                    next_id += 1
-                refs.append(node_ids[key])
-            ways.append(OsmWay(id=osm_id, nodes=tuple(refs), tags=dict(tags)))
-        return OsmData(nodes=nodes, node_tags={}, ways=ways, relations=[], source="test")
+
+class TestExtraction:
+    _osm = staticmethod(_make_osm)
 
     def test_extracts_a_simple_building(self, projection) -> None:
         osm = self._osm(
@@ -243,13 +242,27 @@ class TestExtraction:
         assert len(buildings) == 2
         assert buildings[0].area_m2 > buildings[1].area_m2
 
-    def test_multipolygon_buildings_are_counted_as_skipped(self, projection) -> None:
+    def test_multipolygon_buildings_are_extracted(self, projection) -> None:
         from ivanovo2beam.osm.types import OsmRelation
 
         osm = self._osm(projection, [(rectangle(12.0, 8.0).tolist(), {"building": "house"})])
         osm.relations.append(
             OsmRelation(
                 id=99, members=(("way", 1, "outer"),), tags={"type": "multipolygon", "building": "yes"}
+            )
+        )
+        buildings, stats = extract_buildings(osm, projection)
+        assert stats.relations == 1
+        assert len(buildings) == 1
+        assert buildings[0].osm_id == -99
+
+    def test_degenerate_multipolygons_are_counted_as_skipped(self, projection) -> None:
+        from ivanovo2beam.osm.types import OsmRelation
+
+        osm = OsmData(nodes={}, node_tags={}, ways=[], relations=[], source="test")
+        osm.relations.append(
+            OsmRelation(
+                id=99, members=(("way", 9999, "outer"),), tags={"type": "multipolygon", "building": "yes"}
             )
         )
         _, stats = extract_buildings(osm, projection)
@@ -471,9 +484,10 @@ class TestCollada:
         p = mesh_el.find(f"{COLLADA_NS}triangles/{COLLADA_NS}p")
         assert p is not None and p.text
         values = [int(v) for v in p.text.split()]
-        assert len(values) == mesh.triangle_count * 6
-        assert max(values[0::2]) < n_vertices
-        assert max(values[1::2]) < n_normals
+        # 3 indices per corner (vertex, normal, uv) * 3 corners = 9 values per triangle
+        assert len(values) == mesh.triangle_count * 9
+        assert max(values[0::3]) < n_vertices
+        assert max(values[1::3]) < n_normals
 
     def test_deterministic_bytes(self, tmp_path: Path) -> None:
         mesh = self._mesh()
@@ -585,9 +599,11 @@ class TestExport:
             self.origin_y = -320.0
             self.cell_size_m = 10.0
 
+    _osm = staticmethod(_make_osm)
+
     def test_large_buildings_get_their_own_mesh(self, tmp_path: Path) -> None:
         objects, stats = export_buildings(
-            self._buildings(), self._FlatBuild(), level_id="lvl", level_dir=tmp_path
+            self._buildings(), self._FlatBuild(), level_id="lvl", level_dir=tmp_path, batch_chunks=False
         )
         assert stats.unique_meshes == 2
         assert stats.instances == 20
@@ -599,7 +615,7 @@ class TestExport:
     def test_instances_share_a_small_mesh_library(self, tmp_path: Path) -> None:
         """The whole point: 20 houses must not become 20 distinct meshes."""
         objects, stats = export_buildings(
-            self._buildings(), self._FlatBuild(), level_id="lvl", level_dir=tmp_path
+            self._buildings(), self._FlatBuild(), level_id="lvl", level_dir=tmp_path, batch_chunks=False
         )
         shared = {o["shapeName"] for o in objects if "/b9" not in o["shapeName"]}
         assert 0 < len(shared) <= 4
@@ -611,7 +627,7 @@ class TestExport:
 
     def test_objects_carry_the_fields_beamng_needs(self, tmp_path: Path) -> None:
         objects, _ = export_buildings(
-            self._buildings(), self._FlatBuild(), level_id="lvl", level_dir=tmp_path
+            self._buildings(), self._FlatBuild(), level_id="lvl", level_dir=tmp_path, batch_chunks=False
         )
         for obj in objects:
             assert obj["class"] == "TSStatic"
@@ -625,7 +641,7 @@ class TestExport:
 
     def test_buildings_are_seated_on_the_ground(self, tmp_path: Path) -> None:
         objects, _ = export_buildings(
-            self._buildings(), self._FlatBuild(), level_id="lvl", level_dir=tmp_path
+            self._buildings(), self._FlatBuild(), level_id="lvl", level_dir=tmp_path, batch_chunks=False
         )
         assert all(o["position"][2] == pytest.approx(120.0) for o in objects)
 
@@ -642,10 +658,129 @@ class TestExport:
 
     def test_max_instances_keeps_the_largest(self, tmp_path: Path) -> None:
         objects, stats = export_buildings(
-            self._buildings(), self._FlatBuild(), level_id="lvl", level_dir=tmp_path, max_instances=5
+            self._buildings(),
+            self._FlatBuild(),
+            level_id="lvl",
+            level_dir=tmp_path,
+            batch_chunks=False,
+            max_instances=5,
         )
         assert stats.buildings == 5
         assert len(objects) == 5
+
+    def test_spatial_chunk_batching(self, tmp_path: Path) -> None:
+        """Batch buildings into 500m x 500m sector .dae files."""
+        objects, stats = export_buildings(
+            self._buildings(), self._FlatBuild(), level_id="lvl", level_dir=tmp_path, batch_chunks=True
+        )
+        assert stats.chunks > 0
+        assert stats.buildings == 22
+        assert len(objects) == stats.chunks
+        for obj in objects:
+            assert obj["class"] == "TSStatic"
+            assert obj["collisionType"] == "Visible Mesh Final"
+            assert obj["meshCulling"] is True
+            assert obj["useInstanceRenderData"] is True
+            assert obj["shapeName"].startswith("/levels/lvl/art/shapes/buildings/chunk_")
+            assert obj["scale"] == [1.0, 1.0, 1.0]
+
+        # Check .dae files on disk
+        for obj in objects:
+            rel = obj["shapeName"].replace("/levels/lvl/", "")
+            dae_path = tmp_path / rel
+            assert dae_path.is_file()
+            root = ET.fromstring(dae_path.read_text(encoding="utf-8"))
+            assert root.tag.endswith("COLLADA")
+
+        # Check main.materials.json
+        mat_path = tmp_path / "art" / "shapes" / "buildings" / "main.materials.json"
+        assert mat_path.is_file()
+        materials = json.loads(mat_path.read_text(encoding="utf-8"))
+        assert "bld_brick_industrial" in materials
+        assert "bld_wood_wall" in materials
+        assert materials["bld_brick_industrial"]["class"] == "Material"
+
+    def test_slope_skirts_extend_walls_downwards(self) -> None:
+        ring = rectangle(10.0, 10.0)
+        mesh = extrude_footprint(ring, height_m=5.0, skirt_depth_m=3.0)
+        low, high = mesh.bounds_z()
+        assert low == pytest.approx(-3.0)
+        assert high >= 5.0
+
+    def test_multipolygon_with_courtyard_extracted_and_meshed(self, projection) -> None:
+        from ivanovo2beam.osm.types import OsmRelation
+
+        outer_rect = rectangle(30.0, 30.0).tolist()
+        inner_rect = rectangle(10.0, 10.0, 10.0, 10.0).tolist()
+
+        osm = self._osm(
+            projection,
+            [
+                (outer_rect, {"building": "apartments"}),
+                (inner_rect, {}),
+            ],
+        )
+        osm.relations.append(
+            OsmRelation(
+                id=101,
+                members=(("way", 1, "outer"), ("way", 2, "inner")),
+                tags={"type": "multipolygon", "building": "apartments", "building:levels": "9"},
+            )
+        )
+        buildings, stats = extract_buildings(osm, projection)
+        assert stats.relations == 1
+        b = next(bld for bld in buildings if bld.osm_id == -101)
+        assert len(b.holes) == 1
+        assert b.area_m2 == pytest.approx(800.0, rel=1e-2)
+
+        mesh = extrude_footprint(b.ring, height_m=b.height_m, holes=b.holes, roof="flat")
+        assert mesh.triangle_count > 0
+        low, high = mesh.bounds_z()
+        assert low == pytest.approx(0.0)
+        assert high == pytest.approx(b.height_m)
+
+    def test_building_part_extracted_and_meshed(self, projection) -> None:
+        osm = self._osm(
+            projection,
+            [
+                (
+                    rectangle(12.0, 8.0).tolist(),
+                    {"building:part": "yes", "height": "15", "min_height": "6", "roof:shape": "flat"},
+                )
+            ],
+        )
+        buildings, stats = extract_buildings(osm, projection)
+        assert stats.parts == 1
+        b = buildings[0]
+        assert b.part is True
+        assert b.min_height_m == pytest.approx(6.0)
+        assert b.height_m == pytest.approx(15.0)
+
+        mesh = extrude_footprint(b.ring, height_m=b.height_m, min_height_m=b.min_height_m, roof="flat")
+        low, high = mesh.bounds_z()
+        assert low == pytest.approx(6.0)
+        assert high == pytest.approx(21.0)
+
+    def test_architectural_typology_material_mapping(self) -> None:
+        from ivanovo2beam.buildings.export import resolve_building_materials
+
+        ring = rectangle(10.0, 10.0)
+        b_ind = BuildingFootprint(1, ring, "industrial", 9.0, 1.0, "BIM Textile Mill", 500.0, "height")
+        w_mat, r_mat = resolve_building_materials(b_ind)
+        assert w_mat == "bld_brick_industrial"
+
+        b_panel = BuildingFootprint(2, ring, "apartments", 27.0, 9.0, "Brezhnevka", 600.0, "levels")
+        w_mat, r_mat = resolve_building_materials(b_panel)
+        assert w_mat == "bld_concrete_panel"
+        assert r_mat == "bld_roof_tar"
+
+        b_khrush = BuildingFootprint(3, ring, "apartments", 15.0, 5.0, "Khrushchevka", 400.0, "levels")
+        w_mat, r_mat = resolve_building_materials(b_khrush)
+        assert w_mat == "bld_brick_khrushchevka"
+
+        b_wood = BuildingFootprint(4, ring, "house", 6.0, 1.5, "Izba", 80.0, "default")
+        w_mat, r_mat = resolve_building_materials(b_wood)
+        assert w_mat == "bld_wood_wall"
 
     def test_empty_input_is_handled(self, tmp_path: Path) -> None:
         objects, stats = export_buildings(
