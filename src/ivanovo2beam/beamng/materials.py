@@ -368,8 +368,8 @@ def build_materials_json(
     level_id: str,
     material_keys: Iterable[str] = DEFAULT_MATERIAL_ORDER,
     *,
-    base_tex_size: int = 2048,
-    detail_tex_size: int = 512,
+    base_tex_size: int = 1024,
+    detail_tex_size: int = 1024,
 ) -> dict[str, object]:
     """Build the contents of ``levels/<id>/art/terrains/main.materials.json``.
 
@@ -441,9 +441,10 @@ def build_materials_json(
     document[f"{level_id}TerrainMaterialTextureSet"] = {
         "name": f"{level_id}TerrainMaterialTextureSet",
         "class": "TerrainMaterialTextureSet",
+        "persistentId": str(uuid.uuid5(_MATERIAL_NAMESPACE, f"TerrainMaterialTextureSet:{level_id}")),
         "baseTexSize": [base_tex_size, base_tex_size],
         "detailTexSize": [detail_tex_size, detail_tex_size],
-        "macroTexSize": [256, 256],
+        "macroTexSize": [1024, 1024],
     }
     return document
 

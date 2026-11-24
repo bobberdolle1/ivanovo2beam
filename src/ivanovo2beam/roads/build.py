@@ -426,7 +426,7 @@ def generate_lane_markings(
             line_nodes.append([px, py, pz, 0.15])  # 15cm marking width
 
         line_key = f"{base_key}_mark_{k}"
-        tex_len = 3.0 if "discontinue" in material else 10.0
+        tex_len = 8.0 if "discontinue" in material else 10.0
         line_obj: dict[str, Any] = build_road_object(
             level_id,
             key=line_key,
@@ -438,6 +438,7 @@ def generate_lane_markings(
             gated_road=False,
             texture_length=tex_len,
             render_priority=15,
+            distance_fade=(150.0, 50.0),
         )
         line_obj["decalBias"] = 0.01
         line_obj["autoJunction"] = False

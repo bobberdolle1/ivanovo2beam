@@ -56,7 +56,7 @@ buildings:
   enabled: true
 
 vegetation:
-  enabled: false
+  enabled: true
 
 water:
   enabled: true

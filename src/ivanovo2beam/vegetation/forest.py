@@ -506,7 +506,7 @@ def build_keepout_mask(
             pts = getattr(road, "points", None)
             if pts is None and isinstance(road, (list, tuple)):
                 pts = road
-            if not pts or len(pts) < 2:
+            if pts is None or len(pts) < 2:
                 continue
             width_m = getattr(road, "width_m", 6.0)
             clearance_m = width_m + 6.0  # includes shoulders
@@ -520,7 +520,7 @@ def build_keepout_mask(
             pts = getattr(rail, "points", None)
             if pts is None and isinstance(rail, (list, tuple)):
                 pts = rail
-            if not pts or len(pts) < 2:
+            if pts is None or len(pts) < 2:
                 continue
             width_px = max(1, round(8.0 / cell))
             pix_pts = [to_pixel(float(p[0]), float(p[1])) for p in pts]
@@ -589,8 +589,10 @@ def build_forest_materials_json() -> dict[str, Any]:
     for key, spec in sorted(STOCK_TREE_MATERIALS.items()):
         mat_id = str(uuid.uuid5(_FOREST_NS, f"mat_{key}"))
         stage: dict[str, Any] = {}
-        if "colorMap" in spec:
-            stage["colorMap"] = spec["colorMap"]
+        if "baseColorMap" in spec:
+            stage["baseColorMap"] = spec["baseColorMap"]
+        elif "colorMap" in spec:
+            stage["baseColorMap"] = spec["colorMap"]
         if "normalMap" in spec:
             stage["normalMap"] = spec["normalMap"]
         if "roughnessMap" in spec:

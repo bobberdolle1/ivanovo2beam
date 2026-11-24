@@ -69,64 +69,67 @@ VARIANTS_PER_CLASS = 4
 BUILDING_MATERIALS: dict[str, dict[str, Any]] = {
     "bld_brick_industrial": {
         "title": "Red-brick textile mills (BIM, NIM, Krasnaya Talka)",
-        "groundType": "BRICK",
-        "colorMap": "/assets/materials/tileable/brick/brick_plain/t_bricks_red_01_b.color.dds",
+        "groundType": "CONCRETE",
+        "baseColorMap": "/assets/materials/tileable/brick/brick_plain/t_bricks_red_01_b.color.dds",
         "normalMap": "/assets/materials/tileable/brick/brick_plain/t_bricks_red_01_nm.normal.dds",
-        "specularMap": "/assets/materials/tileable/brick/brick_plain/t_bricks_red_01_s.color.dds",
         "roughnessMap": "/assets/materials/tileable/brick/brick_plain/t_bricks_red_01_r.data.dds",
-        "diffuseColor": (0.65, 0.25, 0.20),
+        "baseColorFactor": [0.65, 0.25, 0.20, 1.0],
     },
     "bld_concrete_panel": {
         "title": "Soviet precast concrete panel blocks (Brezhnevkas >=6F)",
         "groundType": "CONCRETE",
-        "colorMap": "/assets/materials/tileable/concrete/concrete_precast1/t_concrete_precast1_b.color.dds",
+        "baseColorMap": "/assets/materials/tileable/concrete/concrete_precast1/t_concrete_precast1_b.color.dds",
         "normalMap": "/assets/materials/tileable/concrete/concrete_precast1/t_concrete_precast1_nm.normal.dds",
         "roughnessMap": "/assets/materials/tileable/concrete/concrete_precast1/t_concrete_precast1_r.data.dds",
-        "diffuseColor": (0.70, 0.70, 0.68),
+        "baseColorFactor": [0.70, 0.70, 0.68, 1.0],
     },
     "bld_brick_khrushchevka": {
         "title": "Soviet brick blocks (Khrushchevkas <=5F)",
-        "groundType": "BRICK",
-        "colorMap": "/assets/materials/tileable/brick/ind_blockwall/t_concrete_cinderblock_01_b.color.png",
-        "normalMap": "/assets/materials/tileable/brick/ind_blockwall/t_concrete_cinderblock_01_nm.normal.png",
-        "roughnessMap": "/assets/materials/tileable/brick/ind_blockwall/t_concrete_cinderblock_01_r.data.png",
-        "diffuseColor": (0.72, 0.62, 0.54),
+        "groundType": "CONCRETE",
+        "baseColorMap": "/assets/materials/tileable/brick/ind_blockwall/t_concrete_cinderblock_01_b.color.dds",
+        "normalMap": "/assets/materials/tileable/brick/ind_blockwall/t_concrete_cinderblock_01_nm.normal.dds",
+        "roughnessMap": "/assets/materials/tileable/brick/ind_blockwall/t_concrete_cinderblock_01_r.data.dds",
+        "baseColorFactor": [0.72, 0.62, 0.54, 1.0],
     },
     "bld_plaster_civic": {
         "title": "Constructivist monuments and civic buildings (schools, clinics)",
         "groundType": "CONCRETE",
-        "colorMap": "/assets/materials/tileable/plaster/m_plaster_float/t_plaster_float_b.color.png",
-        "normalMap": "/assets/materials/tileable/plaster/m_plaster_float/t_plaster_float_nm.normal.png",
-        "roughnessMap": "/assets/materials/tileable/plaster/m_plaster_float/t_plaster_float_r.data.png",
-        "diffuseColor": (0.78, 0.76, 0.72),
+        "baseColorMap": "/assets/materials/tileable/plaster/m_plaster_float/t_plaster_float_b.color.dds",
+        "normalMap": "/assets/materials/tileable/plaster/m_plaster_float/t_plaster_float_nm.normal.dds",
+        "roughnessMap": "/assets/materials/tileable/plaster/m_plaster_float/t_plaster_float_r.data.dds",
+        "baseColorFactor": [0.78, 0.76, 0.72, 1.0],
     },
     "bld_wood_wall": {
         "title": "Russian wooden houses (izbas, private sector, Plyos merchants)",
         "groundType": "WOOD",
-        "colorMap": "/assets/materials/tileable/wood/m_wood_wall/si_wood_wall_b.color.dds",
-        "normalMap": "/assets/materials/tileable/wood/m_wood_wall/si_wood_wall_nm.normal.dds",
-        "diffuseColor": (0.58, 0.48, 0.38),
+        "baseColorMap": "/assets/materials/tileable/wood/weatherboards/t_weatherboards_b.color.dds",
+        "normalMap": "/assets/materials/tileable/wood/weatherboards/t_weatherboards_nm.normal.dds",
+        "roughnessMap": "/assets/materials/tileable/wood/weatherboards/t_weatherboards_r.data.dds",
+        "baseColorFactor": [0.58, 0.48, 0.38, 1.0],
     },
     "bld_roof_tar": {
         "title": "Flat tar roof for apartment blocks and factories",
         "groundType": "ASPHALT",
-        "colorMap": "/assets/materials/tileable/road/m_asphalt_new_01/t_asphalt_b.color.png",
-        "normalMap": "/assets/materials/tileable/road/m_asphalt_new_01/t_asphalt_nm.normal.png",
-        "diffuseColor": (0.20, 0.20, 0.22),
+        "baseColorMap": "/assets/materials/tileable/roofing/asphalt_roof/t_asphalt_roof_b.color.dds",
+        "normalMap": "/assets/materials/tileable/roofing/asphalt_roof/t_asphalt_roof_nm.normal.dds",
+        "roughnessMap": "/assets/materials/tileable/roofing/asphalt_roof/t_asphalt_roof_r.data.dds",
+        "baseColorFactor": [0.20, 0.20, 0.22, 1.0],
     },
     "bld_roof_slate": {
         "title": "Pitched slate roof tiles for houses and churches",
-        "groundType": "ROOF",
-        "colorMap": "/assets/materials/tileable/roof/t_slate_rooftiles_01_b.color.dds",
-        "normalMap": "/assets/materials/tileable/roof/t_slate_rooftiles_01_nm.normal.dds",
-        "diffuseColor": (0.35, 0.35, 0.38),
+        "groundType": "CONCRETE",
+        "baseColorMap": "/assets/materials/tileable/roofing/t_slate_rooftiles_01/t_slate_rooftiles_01_b.color.dds",
+        "normalMap": "/assets/materials/tileable/roofing/t_slate_rooftiles_01/t_slate_rooftiles_01_nm.normal.dds",
+        "roughnessMap": "/assets/materials/tileable/roofing/t_slate_rooftiles_01/t_slate_rooftiles_01_r.data.dds",
+        "baseColorFactor": [0.35, 0.35, 0.38, 1.0],
     },
     "bld_roof_metal": {
         "title": "Sheet metal roofs for industrial and domestic buildings",
         "groundType": "METAL",
-        "colorMap": "/assets/materials/tileable/metal/m_si_metal_roof/si_metal_roof_b.color.dds",
-        "normalMap": "/assets/materials/tileable/metal/m_si_metal_roof/si_metal_roof_nm.normal.dds",
-        "diffuseColor": (0.45, 0.48, 0.52),
+        "baseColorMap": "/assets/materials/tileable/metal/m_si_metal_roof/t_si_metal_roof_b.color.dds",
+        "normalMap": "/assets/materials/tileable/metal/m_si_metal_roof/t_si_metal_roof_nm.normal.dds",
+        "roughnessMap": "/assets/materials/tileable/metal/m_si_metal_roof/t_si_metal_roof_r.data.dds",
+        "baseColorFactor": [0.45, 0.48, 0.52, 1.0],
     },
 }
 
@@ -173,14 +176,16 @@ def build_building_materials_json(
 
     for key, spec in BUILDING_MATERIALS.items():
         stage: dict[str, Any] = {}
-        if "colorMap" in spec:
-            stage["colorMap"] = spec["colorMap"]
+        if "baseColorMap" in spec:
+            stage["baseColorMap"] = spec["baseColorMap"]
+        elif "colorMap" in spec:
+            stage["baseColorMap"] = spec["colorMap"]
         if "normalMap" in spec:
             stage["normalMap"] = spec["normalMap"]
         if "roughnessMap" in spec:
             stage["roughnessMap"] = spec["roughnessMap"]
-        if "specularMap" in spec:
-            stage["specularMap"] = spec["specularMap"]
+        if "baseColorFactor" in spec:
+            stage["baseColorFactor"] = list(spec["baseColorFactor"])
 
         mat_id = str(uuid.uuid5(_BUILDING_MATERIAL_NS, key))
         materials_dict[key] = {
@@ -188,7 +193,7 @@ def build_building_materials_json(
             "mapTo": key,
             "class": "Material",
             "persistentId": mat_id,
-            "Stages": [stage, {}, {}, {}],
+            "Stages": [stage],
             "annotation": "BUILDINGS",
             "groundType": spec.get("groundType", "CONCRETE"),
             "materialTag0": "beamng",
@@ -209,12 +214,11 @@ def build_building_materials_json(
             "persistentId": mat_id,
             "Stages": [
                 {
-                    "colorMap": "/assets/materials/tileable/plaster/m_plaster_float/t_plaster_float_b.color.png",
-                    "normalMap": "/assets/materials/tileable/plaster/m_plaster_float/t_plaster_float_nm.normal.png",
+                    "baseColorMap": "/assets/materials/tileable/plaster/m_plaster_float/t_plaster_float_b.color.dds",
+                    "normalMap": "/assets/materials/tileable/plaster/m_plaster_float/t_plaster_float_nm.normal.dds",
+                    "roughnessMap": "/assets/materials/tileable/plaster/m_plaster_float/t_plaster_float_r.data.dds",
+                    "baseColorFactor": [0.78, 0.76, 0.72, 1.0],
                 },
-                {},
-                {},
-                {},
             ],
             "annotation": "BUILDINGS",
             "groundType": "CONCRETE",
@@ -582,7 +586,7 @@ def _export_buildings_chunked(
                 "decalType": "None",
                 "meshCulling": True,
                 "useInstanceRenderData": True,
-                "annotation": f"BUILDINGS:chunk_{ix}_{iy}:{len(chunk_buildings)}_buildings",
+                "annotation": "BUILDINGS",
             }
         )
 
@@ -658,7 +662,7 @@ def _export_buildings_archetypes(
                 "collisionType": "Visible Mesh Final",
                 "decalType": "None",
                 "useInstanceRenderData": True,
-                "annotation": f"{footprint.klass}:{roof}:{footprint.height_source}:{width:.1f}x{depth:.1f}",
+                "annotation": "BUILDINGS",
             }
         )
 

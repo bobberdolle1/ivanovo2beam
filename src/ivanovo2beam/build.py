@@ -611,6 +611,47 @@ def build_level(
         if config.railways_enabled and railways:
             corridors.extend(railways_to_corridors(railways))
 
+        landcover_polys: dict[str, list[Any]] = {}
+        field_rings = [v.ring for v in vegetation_areas if v.kind in {"scrub", "meadow"}]
+        farmland_rings = []
+        industrial_rings = []
+        residential_rings = []
+        if osm_data is not None and getattr(osm_data, "ways", None):
+            for way in osm_data.ways:
+                if not way.is_closed or len(way.nodes) < 4:
+                    continue
+                lu = way.tags.get("landuse", "")
+                if not lu:
+                    continue
+                coords = osm_data.way_coords(way)
+                if len(coords) < 3:
+                    continue
+                lons = np.asarray([c[0] for c in coords], dtype=np.float64)
+                lats = np.asarray([c[1] for c in coords], dtype=np.float64)
+                xs, ys = config.projection.geo_to_world_array(lons, lats)
+                ring = np.column_stack((xs, ys))
+                if lu in ("farmland", "farmyard", "allotments", "orchard", "meadow", "grass", "greenfield", "recreation_ground"):
+                    farmland_rings.append(ring)
+                elif lu in ("industrial", "commercial", "retail", "construction", "railway"):
+                    industrial_rings.append(ring)
+                elif lu in ("residential",):
+                    residential_rings.append(ring)
+
+        if field_rings or farmland_rings:
+            landcover_polys["Field"] = field_rings + farmland_rings
+
+        forest_rings = [v.ring for v in vegetation_areas if v.kind == "forest"]
+        if forest_rings:
+            landcover_polys["ForestFloor"] = forest_rings
+
+        if residential_rings:
+            landcover_polys["Asphalt_worn"] = residential_rings
+
+        building_rings = [b.ring for b in buildings] if buildings else []
+        if industrial_rings or building_rings:
+            landcover_polys["Concrete"] = industrial_rings + building_rings
+
+        forest_polys = forest_rings if forest_rings else None
         build = build_terrain(
             dem,
             config.projection,
@@ -624,6 +665,8 @@ def build_level(
             max_height_m=level.max_height_m,
             max_grade=config.roads.max_grade,
             water_network=water_network,
+            forest_polygons=forest_polys,
+            landcover_polygons=landcover_polys or None,
             progress=lambda f, m: report(0.42 + 0.30 * f, m),
         )
     durations["terrain"] = time.perf_counter() - stage
@@ -645,7 +688,7 @@ def build_level(
         square_size=level.grid.square_size_m,
         grid_size=build.grid_size,
         terrain_file=f"/levels/{level.id}/theTerrain.ter",
-        base_tex_size=min(4096, level.grid.grid_size),
+        base_tex_size=1024,
         material_texture_set=f"{level.id}TerrainMaterialTextureSet",
     )
     tree.add_group(("level_objects", "terrain"))
@@ -782,24 +825,37 @@ def build_level(
             warnings.append(f"vegetation export failed: {exc}")
     durations["vegetation"] = time.perf_counter() - stage
 
-    # -- spawn point -------------------------------------------------------
-    anchor_x, anchor_y = level.spawn_anchor(config.projection)
-    spawn = _choose_spawn(roads, build, anchor=(anchor_x, anchor_y))
-    add_spawn_point(
-        tree,
-        ("PlayerDropPoints",),
-        key="player_spawn",
-        name="spawn_default",
-        x=spawn[0],
-        y=spawn[1],
-        z=spawn[2] + 1.5,
-    )
-    stats_spawn_anchor = [round(anchor_x, 1), round(anchor_y, 1)]
-    if spawn[3] > 250.0:
-        warnings.append(
-            f"spawn point is {spawn[3]:.0f} m from the configured anchor "
-            f"({anchor_x:.0f}, {anchor_y:.0f}); the nearest drivable road is that far away"
+    # -- spawn points ------------------------------------------------------
+    spawn_presets = [
+        {"key": "player_spawn", "name": "spawn_default", "title": "City Centre (Площадь Революции)", "geo": (40.97393, 56.99987)},
+        {"key": "spawn_pushkin", "name": "spawn_pushkin", "title": "Pushkin Square & Uvod (Площадь Пушкина)", "geo": (40.9740, 56.9935)},
+        {"key": "spawn_bim", "name": "spawn_bim", "title": "BIM Textile Factory (БИМ / Река Уводь)", "geo": (40.9765, 57.0035)},
+        {"key": "spawn_sheremetev", "name": "spawn_sheremetev", "title": "Sheremetevsky Prospekt (Шереметевский проспект)", "geo": (40.9850, 57.0050)},
+        {"key": "spawn_embankment", "name": "spawn_embankment", "title": "Uvod Embankment (Набережная Уводи / Серебряный Город)", "geo": (40.9690, 57.0010)},
+    ]
+
+    spawn_points_info: list[dict[str, Any]] = []
+    stats_spawn_anchor = [0.0, 0.0]
+    for sp in spawn_presets:
+        lon, lat = sp["geo"]
+        anchor_x, anchor_y = config.projection.geo_to_world(lon, lat)
+        spawn = _choose_spawn(roads, build, anchor=(anchor_x, anchor_y))
+        add_spawn_point(
+            tree,
+            ("PlayerDropPoints",),
+            key=sp["key"],
+            name=sp["name"],
+            x=spawn[0],
+            y=spawn[1],
+            z=spawn[2] + 1.5,
         )
+        spawn_points_info.append({
+            "objectname": sp["name"],
+            "translationId": sp["title"],
+            "preview": f"{level.id}_preview.png",
+        })
+        if sp["name"] == "spawn_default":
+            stats_spawn_anchor = [round(anchor_x, 1), round(anchor_y, 1)]
 
     # -- files -------------------------------------------------------------
     stage = time.perf_counter()
@@ -815,6 +871,7 @@ def build_level(
                 f"{build.max_height:.1f} m.",
                 extent_m=extent,
                 default_spawn_point_name="spawn_default",
+                spawn_points=spawn_points_info,
             ),
             indent=2,
             ensure_ascii=False,

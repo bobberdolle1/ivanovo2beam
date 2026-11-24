@@ -458,6 +458,27 @@ def build_sun_and_sky(
         },
     )
 
+    tree.add_object(
+        group_path,
+        {
+            "name": "clouds",
+            "class": "CloudLayer",
+            "persistentId": stable_uuid(tree.level_id, "CloudLayer", "clouds"),
+            "position": [0, 0, origin_z + 800.0],
+            "Textures": [
+                {"texDirection": [0.5, 0.5], "texScale": 1.5, "texSpeed": 0.002},
+                {"texDirection": [0.8, 0.2], "texScale": 3.0, "texSpeed": 0.015},
+                {"texDirection": [0.2, 0.5], "texScale": 4.0, "texSpeed": 0.025},
+            ],
+            "baseColor": [0.95, 0.95, 0.95, 0.9],
+            "coverage": 0.65,
+            "exposure": 1.2,
+            "height": 3.0,
+            "texture": "/levels/east_coast_usa/art/skies/SkyNormals_05.dds",
+            "windSpeed": 0.2,
+        },
+    )
+
 
 def add_spawn_point(
     tree: SceneTree,
@@ -518,7 +539,7 @@ def build_road_object(
     texture_length: float = 50.0,
     render_priority: int = 10,
     break_angle: float = 2.0,
-    distance_fade: tuple[float, float] = (200.0, 50.0),
+    distance_fade: tuple[float, float] = (500.0, 100.0),
     start_end_fade: tuple[float, float] = (5.0, 5.0),
 ) -> dict[str, Any]:
     """Build a ``DecalRoad`` scene object.
