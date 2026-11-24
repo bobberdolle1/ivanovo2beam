@@ -18,6 +18,7 @@ no stage uses an unseeded random number generator.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shutil
 import time
@@ -41,13 +42,39 @@ from ivanovo2beam.beamng.materials import (
     build_materials_json,
     referenced_asset_paths,
 )
+from ivanovo2beam.beamng.preview import generate_level_preview_png
 from ivanovo2beam.beamng.ter import write_ter
 from ivanovo2beam.buildings.export import export_buildings
 from ivanovo2beam.buildings.footprints import extract_buildings
 from ivanovo2beam.osm.merge import merge_osm_data, osm_bbox_tiles
-from ivanovo2beam.roads.build import add_network_to_scene, roads_to_corridors
+from ivanovo2beam.provenance import build_attribution_manifest, write_attribution_files
+from ivanovo2beam.roads.bridges import (
+    build_bridge_geometry,
+    build_bridge_scene_object,
+    compute_bridge_deck_profile,
+    emit_bridges_materials,
+    export_bridge_dae,
+)
+from ivanovo2beam.roads.build import (
+    add_network_to_scene,
+    roads_to_corridors,
+    sample_surface_z,
+)
+from ivanovo2beam.roads.materials import write_road_materials
 from ivanovo2beam.roads.network import extract_roads, road_network_stats
+from ivanovo2beam.roads.railways import (
+    build_railway_geometry,
+    build_railway_scene_object,
+    emit_railways_materials,
+    export_railway_dae,
+    extract_railways,
+    railways_to_corridors,
+)
 from ivanovo2beam.terrain.builder import build_terrain
+from ivanovo2beam.vegetation.extract import extract_vegetation
+from ivanovo2beam.vegetation.forest import export_vegetation
+from ivanovo2beam.water.export import export_water_to_scene
+from ivanovo2beam.water.extract import extract_water
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Callable, Sequence
@@ -115,11 +142,32 @@ class BuildResult:
         if "export" in stats:
             e = stats["export"]
             lines.append(f"  decals      {e['exported']} DecalRoads, {e['nodes']} nodes")
+        if "water" in stats and stats["water"].get("rivers"):
+            w = stats["water"]
+            lines.append(
+                f"  water       {w.get('rivers', 0)} rivers ({w.get('river_length_km', 0.0):.1f} km), "
+                f"{w.get('water_bodies', 0)} bodies ({w.get('water_area_km2', 0.0):.2f} km²)"
+            )
+        if "bridges" in stats and stats["bridges"].get("bridges"):
+            br = stats["bridges"]
+            lines.append(
+                f"  bridges     {br['bridges']} 3D structures ({br.get('total_length_m', 0.0):.0f} m deck)"
+            )
+        if "railways" in stats and stats["railways"].get("railways"):
+            rw = stats["railways"]
+            lines.append(
+                f"  railways    {rw['railways']} 1520mm tracks, {rw.get('length_km', 0.0):.1f} km"
+            )
         if stats.get("buildings", {}).get("buildings"):
             b = stats["buildings"]
             lines.append(
                 f"  buildings   {b['buildings']} placed "
                 f"({b.get('archetypes', 0)} archetypes, {b.get('unique_meshes', 0)} unique)"
+            )
+        if stats.get("vegetation", {}).get("trees"):
+            v = stats["vegetation"]
+            lines.append(
+                f"  vegetation  {v['trees']} trees across {v.get('areas', 0)} areas"
             )
         for warning in self.warnings:
             lines.append(f"  WARNING: {warning}")
@@ -269,6 +317,28 @@ def fetch_level_osm(
     started = time.perf_counter()
     timed_out = False
 
+    # If the local cache already contains a multi-tile extract, reuse it
+    if not force and cache_dir.is_dir():
+        cached_files = sorted(cache_dir.glob("*.osm"))
+        if len(cached_files) >= 10:
+            for i, cp in enumerate(cached_files):
+                if progress is not None:
+                    progress(0.05 + 0.25 * (i / len(cached_files)), f"cached OSM {i + 1}/{len(cached_files)}")
+                with contextlib.suppress(Exception):
+                    extracts.append(parse_osm(cp))
+            if extracts:
+                merged, report = merge_osm_data(extracts)
+                return merged, {
+                    "tiles_requested": len(cached_files),
+                    "tiles_succeeded": len(extracts),
+                    "tiles_failed": 0,
+                    "tiles_skipped": 0,
+                    "budget_exhausted": False,
+                    "fetch_seconds": round(time.perf_counter() - started, 1),
+                    "merge": report.as_dict(),
+                    "merge_summary": f"loaded {len(extracts)} cached extracts",
+                }
+
     for i, (west, south, east, north) in enumerate(tiles):
         if progress is not None:
             progress(0.05 + 0.25 * (i / max(1, len(tiles))), f"OSM tile {i + 1}/{len(tiles)}")
@@ -286,6 +356,12 @@ def fetch_level_osm(
         if time.perf_counter() - started > budget_s and i + 1 < len(tiles):
             timed_out = True
 
+    if not extracts:
+        cached_files = sorted(cache_dir.glob("*.osm"))
+        if cached_files:
+            for cp in cached_files:
+                with contextlib.suppress(Exception):
+                    extracts.append(parse_osm(cp))
     if not extracts:
         raise RuntimeError(
             "every OSM tile failed; the Overpass API may be rate limiting. "
@@ -443,7 +519,7 @@ def build_level(
 
     # -- roads -------------------------------------------------------------
     stage = time.perf_counter()
-    report(0.33, "projecting and classifying roads")
+    report(0.30, "projecting and classifying roads")
     margin = ROAD_RENDER_MARGIN_M
     clip_bounds = (
         origin_x - margin,
@@ -457,12 +533,44 @@ def build_level(
     if not roads:
         warnings.append("no drivable roads were found in the OSM extract")
 
+    # -- water (hydrology) -------------------------------------------------
+    stage = time.perf_counter()
+    water_network = None
+    water_stats: dict[str, Any] = {"enabled": config.water_enabled}
+    if config.water_enabled:
+        report(0.33, "extracting hydrology and water bodies")
+        try:
+            water_network = extract_water(osm_data, config.projection)
+            water_stats.update({
+                "rivers": len(water_network.rivers),
+                "river_length_km": round(water_network.total_river_length_m / 1000.0, 2),
+                "water_bodies": len(water_network.water_bodies),
+                "water_area_km2": round(water_network.total_water_area_m2 / 1e6, 3),
+            })
+        except Exception as exc:
+            warnings.append(f"hydrology extraction failed: {exc}")
+    durations["water"] = time.perf_counter() - stage
+
+    # -- railways ----------------------------------------------------------
+    stage = time.perf_counter()
+    railways: list[Any] = []
+    railway_stats: dict[str, Any] = {"enabled": config.railways_enabled}
+    if config.railways_enabled:
+        report(0.35, "extracting railways and tram lines")
+        try:
+            railways = extract_railways(osm_data, config.projection, clip_bounds=clip_bounds)
+            railway_stats["railways"] = len(railways)
+            railway_stats["length_km"] = round(sum(rw.length_m for rw in railways) / 1000.0, 2)
+        except Exception as exc:
+            warnings.append(f"railway extraction failed: {exc}")
+    durations["railways"] = time.perf_counter() - stage
+
     # -- building footprints -----------------------------------------------
     stage = time.perf_counter()
     buildings: list[Any] = []
     footprint_stats: dict[str, Any] = {}
     if config.buildings_enabled:
-        report(0.35, "extracting building footprints")
+        report(0.38, "extracting building footprints")
         buildings, footprints = extract_buildings(
             osm_data,
             config.projection,
@@ -476,13 +584,33 @@ def build_level(
                 f"{footprints.skipped_relations} multipolygon buildings were skipped; "
                 "only closed ways are assembled into footprints"
             )
-    durations["buildings"] = time.perf_counter() - stage
+    durations["buildings_extract"] = time.perf_counter() - stage
 
-    # -- terrain -----------------------------------------------------------
+    # -- vegetation extraction ---------------------------------------------
     stage = time.perf_counter()
-    report(0.38, "building terrain and grading road corridors")
+    vegetation_areas: list[Any] = []
+    veg_stats: dict[str, Any] = {"enabled": config.vegetation_enabled}
+    if config.vegetation_enabled:
+        report(0.40, "extracting vegetation and forest areas")
+        try:
+            vegetation_areas, v_stats = extract_vegetation(
+                osm_data,
+                config.projection,
+                clip_bounds=clip_bounds,
+            )
+            veg_stats.update(v_stats.as_dict())
+        except Exception as exc:
+            warnings.append(f"vegetation extraction failed: {exc}")
+    durations["vegetation_extract"] = time.perf_counter() - stage
+
+    # -- corridors & terrain -----------------------------------------------
+    stage = time.perf_counter()
+    report(0.42, "building terrain corridors and grading terrain")
     with DemReader(dem_path) as dem:
         corridors = roads_to_corridors(roads, config.roads)
+        if config.railways_enabled and railways:
+            corridors.extend(railways_to_corridors(railways))
+
         build = build_terrain(
             dem,
             config.projection,
@@ -495,7 +623,8 @@ def build_level(
             ground_margin_m=level.ground_margin_m,
             max_height_m=level.max_height_m,
             max_grade=config.roads.max_grade,
-            progress=lambda f, m: report(0.38 + 0.34 * f, m),
+            water_network=water_network,
+            progress=lambda f, m: report(0.42 + 0.30 * f, m),
         )
     durations["terrain"] = time.perf_counter() - stage
     if build.graded_cells == 0 and roads:
@@ -539,16 +668,74 @@ def build_level(
         max_node_spacing_m=max_decal_node_spacing_m,
     )
 
+    # -- water scene objects -----------------------------------------------
+    if water_network is not None:
+        report(0.76, "exporting water scene objects")
+        water_objects_count = export_water_to_scene(tree, water_network)
+        water_stats["scene_objects"] = water_objects_count
+
+    # -- bridges 3D meshes -------------------------------------------------
+    bridge_stats: dict[str, Any] = {"enabled": config.bridges_enabled}
+    if config.bridges_enabled:
+        bridge_roads = [r for r in roads if r.bridge and len(r.points) >= 2]
+        if bridge_roads:
+            report(0.78, f"generating {len(bridge_roads)} 3D bridge structures")
+            bridges_dir = level_dir / "art" / "shapes" / "bridges"
+            bridges_dir.mkdir(parents=True, exist_ok=True)
+            exported_bridges = 0
+            total_bridge_len = 0.0
+            for r in bridge_roads:
+                try:
+                    gz = sample_surface_z(r, build)
+                    deck_z = compute_bridge_deck_profile(r, ground_z=gz)
+                    geom = build_bridge_geometry(r, deck_z)
+                    dae_path = bridges_dir / f"bridge_way{r.osm_id}.dae"
+                    export_bridge_dae(dae_path, geom, f"bridge_way{r.osm_id}")
+                    obj = build_bridge_scene_object(r, level.id)
+                    tree.add_object(("level_objects", "bridges"), obj)
+                    exported_bridges += 1
+                    total_bridge_len += r.length_m
+                except Exception as exc:
+                    warnings.append(f"bridge way {r.osm_id} export failed: {exc}")
+            emit_bridges_materials(level_dir, level.id)
+            bridge_stats["bridges"] = exported_bridges
+            bridge_stats["total_length_m"] = round(total_bridge_len, 1)
+    durations["bridges"] = time.perf_counter() - stage
+
+    # -- railways 3D meshes ------------------------------------------------
+    stage = time.perf_counter()
+    if config.railways_enabled and railways:
+        report(0.80, f"generating {len(railways)} 1520mm railway tracks")
+        railways_dir = level_dir / "art" / "shapes" / "railways"
+        railways_dir.mkdir(parents=True, exist_ok=True)
+        exported_rw = 0
+        for rw in railways:
+            if len(rw.points) >= 2:
+                try:
+                    mesh = build_railway_geometry(rw, roads=roads)
+                    dae_path = railways_dir / f"railway_way{rw.osm_id}.dae"
+                    export_railway_dae(dae_path, mesh, f"railway_way{rw.osm_id}")
+                    obj = build_railway_scene_object(rw, level.id)
+                    tree.add_object(("level_objects", "railways"), obj)
+                    exported_rw += 1
+                except Exception as exc:
+                    warnings.append(f"railway way {rw.osm_id} export failed: {exc}")
+        emit_railways_materials(level_dir, level.id)
+        railway_stats["exported"] = exported_rw
+    durations["railways_export"] = time.perf_counter() - stage
+
     # -- buildings ---------------------------------------------------------
+    stage = time.perf_counter()
     building_stats: dict[str, Any] = {"enabled": config.buildings_enabled}
     if config.buildings_enabled and buildings:
-        report(0.80, f"generating {len(buildings)} buildings")
+        report(0.82, f"generating {len(buildings)} buildings")
         building_objects, building_export = export_buildings(
             buildings,
             build,
             level_id=level.id,
             level_dir=level_dir,
             max_instances=max_buildings,
+            batch_chunks=True,
         )
         for obj in building_objects:
             tree.add_object(("level_objects", "buildings"), obj)
@@ -566,13 +753,43 @@ def build_level(
         stale_shapes = level_dir / "art" / "shapes" / "buildings"
         if stale_shapes.exists():
             shutil.rmtree(stale_shapes)
+    durations["buildings"] = time.perf_counter() - stage
 
+    # -- vegetation export -------------------------------------------------
+    stage = time.perf_counter()
+    veg_export_stats: dict[str, Any] = {"enabled": config.vegetation_enabled}
+    if config.vegetation_enabled and vegetation_areas:
+        report(0.85, f"generating forest and vegetation across {len(vegetation_areas)} areas")
+        water_items = []
+        if water_network:
+            water_items.extend(water_network.rivers)
+            water_items.extend(water_network.water_bodies)
+        try:
+            veg_objects, v_exp = export_vegetation(
+                vegetation_areas,
+                build,
+                level_id=level.id,
+                level_dir=level_dir,
+                roads=roads,
+                buildings=buildings,
+                water=water_items,
+                railways=railways,
+            )
+            for obj in veg_objects:
+                tree.add_object(("level_objects", "vegetation"), obj)
+            veg_export_stats.update(v_exp.as_dict())
+        except Exception as exc:
+            warnings.append(f"vegetation export failed: {exc}")
+    durations["vegetation"] = time.perf_counter() - stage
+
+    # -- spawn point -------------------------------------------------------
     anchor_x, anchor_y = level.spawn_anchor(config.projection)
     spawn = _choose_spawn(roads, build, anchor=(anchor_x, anchor_y))
     add_spawn_point(
         tree,
         ("PlayerDropPoints",),
         key="player_spawn",
+        name="spawn_default",
         x=spawn[0],
         y=spawn[1],
         z=spawn[2] + 1.5,
@@ -585,7 +802,8 @@ def build_level(
         )
 
     # -- files -------------------------------------------------------------
-    report(0.86, "writing level files")
+    stage = time.perf_counter()
+    report(0.88, "writing level files")
     files = tree.render()
     files["info.json"] = (
         json.dumps(
@@ -596,6 +814,7 @@ def build_level(
                 f"Copernicus DEM. Build extent {extent / 1000:.2f} km, vertical range "
                 f"{build.max_height:.1f} m.",
                 extent_m=extent,
+                default_spawn_point_name="spawn_default",
             ),
             indent=2,
             ensure_ascii=False,
@@ -627,7 +846,22 @@ def build_level(
         level_dir / "art" / "terrains" / "main.materials.json",
         build_materials_json(level.id, DEFAULT_MATERIAL_ORDER, base_tex_size=terrain_placement.base_tex_size),
     )
+    write_road_materials(level_dir, level.id)
     terrain_bytes = write_ter(level_dir / "theTerrain.ter", build.to_terrain_file())
+
+    # Generate preview PNG for level selection
+    generate_level_preview_png(level_dir, level.id)
+
+    # Provenance attribution
+    try:
+        manifest = build_attribution_manifest(
+            level.id,
+            dem_sources=[dem_path],
+        )
+        write_attribution_files(manifest, level_dir=level_dir, build_dir=config.build_dir)
+    except Exception as exc:
+        warnings.append(f"attribution manifest generation failed: {exc}")
+
     durations["scene"] = time.perf_counter() - stage
 
     # -- package -----------------------------------------------------------
@@ -642,10 +876,14 @@ def build_level(
         "level_id": level.id,
         "terrain": build.stats,
         "roads": road_stats,
+        "water": water_stats,
+        "railways": railway_stats,
+        "bridges": bridge_stats,
         "osm": osm_stats,
         "export": export_stats,
         "footprints": footprint_stats,
         "buildings": building_stats,
+        "vegetation": veg_export_stats,
         "spawn": {
             "x": spawn[0],
             "y": spawn[1],

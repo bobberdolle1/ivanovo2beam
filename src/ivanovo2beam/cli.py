@@ -15,6 +15,7 @@ stage that produced it. Every stage caches its output under ``.cache/``.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import shutil
 import sys
@@ -174,6 +175,23 @@ def cmd_build(args: argparse.Namespace) -> int:
     from ivanovo2beam.build import build_level
 
     config = _load(args)
+    overrides = {}
+    if getattr(args, "no_buildings", False):
+        overrides["buildings_enabled"] = False
+    if getattr(args, "no_vegetation", False):
+        overrides["vegetation_enabled"] = False
+    elif getattr(args, "with_vegetation", False):
+        overrides["vegetation_enabled"] = True
+    if getattr(args, "no_water", False):
+        overrides["water_enabled"] = False
+    if getattr(args, "no_bridges", False):
+        overrides["bridges_enabled"] = False
+    if getattr(args, "no_railways", False):
+        overrides["railways_enabled"] = False
+
+    if overrides:
+        config = dataclasses.replace(config, **overrides)
+
     console = Console(quiet=args.quiet)
     started = time.perf_counter()
     result = build_level(
@@ -345,6 +363,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="optional cap on exported buildings, largest first",
     )
+    build.add_argument("--no-buildings", action="store_true", help="skip building generation")
+    build.add_argument("--no-vegetation", action="store_true", help="skip vegetation generation")
+    build.add_argument("--with-vegetation", action="store_true", help="enable vegetation generation")
+    build.add_argument("--no-water", action="store_true", help="skip water carving and objects")
+    build.add_argument("--no-bridges", action="store_true", help="skip 3D procedural bridge structures")
+    build.add_argument("--no-railways", action="store_true", help="skip 3D railway tracks")
     build.set_defaults(func=cmd_build)
 
     package = sub.add_parser("package", help="package a built level into a mod zip")

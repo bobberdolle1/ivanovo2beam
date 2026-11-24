@@ -210,6 +210,8 @@ def road_to_decal_object(
         parent=parent,
         over_objects=True,
         gated_road=gated,
+        texture_length=100.0,
+        render_priority=10,
     )
 
     # Populate BeamNG AI navgraph properties
@@ -424,6 +426,7 @@ def generate_lane_markings(
             line_nodes.append([px, py, pz, 0.15])  # 15cm marking width
 
         line_key = f"{base_key}_mark_{k}"
+        tex_len = 3.0 if "discontinue" in material else 10.0
         line_obj: dict[str, Any] = build_road_object(
             level_id,
             key=line_key,
@@ -433,6 +436,8 @@ def generate_lane_markings(
             parent=parent,
             over_objects=True,
             gated_road=False,
+            texture_length=tex_len,
+            render_priority=15,
         )
         line_obj["decalBias"] = 0.01
         line_obj["autoJunction"] = False

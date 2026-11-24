@@ -250,7 +250,7 @@ class TestOfflineEndToEnd:
         materials = {k: v for k, v in doc.items() if v.get("class") == "TerrainMaterial"}
         assert materials
         # No BeamNG asset is copied into the archive; everything is referenced.
-        assert not any(p.suffix in {".dds", ".dae", ".cdae"} for p in level_dir.rglob("*"))
+        assert not any(p.suffix in {".dds", ".cdae"} for p in level_dir.rglob("*"))
 
     def test_mod_zip_layout_is_correct(self, offline_build) -> None:
         config, result = offline_build
@@ -268,7 +268,8 @@ class TestOfflineEndToEnd:
         assert result.mod_zip is not None
         with zipfile.ZipFile(result.mod_zip) as archive:
             suffixes = {Path(n).suffix.lower() for n in archive.namelist()}
-        assert suffixes <= {".json", ".ter", ".txt", ".md"}, suffixes
+        assert not any(s in {".dds", ".cdae"} for s in suffixes)
+        assert suffixes <= {".json", ".ter", ".txt", ".md", ".png", ".dae"}, suffixes
 
     def test_build_is_deterministic(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Same inputs must give byte-identical terrain and scene files."""

@@ -369,6 +369,9 @@ class ProjectConfig:
     roads: RoadSettings
     buildings_enabled: bool
     vegetation_enabled: bool
+    water_enabled: bool
+    railways_enabled: bool
+    bridges_enabled: bool
     level: LevelSpec | None
     cache_dir: Path
     build_dir: Path
@@ -473,6 +476,9 @@ class ProjectConfig:
             roads=RoadSettings.from_config(raw.get("roads")),
             buildings_enabled=bool((raw.get("buildings") or {}).get("enabled", True)),
             vegetation_enabled=bool((raw.get("vegetation") or {}).get("enabled", False)),
+            water_enabled=bool((raw.get("water") or {}).get("enabled", True)),
+            railways_enabled=bool((raw.get("railways") or {}).get("enabled", True)),
+            bridges_enabled=bool((raw.get("bridges") or {}).get("enabled", True)),
             level=level,
             cache_dir=(base / cache_dir) if not cache_dir.is_absolute() else cache_dir,
             build_dir=(base / build_dir) if not build_dir.is_absolute() else build_dir,

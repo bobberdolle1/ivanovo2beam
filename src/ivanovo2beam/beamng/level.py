@@ -311,7 +311,7 @@ def build_info_json(
     region: str = "europe",
     road_rules: dict[str, bool] | None = None,
     spawn_points: Sequence[dict[str, Any]] | dict[str, Any] | None = None,
-    default_spawn_point_name: str | None = None,
+    default_spawn_point_name: str | None = "spawn_default",
 ) -> dict[str, Any]:
     """Build a level's ``info.json``.
 
@@ -357,6 +357,14 @@ def build_info_json(
         info["defaultSpawnPointName"] = default_spawn_point_name
     if spawn_points is not None:
         info["spawnPoints"] = spawn_points
+    elif default_spawn_point_name:
+        info["spawnPoints"] = [
+            {
+                "objectname": default_spawn_point_name,
+                "translationId": "ui.freeroam.spawns.default",
+                "preview": f"{level_id}_preview.png",
+            }
+        ]
     return info
 
 
@@ -456,6 +464,7 @@ def add_spawn_point(
     group_path: Sequence[str],
     *,
     key: str,
+    name: str = "spawn_default",
     x: float,
     y: float,
     z: float,
@@ -467,6 +476,7 @@ def add_spawn_point(
         tree: Scene to populate.
         group_path: Owning group, normally ``PlayerDropPoints``.
         key: Stable key for the deterministic UUID.
+        name: Name of the SpawnSphere object in BeamNG.
         x: World X in metres.
         y: World Y in metres.
         z: World Z in metres.
@@ -478,6 +488,7 @@ def add_spawn_point(
     return tree.add_object(
         group_path,
         {
+            "name": name,
             "class": "SpawnSphere",
             "persistentId": stable_uuid(tree.level_id, "SpawnSphere", key),
             "position": [round(x, 5), round(y, 5), round(z, 5)],
@@ -504,6 +515,11 @@ def build_road_object(
     parent: str,
     over_objects: bool = True,
     gated_road: bool = True,
+    texture_length: float = 50.0,
+    render_priority: int = 10,
+    break_angle: float = 2.0,
+    distance_fade: tuple[float, float] = (200.0, 50.0),
+    start_end_fade: tuple[float, float] = (5.0, 5.0),
 ) -> dict[str, Any]:
     """Build a ``DecalRoad`` scene object.
 
@@ -520,6 +536,11 @@ def build_road_object(
         parent: Owning group name.
         over_objects: Whether the decal draws over placed objects.
         gated_road: Whether AI treats it as a gated road.
+        texture_length: Ground length in metres for one texture repeat.
+        render_priority: Torque3D decal rendering priority.
+        break_angle: Subdivision threshold angle in degrees.
+        distance_fade: (start, end) fade distances in metres.
+        start_end_fade: (start, end) endpoint fade distances in metres.
 
     Returns:
         The object ready for :meth:`SceneTree.add_object`.
@@ -538,12 +559,17 @@ def build_road_object(
         "persistentId": stable_uuid(level_id, "DecalRoad", key),
         "__parent": parent,
         "position": node_list[0][:3],
+        "breakAngle": break_angle,
+        "distanceFade": list(distance_fade),
         "drivability": drivability,
         "gatedRoad": gated_road,
         "improvedSpline": True,
         "material": material,
         "nodes": node_list,
         "overObjects": over_objects,
+        "renderPriority": render_priority,
+        "startEndFade": list(start_end_fade),
+        "textureLength": texture_length,
     }
 
 
