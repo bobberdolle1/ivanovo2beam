@@ -27,18 +27,32 @@ on determinism).
 
 from __future__ import annotations
 
+import binascii
+import hashlib
+import math
+import struct
 import uuid
+import zlib
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+import numpy as np
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Iterable, Mapping
+
+    from numpy.typing import NDArray
 
 #: Namespace for deterministic material UUIDs. A fixed, arbitrary UUID.
 _MATERIAL_NAMESPACE = uuid.UUID("6f9619ff-8b86-d011-b42d-00c04fc964ff")
 
 #: Root of the shared, base-game terrain textures.
 _ASSET_ROOT = "/assets/materials/terrain"
+
+#: Default edge length in pixels for terrain base maps and TerrainMaterialTextureSet.baseTexSize.
+#: Matches shipped BeamNG levels (e.g. template uses [512, 512]), reducing VRAM 4x vs 1024.
+DEFAULT_BASE_TEX_SIZE: int = 512
 
 #: Valid ``groundmodelName`` values observed in shipped levels. Anything else
 #: silently loses the tyre/audio response, so the library is restricted to this
@@ -60,6 +74,9 @@ VALID_GROUNDMODELS = frozenset(
     }
 )
 
+#: Blend distances for the close-up detail texture layer, in metres.
+_DEFAULT_DETAIL_DISTANCES = (0, 0, 35, 70)
+
 #: Blend distances for the macro texture layer, in metres. Copied from the
 #: shipped materials so the large-scale variation fades in the same way.
 _DEFAULT_MACRO_DISTANCES = (0, 10, 100, 3000)
@@ -76,16 +93,21 @@ class TerrainMaterialSpec:
         title: Human-readable description for documentation.
         groundmodel: BeamNG ground model, one of :data:`VALID_GROUNDMODELS`.
         texture_set: Directory under ``/assets/materials/terrain`` holding the
-            5-channel texture set, relative to :data:`_ASSET_ROOT`.
+            5-channel detail texture set, relative to :data:`_ASSET_ROOT`.
         texture_prefix: Filename stem inside ``texture_set``, e.g.
             ``t_grass_01`` for ``t_grass_01_b.png``.
         macro_set: Directory holding the macro texture set.
         macro_prefix: Filename stem inside ``macro_set``.
+        base_color: Representative sRGB colour ``(r, g, b)`` used to generate the
+            level's smooth, tileable ``t_terrain_base_<key>_b.png`` base map.
         base_size: World size in metres the base texture is stretched over.
+        detail_size: World size in metres the close-up detail texture tiles at.
         macro_size: World size in metres the macro texture is stretched over.
         detail_strength: ``[baseColor, roughness]``-style blend strengths applied
             to the detail layer. Defaults suit a subtle detail pass.
         normal_detail_strength: Detail-layer normal strength.
+        detail_distances: Blend distances for the detail layer, in metres.
+        macro_distances: Blend distances for the macro layer, in metres.
         osm_surface: OSM ``surface`` values that select this material.
     """
 
@@ -96,10 +118,14 @@ class TerrainMaterialSpec:
     texture_prefix: str
     macro_set: str
     macro_prefix: str
-    base_size: int = 512
+    base_color: tuple[int, int, int] = (120, 120, 120)
+    base_size: int = 256
+    detail_size: int = 4
     macro_size: int = 64
-    detail_strength: tuple[float, float] = (0.25, 0.25)
-    normal_detail_strength: tuple[float, float] = (0.7, 0.15)
+    detail_strength: tuple[float, float] = (0.25, 0.15)
+    normal_detail_strength: tuple[float, float] = (0.6, 0.15)
+    detail_distances: tuple[int, int, int, int] = _DEFAULT_DETAIL_DISTANCES
+    macro_distances: tuple[int, int, int, int] = _DEFAULT_MACRO_DISTANCES
     osm_surface: tuple[str, ...] = field(default=())
 
     def __post_init__(self) -> None:
@@ -108,6 +134,24 @@ class TerrainMaterialSpec:
                 f"material {self.key!r}: groundmodel {self.groundmodel!r} is not a known "
                 f"BeamNG ground model; expected one of {sorted(VALID_GROUNDMODELS)}"
             )
+
+    def base_channel_paths(self, level_id: str) -> dict[str, str]:
+        """Return the per-level smooth base-layer texture path for every channel.
+
+        In BeamNG's PBR terrain shader, shared ``/assets/materials/terrain/``
+        textures are neutral-grey modulation detail/macro maps; the biome colour
+        must come from ``baseColorBaseTex`` while normal/height/AO/roughness
+        base maps stay smooth so coarse tiling never produces giant pits.
+        """
+        root = f"/levels/{level_id}/art/terrains"
+        slug = self.key.lower()
+        return {
+            "b": f"{root}/t_terrain_base_{slug}_b.png",
+            "nm": f"{root}/t_terrain_base_nm.png",
+            "r": f"{root}/t_terrain_base_r.png",
+            "ao": f"{root}/t_terrain_base_ao.png",
+            "h": f"{root}/t_terrain_base_h.png",
+        }
 
     def channel_paths(self) -> dict[str, str]:
         """Return the shared-texture path for every channel.
@@ -170,7 +214,9 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_asphalt",
             macro_set="asphalt/macro_asphalt",
             macro_prefix="t_macro_asphalt",
-            detail_strength=(0.3, 0.25),
+            base_color=(58, 60, 64),
+            detail_size=3,
+            detail_strength=(0.3, 0.2),
             osm_surface=("asphalt", "paved", "chipseal"),
         ),
         TerrainMaterialSpec(
@@ -181,8 +227,10 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_asphalt_03",
             macro_set="asphalt/macro_asphalt",
             macro_prefix="t_macro_asphalt",
-            detail_strength=(0.45, 0.35),
-            osm_surface=("asphalt",),
+            base_color=(78, 80, 82),
+            detail_size=3,
+            detail_strength=(0.4, 0.3),
+            osm_surface=(),
         ),
         TerrainMaterialSpec(
             key="Concrete",
@@ -192,7 +240,9 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_concrete_damaged",
             macro_set="concrete/macro_concrete",
             macro_prefix="t_macro_concrete",
-            detail_strength=(0.35, 0.3),
+            base_color=(142, 140, 134),
+            detail_size=4,
+            detail_strength=(0.35, 0.25),
             osm_surface=("concrete", "concrete:plates", "paving_stones"),
         ),
         TerrainMaterialSpec(
@@ -201,9 +251,13 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             groundmodel="GRAVEL",
             texture_set="soil/t_gravel",
             texture_prefix="t_gravel",
+            # Shipped BeamNG asset zips spell this directory "soil/macro_clumply"
+            # while the filenames use "t_macro_clumpy_*" (same in east_coast_usa).
             macro_set="soil/macro_clumply",
             macro_prefix="t_macro_clumpy",
-            detail_strength=(0.4, 0.4),
+            base_color=(124, 118, 108),
+            detail_size=3,
+            detail_strength=(0.35, 0.3),
             osm_surface=("gravel", "fine_gravel", "pebblestone", "compacted"),
         ),
         TerrainMaterialSpec(
@@ -214,27 +268,38 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_dirt_crumbly",
             macro_set="soil/macro_clumply",
             macro_prefix="t_macro_clumpy",
+            base_color=(108, 86, 62),
+            detail_size=3,
+            detail_strength=(0.25, 0.2),
             osm_surface=("dirt", "ground", "mud", "earth", "unpaved"),
         ),
         TerrainMaterialSpec(
             key="Grass",
-            title="Meadow and roadside grass",
+            title="Summer meadow and roadside grass",
             groundmodel="GRASS",
             texture_set="grass/t_grass_01",
             texture_prefix="t_grass_01",
             macro_set="grass/macro_grass",
             macro_prefix="t_macro_grass",
+            base_color=(78, 114, 52),
+            detail_size=3,
+            detail_strength=(0.2, 0.1),
+            normal_detail_strength=(0.55, 0.1),
+            detail_distances=(0, 0, 45, 90),
             osm_surface=(),
         ),
         TerrainMaterialSpec(
             key="Field",
-            title="Arable field and dry grass",
+            title="Arable field and summer meadow dry grass",
             groundmodel="GRASS",
             texture_set="grass/t_dirt_dry_grass",
             texture_prefix="t_dirt_dry_grass",
             macro_set="grass/t_macro_dry_grass",
             macro_prefix="t_macro_dry_grass",
-            detail_strength=(0.3, 0.3),
+            base_color=(112, 124, 60),
+            detail_size=4,
+            detail_strength=(0.25, 0.2),
+            detail_distances=(0, 0, 45, 90),
             osm_surface=(),
         ),
         TerrainMaterialSpec(
@@ -245,6 +310,9 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_forest_ground_02",
             macro_set="forest/t_macro_dirt_forest",
             macro_prefix="t_macro_dirt_forest",
+            base_color=(56, 74, 42),
+            detail_size=4,
+            detail_strength=(0.25, 0.2),
             osm_surface=(),
         ),
         TerrainMaterialSpec(
@@ -255,6 +323,9 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_mud",
             macro_set="soil/macro_clumply",
             macro_prefix="t_macro_clumpy",
+            base_color=(74, 62, 48),
+            detail_size=3,
+            detail_strength=(0.25, 0.25),
             osm_surface=(),
         ),
         TerrainMaterialSpec(
@@ -265,6 +336,9 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_dirt_rocky",
             macro_set="rock/macro_rocky",
             macro_prefix="t_macro_rocky",
+            base_color=(102, 102, 100),
+            detail_size=4,
+            detail_strength=(0.3, 0.25),
             osm_surface=("rock",),
         ),
         TerrainMaterialSpec(
@@ -275,6 +349,9 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_sand",
             macro_set="sand/t_macro_sand",
             macro_prefix="t_macro_sand",
+            base_color=(176, 156, 116),
+            detail_size=3,
+            detail_strength=(0.25, 0.2),
             osm_surface=("sand",),
         ),
         TerrainMaterialSpec(
@@ -285,6 +362,9 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_pebbles",
             macro_set="rock/macro_rocky",
             macro_prefix="t_macro_rocky",
+            base_color=(112, 108, 100),
+            detail_size=3,
+            detail_strength=(0.3, 0.25),
             osm_surface=("pebbles",),
         ),
     )
@@ -368,7 +448,7 @@ def build_materials_json(
     level_id: str,
     material_keys: Iterable[str] = DEFAULT_MATERIAL_ORDER,
     *,
-    base_tex_size: int = 1024,
+    base_tex_size: int = DEFAULT_BASE_TEX_SIZE,
     detail_tex_size: int = 1024,
 ) -> dict[str, object]:
     """Build the contents of ``levels/<id>/art/terrains/main.materials.json``.
@@ -392,48 +472,61 @@ def build_materials_json(
     document: dict[str, object] = {}
     for key in keys:
         spec = MATERIAL_LIBRARY[key]
+        base_ch = spec.base_channel_paths(level_id)
         ch = spec.channel_paths()
         macro = spec.macro_channel_paths()
         document[key] = {
             "internalName": spec.key,
             "class": "TerrainMaterial",
             "persistentId": spec.persistent_id(),
-            # Base layer: the coarse, large-scale colour and relief.
-            "baseColorBaseTex": ch["b"],
+            # Base layer: smooth biome colour and flat foundation so coarse
+            # tiling never stretches close-up detail bumps across hundreds of metres.
+            "baseColorBaseTex": base_ch["b"],
             "baseColorBaseTexSize": spec.base_size,
-            "normalBaseTex": ch["nm"],
+            "normalBaseTex": base_ch["nm"],
             "normalBaseTexSize": spec.base_size,
-            "roughnessBaseTex": ch["r"],
+            "roughnessBaseTex": base_ch["r"],
             "roughnessBaseTexSize": spec.base_size,
-            "aoBaseTex": ch["ao"],
+            "aoBaseTex": base_ch["ao"],
             "aoBaseTexSize": spec.base_size,
-            "heightBaseTex": ch["h"],
+            "heightBaseTex": base_ch["h"],
             "heightBaseTexSize": spec.base_size,
-            # Detail layer: close-up break-up.
+            # Detail layer: close-up surface grain (2-4 m tiles, faded at distance).
             "baseColorDetailTex": ch["b"],
+            "baseColorDetailTexSize": spec.detail_size,
             "baseColorDetailStrength": list(spec.detail_strength),
             "normalDetailTex": ch["nm"],
+            "normalDetailTexSize": spec.detail_size,
             "normalDetailStrength": list(spec.normal_detail_strength),
             "roughnessDetailTex": ch["r"],
+            "roughnessDetailTexSize": spec.detail_size,
             "roughnessDetailStrength": [0.3, 0.3],
             "aoDetailTex": ch["ao"],
+            "aoDetailTexSize": spec.detail_size,
+            "aoDetailStrength": [0.35, 0.5],
             "heightDetailTex": ch["h"],
-            # Macro layer: kilometre-scale variation so large fields and
+            "heightDetailTexSize": spec.detail_size,
+            "heightDetailStrength": [0.5, 0.0],
+            "detailDistances": list(spec.detail_distances),
+            "detailDistAtten": [0, 0.9],
+            # Macro layer: medium-scale variation (40-80 m tiles) so fields and
             # forests do not read as one flat repeating tile.
             "baseColorMacroTex": macro["b"],
             "baseColorMacroTexSize": spec.macro_size,
-            "baseColorMacroStrength": [0.1, 0.1],
+            "baseColorMacroStrength": [0.12, 0.15],
             "normalMacroTex": macro["nm"],
             "normalMacroTexSize": spec.macro_size,
-            "normalMacroStrength": [0.2, 0.4],
+            "normalMacroStrength": [0.15, 0.25],
             "roughnessMacroTex": macro["r"],
             "roughnessMacroTexSize": spec.macro_size,
-            "roughnessMacroStrength": [0.15, 0.8],
+            "roughnessMacroStrength": [0.15, 0.4],
             "aoMacroTex": macro["ao"],
             "aoMacroTexSize": spec.macro_size,
+            "aoMacroStrength": [0.2, 0.4],
             "heightMacroTex": macro["h"],
             "heightMacroTexSize": spec.macro_size,
-            "macroDistances": list(_DEFAULT_MACRO_DISTANCES),
+            "heightMacroStrength": [0.0, 0.3],
+            "macroDistances": list(spec.macro_distances),
             # Physics and audio response.
             "groundmodelName": spec.groundmodel,
         }
@@ -447,6 +540,104 @@ def build_materials_json(
         "macroTexSize": [1024, 1024],
     }
     return document
+
+
+def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+    crc = binascii.crc32(chunk_type + data) & 0xFFFFFFFF
+    return struct.pack(">I", len(data)) + chunk_type + data + struct.pack(">I", crc)
+
+
+def _encode_png(pixels: NDArray[np.uint8]) -> bytes:
+    """Encode a 2D grayscale or 3D RGB uint8 array as a deterministic PNG."""
+    if pixels.ndim == 2:
+        height, width = pixels.shape
+        color_type = 0
+        rows = pixels
+    elif pixels.ndim == 3 and pixels.shape[2] == 3:
+        height, width, _ = pixels.shape
+        color_type = 2
+        rows = pixels.reshape(height, width * 3)
+    else:
+        raise ValueError(f"expected (H, W) or (H, W, 3) uint8 array, got {pixels.shape}")
+
+    scanlines = np.empty((height, rows.shape[1] + 1), dtype=np.uint8)
+    scanlines[:, 0] = 0
+    scanlines[:, 1:] = rows
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", ihdr)
+        + _png_chunk(b"IDAT", zlib.compress(scanlines.tobytes(), level=6))
+        + _png_chunk(b"IEND", b"")
+    )
+
+
+def _tileable_color_patch(base_rgb: tuple[int, int, int], seed_key: str, size: int = 256) -> NDArray[np.uint8]:
+    """Create a deterministic, seamlessly tileable base-colour RGB array."""
+    digest = hashlib.sha256(seed_key.encode("utf-8")).digest()
+    seed = int.from_bytes(digest[:8], "little")
+    rng = np.random.default_rng(seed)
+
+    coords = np.linspace(0.0, 2.0 * math.pi, size, endpoint=False, dtype=np.float64)
+    gx, gy = np.meshgrid(coords, coords)
+    field_a = np.zeros((size, size), dtype=np.float64)
+    field_b = np.zeros((size, size), dtype=np.float64)
+
+    for fx, fy, amp in ((1, 0, 0.45), (0, 1, 0.45), (1, 1, 0.35), (2, -1, 0.25), (2, 2, 0.18), (3, -2, 0.12)):
+        pa, pb = rng.uniform(0.0, 2.0 * math.pi, size=2)
+        field_a += amp * np.cos(fx * gx + fy * gy + pa)
+        field_b += amp * np.cos(fx * gx - fy * gy + pb)
+
+    # Normalise to roughly [-1, 1] and apply a gentle +/-9 RGB modulation.
+    norm_a = field_a / 1.8
+    norm_b = field_b / 1.8
+    r = np.clip(base_rgb[0] + norm_a * 8.0 + norm_b * 3.0, 0.0, 255.0)
+    g = np.clip(base_rgb[1] + norm_a * 10.0 - norm_b * 2.0, 0.0, 255.0)
+    b = np.clip(base_rgb[2] + norm_a * 6.0 + norm_b * 4.0, 0.0, 255.0)
+    return np.stack((r, g, b), axis=-1).round().astype(np.uint8)
+
+
+def write_terrain_base_textures(
+    level_dir: Path,
+    material_keys: Iterable[str] = DEFAULT_MATERIAL_ORDER,
+    *,
+    size: int = DEFAULT_BASE_TEX_SIZE,
+) -> list[Path]:
+    """Write smooth per-level ``t_terrain_base_*.png`` textures into ``art/terrains``.
+
+    Args:
+        level_dir: Built level root directory (``levels/<id>``).
+        material_keys: Materials whose base colour textures should be generated.
+        size: Edge length in pixels for each tileable base map texture (matches baseTexSize).
+
+    Returns:
+        List of paths written.
+    """
+    terrains_dir = Path(level_dir) / "art" / "terrains"
+    terrains_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+
+    flat_size = size
+    normal_arr = np.empty((flat_size, flat_size, 3), dtype=np.uint8)
+    normal_arr[:, :] = (128, 128, 255)
+    flat_arrays: tuple[tuple[str, NDArray[np.uint8]], ...] = (
+        ("t_terrain_base_nm.png", normal_arr),
+        ("t_terrain_base_h.png", np.full((flat_size, flat_size), 128, dtype=np.uint8)),
+        ("t_terrain_base_ao.png", np.full((flat_size, flat_size), 235, dtype=np.uint8)),
+        ("t_terrain_base_r.png", np.full((flat_size, flat_size), 215, dtype=np.uint8)),
+    )
+    for filename, arr in flat_arrays:
+        out = terrains_dir / filename
+        out.write_bytes(_encode_png(arr))
+        written.append(out)
+
+    for key in material_keys:
+        spec = MATERIAL_LIBRARY[key]
+        out = terrains_dir / f"t_terrain_base_{spec.key.lower()}_b.png"
+        out.write_bytes(_encode_png(_tileable_color_patch(spec.base_color, spec.key, size=size)))
+        written.append(out)
+
+    return written
 
 
 def referenced_asset_paths(material_keys: Iterable[str] = DEFAULT_MATERIAL_ORDER) -> tuple[str, ...]:

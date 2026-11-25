@@ -68,6 +68,299 @@ MAX_DECAL_NODE_SPACING_M = 6.0
 #: Maximum segment length in metres before splitting into chained segments.
 MAX_SEGMENT_LENGTH_M = 1500.0
 
+#: Maximum axis-aligned bounding-box span (X, Y, Z) per DecalRoad, in metres.
+#: BeamNG's SceneStaticDecalRoadManager packs positions in a 2048 m local range;
+#: capping each DecalRoad's bbox span at 800 m keeps every leaf safely inside.
+MAX_SEGMENT_BBOX_SPAN_M = 800.0
+
+#: Minimum XY separation between consecutive DecalRoad nodes, in metres.
+_MIN_NODE_DIST_M = 1e-3
+
+#: Tiered DecalRoad LOD settings ``(distance_fade, break_angle, detail)`` by highway class.
+_DECAL_LOD_BY_CLASS: dict[str, tuple[tuple[float, float], float, float]] = {
+    "motorway": ((650.0, 150.0), 3.0, 0.3),
+    "motorway_link": ((650.0, 150.0), 3.0, 0.3),
+    "trunk": ((650.0, 150.0), 3.0, 0.3),
+    "trunk_link": ((650.0, 150.0), 3.0, 0.3),
+    "primary": ((650.0, 150.0), 3.0, 0.3),
+    "primary_link": ((650.0, 150.0), 3.0, 0.3),
+    "secondary": ((450.0, 100.0), 3.5, 0.35),
+    "secondary_link": ((450.0, 100.0), 3.5, 0.35),
+    "tertiary": ((450.0, 100.0), 3.5, 0.35),
+    "tertiary_link": ((450.0, 100.0), 3.5, 0.35),
+    "residential": ((250.0, 75.0), 4.0, 0.4),
+    "unclassified": ((250.0, 75.0), 4.0, 0.4),
+    "service": ((120.0, 40.0), 4.5, 0.5),
+    "living_street": ((120.0, 40.0), 4.5, 0.5),
+    "track": ((120.0, 40.0), 4.5, 0.5),
+    "path": ((120.0, 40.0), 4.5, 0.5),
+}
+_DEFAULT_DECAL_LOD: tuple[tuple[float, float], float, float] = ((120.0, 40.0), 4.5, 0.5)
+
+
+def _decal_lod_for(highway: str) -> tuple[tuple[float, float], float, float]:
+    """Return ``(distance_fade, break_angle, detail)`` for an OSM highway class."""
+    return _DECAL_LOD_BY_CLASS.get(highway, _DEFAULT_DECAL_LOD)
+
+
+def _simplify_3d_z_aware(
+    pts: np.ndarray,
+    *,
+    tol_xy: float = 0.5,
+    tol_z: float = 0.10,
+    max_seg_m: float = 250.0,
+) -> np.ndarray:
+    """Simplify a 3D polyline while bounding both XY deviation and vertical Z error.
+
+    Also preserves intermediate points so no simplified segment exceeds ``max_seg_m``,
+    keeping subsequent bounding-box splitting accurate on long straightaways.
+    """
+    n = pts.shape[0]
+    if n <= 2:
+        return pts
+
+    keep = np.zeros(n, dtype=bool)
+    keep[0] = True
+    keep[-1] = True
+    stack: list[tuple[int, int]] = [(0, n - 1)]
+
+    while stack:
+        i0, i1 = stack.pop()
+        if i1 - i0 <= 1:
+            continue
+        ax, ay, az = float(pts[i0, 0]), float(pts[i0, 1]), float(pts[i0, 2])
+        bx, by, bz = float(pts[i1, 0]), float(pts[i1, 1]), float(pts[i1, 2])
+        abx = bx - ax
+        aby = by - ay
+        abz = bz - az
+        len2 = abx * abx + aby * aby
+        chord_len = math.sqrt(len2)
+
+        sub = pts[i0 + 1 : i1]
+        if len2 <= 1e-12:
+            d_xy = np.hypot(sub[:, 0] - ax, sub[:, 1] - ay)
+            dz = np.abs(sub[:, 2] - az)
+        else:
+            t = np.clip(((sub[:, 0] - ax) * abx + (sub[:, 1] - ay) * aby) / len2, 0.0, 1.0)
+            proj_x = ax + t * abx
+            proj_y = ay + t * aby
+            proj_z = az + t * abz
+            d_xy = np.hypot(sub[:, 0] - proj_x, sub[:, 1] - proj_y)
+            dz = np.abs(sub[:, 2] - proj_z)
+
+        scores = np.maximum(d_xy / tol_xy, dz / tol_z)
+        rel_idx = int(np.argmax(scores))
+        max_score = float(scores[rel_idx])
+        if max_score > 1.0:
+            split = i0 + 1 + rel_idx
+            keep[split] = True
+            stack.append((i0, split))
+            stack.append((split, i1))
+        elif max_seg_m > 0.0 and chord_len > max_seg_m:
+            # Keep the vertex closest to the chord midpoint so long straightaways remain splittable
+            mid_idx = i0 + 1 + (i1 - i0 - 1) // 2
+            keep[mid_idx] = True
+            stack.append((i0, mid_idx))
+            stack.append((mid_idx, i1))
+
+    return pts[keep]
+
+
+def _sanitize_xy_points(
+    points: np.ndarray,
+    extra: np.ndarray | None = None,
+    *,
+    min_dist_m: float = _MIN_NODE_DIST_M,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    """Drop non-finite vertices and consecutive duplicate XY coordinates."""
+    pts = np.asarray(points, dtype=np.float64)
+    if pts.ndim != 2 or pts.shape[0] == 0:
+        return np.empty((0, 2), dtype=np.float64), (np.empty(0, dtype=np.float64) if extra is not None else None)
+
+    valid = np.isfinite(pts[:, 0]) & np.isfinite(pts[:, 1])
+    ext: np.ndarray | None = None
+    if extra is not None and len(extra) == pts.shape[0]:
+        ext = np.asarray(extra, dtype=np.float64)
+        valid &= np.isfinite(ext)
+
+    pts = pts[valid, :2]
+    if ext is not None:
+        ext = ext[valid]
+
+    if pts.shape[0] < 2:
+        return pts, ext
+
+    keep = np.ones(pts.shape[0], dtype=bool)
+    last_x, last_y = float(pts[0, 0]), float(pts[0, 1])
+    for i in range(1, pts.shape[0]):
+        dx = float(pts[i, 0]) - last_x
+        dy = float(pts[i, 1]) - last_y
+        if math.hypot(dx, dy) < min_dist_m:
+            keep[i] = False
+        else:
+            last_x, last_y = float(pts[i, 0]), float(pts[i, 1])
+
+    pts = pts[keep]
+    if ext is not None:
+        ext = ext[keep]
+    return pts, ext
+
+
+def _sanitize_xyz_points(
+    points: np.ndarray,
+    *,
+    min_dist_m: float = _MIN_NODE_DIST_M,
+) -> np.ndarray:
+    """Drop non-finite 3D vertices and consecutive duplicate XY coordinates."""
+    pts = np.asarray(points, dtype=np.float64)
+    if pts.ndim != 2 or pts.shape[0] == 0:
+        return np.empty((0, 3), dtype=np.float64)
+
+    valid = np.all(np.isfinite(pts[:, :3]), axis=1)
+    pts = pts[valid, :3]
+    if pts.shape[0] < 2:
+        return pts
+
+    keep = np.ones(pts.shape[0], dtype=bool)
+    last_x, last_y = float(pts[0, 0]), float(pts[0, 1])
+    for i in range(1, pts.shape[0]):
+        dx = float(pts[i, 0]) - last_x
+        dy = float(pts[i, 1]) - last_y
+        if math.hypot(dx, dy) < min_dist_m:
+            keep[i] = False
+        else:
+            last_x, last_y = float(pts[i, 0]), float(pts[i, 1])
+    return pts[keep]
+
+
+def _bbox_span(pts: np.ndarray) -> float:
+    """Return the maximum X/Y/Z bounding-box span of a point array."""
+    if pts.shape[0] == 0:
+        return 0.0
+    mins = np.min(pts, axis=0)
+    maxs = np.max(pts, axis=0)
+    return float(np.max(maxs - mins))
+
+
+def _split_points_by_span(
+    pts: np.ndarray,
+    max_segment_length_m: float,
+    max_bbox_span_m: float,
+) -> list[np.ndarray]:
+    """Split a 3D polyline into contiguous slices bounded by arc length and bbox span."""
+    n = pts.shape[0]
+    if n < 2:
+        return []
+
+    deltas = np.diff(pts[:, :2], axis=0)
+    seg_lengths = np.hypot(deltas[:, 0], deltas[:, 1])
+    total_len = float(seg_lengths.sum())
+
+    if total_len <= max_segment_length_m and _bbox_span(pts) <= max_bbox_span_m:
+        return [pts]
+
+    slices: list[np.ndarray] = []
+    start_idx = 0
+    while start_idx < n - 1:
+        current_len = 0.0
+        min_xyz = pts[start_idx].copy()
+        max_xyz = pts[start_idx].copy()
+        end_idx = start_idx
+        while end_idx < n - 1:
+            step = float(seg_lengths[end_idx])
+            nxt = pts[end_idx + 1]
+            cand_min = np.minimum(min_xyz, nxt)
+            cand_max = np.maximum(max_xyz, nxt)
+            cand_span = float(np.max(cand_max - cand_min))
+            if (current_len + step > max_segment_length_m or cand_span > max_bbox_span_m) and end_idx > start_idx:
+                break
+            current_len += step
+            min_xyz = cand_min
+            max_xyz = cand_max
+            end_idx += 1
+        slices.append(pts[start_idx : end_idx + 1])
+        start_idx = end_idx
+    return slices
+
+
+def _straighten_shallow_bridge_xy(pts: np.ndarray, *, max_lat_dev_m: float = 0.05, min_turn_deg: float = 0.3) -> np.ndarray:
+    """Snap near-collinear bridge vertices in XY onto their chord to avoid degenerate miter joints."""
+    if pts.shape[0] < 3:
+        return pts
+    out = pts.copy()
+    cos_thresh = math.cos(math.radians(min_turn_deg))
+    for i in range(1, out.shape[0] - 1):
+        ax, ay = float(out[i - 1, 0]), float(out[i - 1, 1])
+        px, py = float(out[i, 0]), float(out[i, 1])
+        bx, by = float(out[i + 1, 0]), float(out[i + 1, 1])
+        v1x, v1y = px - ax, py - ay
+        v2x, v2y = bx - px, by - py
+        l1 = math.hypot(v1x, v1y)
+        l2 = math.hypot(v2x, v2y)
+        abx, aby = bx - ax, by - ay
+        lab2 = abx * abx + aby * aby
+        if l1 < 1e-6 or l2 < 1e-6 or lab2 < 1e-12:
+            continue
+        cos_turn = (v1x * v2x + v1y * v2y) / (l1 * l2)
+        t = max(0.0, min(1.0, ((px - ax) * abx + (py - ay) * aby) / lab2))
+        proj_x = ax + t * abx
+        proj_y = ay + t * aby
+        lat_dev = math.hypot(px - proj_x, py - proj_y)
+        if lat_dev < max_lat_dev_m and cos_turn >= cos_thresh:
+            out[i, 0] = proj_x
+            out[i, 1] = proj_y
+    return out
+
+
+def _prepare_road_points_3d(
+    road: Road,
+    *,
+    ground_z: np.ndarray | None = None,
+    terrain_build: object | None = None,
+    max_node_spacing_m: float = MAX_DECAL_NODE_SPACING_M,
+    max_bbox_span_m: float = MAX_SEGMENT_BBOX_SPAN_M,
+) -> np.ndarray:
+    """Sanitize, densify, attach Z coordinates, and Z-aware simplify a road polyline."""
+    pts_2d, gz = _sanitize_xy_points(road.points, ground_z)
+    if pts_2d.shape[0] < 2:
+        return np.empty((0, 3), dtype=np.float64)
+
+    if terrain_build is not None:
+        if road.bridge:
+            from ivanovo2beam.roads.bridges import compute_bridge_deck_profile
+
+            raw_gz = sample_points_z(pts_2d, terrain_build)
+            if gz is not None and len(gz) == pts_2d.shape[0]:
+                raw_gz = gz
+            # Temporarily compute deck profile on sanitized bridge vertices
+            from dataclasses import replace
+
+            bridge_road = replace(road, points=pts_2d)
+            deck_z = compute_bridge_deck_profile(bridge_road, ground_z=raw_gz)
+            pts_3d = _densify_with_z(pts_2d, deck_z, max_node_spacing_m)
+        else:
+            from ivanovo2beam.roads.network import densify
+
+            d2 = densify(pts_2d, max_node_spacing_m)
+            z_vals = sample_points_z(d2, terrain_build)
+            pts_3d = np.column_stack((d2, z_vals))
+    elif gz is not None and len(gz) == pts_2d.shape[0]:
+        pts_3d = _densify_with_z(pts_2d, gz, max_node_spacing_m)
+    else:
+        from ivanovo2beam.roads.network import densify
+
+        d2 = densify(pts_2d, max_node_spacing_m)
+        # No elevation known: place the decal at zero and let the terrain own it.
+        pts_3d = np.column_stack((d2, np.zeros(d2.shape[0])))
+
+    clean = _sanitize_xyz_points(pts_3d)
+    max_seg = min(250.0, max(1.0, max_bbox_span_m * 0.5))
+    tol_z = 0.15 if road.bridge else 0.10
+    simplified = _simplify_3d_z_aware(clean, tol_xy=0.5, tol_z=tol_z, max_seg_m=max_seg)
+    if road.bridge and simplified.shape[0] >= 3:
+        simplified = _straighten_shallow_bridge_xy(simplified)
+    return simplified
+
 
 def corridor_half_width_for(road: Road, settings: RoadSettings) -> float:
     """Return the graded corridor half-width for a road, in metres.
@@ -109,6 +402,11 @@ def roads_to_corridors(
             continue
         half_width = road.half_width_m
         corridor_half = corridor_half_width_for(road, settings)
+        shoulder_material = (
+            "Grass"
+            if road.material_key in {"Asphalt", "Asphalt_worn", "Concrete"}
+            else ("Dirt" if road.material_key == "Dirt" else "Gravel")
+        )
         corridors.append(
             RoadCorridor(
                 points=road.points,
@@ -118,7 +416,7 @@ def roads_to_corridors(
                 # Bridges and tunnels must not flatten the ground beneath them.
                 grade_terrain=not (road.bridge or road.tunnel),
                 material_key=road.material_key,
-                shoulder_material_key="Gravel",
+                shoulder_material_key=shoulder_material,
                 key=f"way{road.osm_id}",
             )
         )
@@ -130,6 +428,7 @@ def road_to_decal_object(
     level_id: str,
     *,
     ground_z: np.ndarray | None = None,
+    terrain_build: object | None = None,
     max_node_spacing_m: float = MAX_DECAL_NODE_SPACING_M,
     key: str | None = None,
     points_3d: np.ndarray | None = None,
@@ -143,6 +442,8 @@ def road_to_decal_object(
         ground_z: Optional elevation for each input vertex, in metres. When
             given, nodes follow the graded terrain surface, which is what makes
             the decal sit exactly on the road instead of floating.
+        terrain_build: Optional built terrain used to sample Z at every
+            densified node instead of linearly interpolating sparse vertices.
         max_node_spacing_m: Maximum spacing between exported nodes.
         key: Stable object key override. Defaults to ``f"way{road.osm_id}"``.
         points_3d: Pre-computed ``(n, 3)`` node coordinates.
@@ -154,21 +455,20 @@ def road_to_decal_object(
     """
     if road.tunnel:
         return None
+    if not math.isfinite(road.width_m) or road.width_m <= 0.0:
+        return None
 
     from ivanovo2beam.beamng.level import build_road_object
 
     if points_3d is not None:
-        points = points_3d
+        points = _sanitize_xyz_points(points_3d)
     else:
-        points = road.points
-        if ground_z is not None and len(ground_z) == points.shape[0]:
-            points = _densify_with_z(points, np.asarray(ground_z, dtype=np.float64), max_node_spacing_m)
-        else:
-            from ivanovo2beam.roads.network import densify
-
-            d2 = densify(points, max_node_spacing_m)
-            # No elevation known: place the decal at zero and let the terrain own it.
-            points = np.column_stack((d2, np.zeros(d2.shape[0])))
+        points = _prepare_road_points_3d(
+            road,
+            ground_z=ground_z,
+            terrain_build=terrain_build,
+            max_node_spacing_m=max_node_spacing_m,
+        )
 
     if points.shape[0] < 2:
         return None
@@ -201,6 +501,10 @@ def road_to_decal_object(
     nodes = [[float(p[0]), float(p[1]), float(p[2]) + z_offset, float(road.width_m)] for p in points]
 
     object_key = key if key is not None else f"way{road.osm_id}"
+    distance_fade, break_angle, detail = _decal_lod_for(road.highway)
+    if road.bridge:
+        break_angle = min(break_angle, 1.5)
+        detail = min(detail, 0.25)
     obj: dict[str, Any] = build_road_object(
         level_id,
         key=object_key,
@@ -208,14 +512,17 @@ def road_to_decal_object(
         material=road.decal_material,
         drivability=drivability,
         parent=parent,
-        over_objects=True,
+        over_objects=bool(road.bridge),
         gated_road=gated,
         texture_length=100.0,
         render_priority=10,
+        break_angle=break_angle,
+        distance_fade=distance_fade,
     )
 
-    # Populate BeamNG AI navgraph properties
+    # Populate BeamNG AI navgraph and LOD properties
     obj["name"] = object_key
+    obj["detail"] = detail
     obj["oneWay"] = bool(road.oneway)
     obj["autoLanes"] = False
     obj["lanesLeft"] = 0 if road.oneway else max(1, road.lanes // 2)
@@ -234,21 +541,27 @@ def road_to_decal_objects(
     level_id: str,
     *,
     ground_z: np.ndarray | None = None,
+    terrain_build: object | None = None,
     max_node_spacing_m: float = MAX_DECAL_NODE_SPACING_M,
     max_segment_length_m: float = MAX_SEGMENT_LENGTH_M,
+    max_bbox_span_m: float = MAX_SEGMENT_BBOX_SPAN_M,
     parent: str = "road_network",
 ) -> list[dict[str, object]]:
-    """Build DecalRoad scene object(s) for a road, splitting if > 1500m.
+    """Build DecalRoad scene object(s) for a road, splitting by length and bbox span.
 
-    Highways longer than 1500m are split into chained segments (way<id>_0, way<id>_1)
-    to prevent packed-vertex-range overflow in BeamNG.
+    Highways exceeding ``max_segment_length_m`` or ``max_bbox_span_m`` are split
+    into chained segments (``way<id>_0``, ``way<id>_1``) to prevent
+    packed-vertex-range overflow in BeamNG's ``SceneStaticDecalRoadManager``.
 
     Args:
         road: The road to export.
         level_id: Level identifier for deterministic UUIDs.
         ground_z: Elevation along vertices.
+        terrain_build: Optional built terrain used to sample Z at every
+            densified node.
         max_node_spacing_m: Spacing between nodes.
-        max_segment_length_m: Maximum segment length before splitting (default 1500m).
+        max_segment_length_m: Maximum segment arc length before splitting.
+        max_bbox_span_m: Maximum axis-aligned bounding-box span before splitting.
         parent: Owning group name.
 
     Returns:
@@ -257,48 +570,29 @@ def road_to_decal_objects(
     if road.tunnel:
         return []
 
-    points = road.points
-    if ground_z is not None and len(ground_z) == points.shape[0]:
-        pts = _densify_with_z(points, np.asarray(ground_z, dtype=np.float64), max_node_spacing_m)
-    else:
-        from ivanovo2beam.roads.network import densify
-
-        d2 = densify(points, max_node_spacing_m)
-        pts = np.column_stack((d2, np.zeros(d2.shape[0])))
-
+    pts = _prepare_road_points_3d(
+        road,
+        ground_z=ground_z,
+        terrain_build=terrain_build,
+        max_node_spacing_m=max_node_spacing_m,
+        max_bbox_span_m=max_bbox_span_m,
+    )
     if pts.shape[0] < 2:
         return []
 
-    deltas = np.diff(pts[:, :2], axis=0)
-    seg_lengths = np.hypot(deltas[:, 0], deltas[:, 1])
-    total_len = float(seg_lengths.sum())
-
-    if total_len <= max_segment_length_m:
+    slices = _split_points_by_span(pts, max_segment_length_m, max_bbox_span_m)
+    if len(slices) == 1:
         obj = road_to_decal_object(
             road,
             level_id,
-            points_3d=pts,
+            points_3d=slices[0],
             key=f"way{road.osm_id}",
             parent=parent,
         )
         return [obj] if obj is not None else []
 
-    # Split into chained segments
     objects: list[dict[str, object]] = []
-    start_idx = 0
-    seg_idx = 0
-    n = pts.shape[0]
-
-    while start_idx < n - 1:
-        current_len = 0.0
-        end_idx = start_idx
-        while end_idx < n - 1:
-            step = float(seg_lengths[end_idx])
-            if current_len + step > max_segment_length_m and end_idx > start_idx:
-                break
-            current_len += step
-            end_idx += 1
-        sub_pts = pts[start_idx : end_idx + 1]
+    for seg_idx, sub_pts in enumerate(slices):
         obj = road_to_decal_object(
             road,
             level_id,
@@ -308,10 +602,21 @@ def road_to_decal_objects(
         )
         if obj is not None:
             objects.append(obj)
-        start_idx = end_idx
-        seg_idx += 1
-
     return objects
+
+
+def _should_generate_markings(road: Road) -> bool:
+    """Return whether a road receives GOST lane/centerline decal markings."""
+    if not road.drivable or road.tunnel:
+        return False
+    if road.lanes >= 4:
+        return True
+    return (
+        not road.oneway
+        and road.lanes == 2
+        and road.highway in {"motorway", "trunk", "primary"}
+        and road.width_m >= 8.0
+    )
 
 
 def generate_lane_markings(
@@ -324,8 +629,10 @@ def generate_lane_markings(
     clip_distance_m: float = 8.0,
     parent_key: str | None = None,
     parent: str = "road_network",
+    max_segment_length_m: float = MAX_SEGMENT_LENGTH_M,
+    max_bbox_span_m: float = MAX_SEGMENT_BBOX_SPAN_M,
 ) -> list[dict[str, object]]:
-    """Generate multi-lane GOST markings for roads with lanes >= 4.
+    """Generate GOST markings for multi-lane roads (lanes >= 4) and wide 2-lane highways.
 
     Following the MapNG pattern, white center and lane overlay DecalRoads
     (``m_line_white`` / ``m_line_white_discontinue``) are clipped 8m back from junctions.
@@ -339,25 +646,31 @@ def generate_lane_markings(
         clip_distance_m: Distance in metres to clip markings back from junctions.
         parent_key: Base key for naming overlay lines.
         parent: Scene parent group.
+        max_segment_length_m: Maximum marking segment arc length.
+        max_bbox_span_m: Maximum marking axis-aligned bounding-box span.
 
     Returns:
         List of overlay DecalRoad scene objects.
     """
-    if road.lanes < 4 or not road.drivable or road.tunnel:
+    if not _should_generate_markings(road):
         return []
-    if points_3d.shape[0] < 2:
+    if not math.isfinite(road.width_m) or road.width_m <= 0.0:
+        return []
+
+    clean_pts = _sanitize_xyz_points(points_3d)
+    if clean_pts.shape[0] < 2:
         return []
 
     from ivanovo2beam.beamng.level import build_road_object
 
-    deltas = np.diff(points_3d[:, :2], axis=0)
+    deltas = np.diff(clean_pts[:, :2], axis=0)
     seg_lens = np.hypot(deltas[:, 0], deltas[:, 1])
     total_len = float(seg_lens.sum())
 
     start_clip = clip_distance_m if is_start_junction else 0.0
     end_clip = total_len - (clip_distance_m if is_end_junction else 0.0)
 
-    if end_clip - start_clip < 2.0:
+    if end_clip - start_clip < 12.0:
         return []
 
     cum_dist = np.concatenate(([0.0], np.cumsum(seg_lens)))
@@ -371,8 +684,8 @@ def generate_lane_markings(
         d0 = float(cum_dist[idx])
         seg_len = float(seg_lens[idx])
         t = 0.0 if seg_len <= 1e-6 else (target_d - d0) / seg_len
-        p0 = points_3d[idx]
-        p1 = points_3d[idx + 1]
+        p0 = clean_pts[idx]
+        p1 = clean_pts[idx + 1]
         return (
             float(p0[0] + t * (p1[0] - p0[0])),
             float(p0[1] + t * (p1[1] - p0[1])),
@@ -383,18 +696,18 @@ def generate_lane_markings(
     for i in range(len(cum_dist)):
         d = float(cum_dist[i])
         if start_clip < d < end_clip:
-            resampled_pts.append((float(points_3d[i, 0]), float(points_3d[i, 1]), float(points_3d[i, 2])))
+            resampled_pts.append((float(clean_pts[i, 0]), float(clean_pts[i, 1]), float(clean_pts[i, 2])))
     resampled_pts.append(point_at_dist(end_clip))
 
-    clipped_pts = np.asarray(resampled_pts, dtype=np.float64)
+    clipped_pts = _sanitize_xyz_points(np.asarray(resampled_pts, dtype=np.float64))
     if clipped_pts.shape[0] < 2:
         return []
 
     # Calculate tangent and 2D unit normal vectors
     p_diff = np.diff(clipped_pts[:, :2], axis=0)
     p_lens = np.hypot(p_diff[:, 0], p_diff[:, 1])
-    p_lens[p_lens < 1e-6] = 1.0
-    tangents_seg = p_diff / p_lens[:, None]
+    safe_p_lens = np.where(p_lens < 1e-6, 1.0, p_lens)
+    tangents_seg = p_diff / safe_p_lens[:, None]
 
     normals = np.zeros((clipped_pts.shape[0], 2), dtype=np.float64)
     normals[0] = [-tangents_seg[0, 1], tangents_seg[0, 0]]
@@ -402,7 +715,12 @@ def generate_lane_markings(
     if clipped_pts.shape[0] > 2:
         mid_tangents = (tangents_seg[:-1] + tangents_seg[1:]) * 0.5
         mid_lens = np.hypot(mid_tangents[:, 0], mid_tangents[:, 1])
-        mid_lens[mid_lens < 1e-6] = 1.0
+        # Fall back to the incoming segment tangent on 180-degree reversals
+        degenerate = mid_lens < 1e-6
+        if np.any(degenerate):
+            mid_tangents[degenerate] = tangents_seg[:-1][degenerate]
+            mid_lens = np.hypot(mid_tangents[:, 0], mid_tangents[:, 1])
+            mid_lens = np.where(mid_lens < 1e-6, 1.0, mid_lens)
         mid_tangents /= mid_lens[:, None]
         normals[1:-1] = np.column_stack((-mid_tangents[:, 1], mid_tangents[:, 0]))
 
@@ -414,37 +732,45 @@ def generate_lane_markings(
 
     for k in range(1, num_lanes):
         offset = -road.width_m * 0.5 + k * lane_width
-        is_center = (not road.oneway) and (k == num_lanes // 2)
+        is_center = (num_lanes >= 4) and (not road.oneway) and (k == num_lanes // 2)
         material = "m_line_white" if is_center else "m_line_white_discontinue"
 
-        line_nodes: list[list[float]] = []
-        for j in range(clipped_pts.shape[0]):
-            nx, ny = float(normals[j, 0]), float(normals[j, 1])
-            px = float(clipped_pts[j, 0] + offset * nx)
-            py = float(clipped_pts[j, 1] + offset * ny)
-            pz = float(clipped_pts[j, 2] + 0.01)  # 1cm above road surface
-            line_nodes.append([px, py, pz, 0.15])  # 15cm marking width
-
-        line_key = f"{base_key}_mark_{k}"
-        tex_len = 8.0 if "discontinue" in material else 10.0
-        line_obj: dict[str, Any] = build_road_object(
-            level_id,
-            key=line_key,
-            nodes=line_nodes,
-            material=material,
-            drivability=0.0,
-            parent=parent,
-            over_objects=True,
-            gated_road=False,
-            texture_length=tex_len,
-            render_priority=15,
-            distance_fade=(150.0, 50.0),
+        raw_line = np.column_stack(
+            (
+                clipped_pts[:, 0] + offset * normals[:, 0],
+                clipped_pts[:, 1] + offset * normals[:, 1],
+                clipped_pts[:, 2] + 0.01,
+            )
         )
-        line_obj["decalBias"] = 0.01
-        line_obj["autoJunction"] = False
-        line_obj["autoLanes"] = False
-        line_obj["oneWay"] = bool(road.oneway)
-        markings.append(line_obj)
+        clean_line = _sanitize_xyz_points(raw_line)
+        if clean_line.shape[0] < 2:
+            continue
+
+        line_slices = _split_points_by_span(clean_line, max_segment_length_m, max_bbox_span_m)
+        tex_len = 8.0 if "discontinue" in material else 10.0
+
+        for seg_idx, sub_line in enumerate(line_slices):
+            line_nodes = [[float(p[0]), float(p[1]), float(p[2]), 0.15] for p in sub_line]
+            line_key = f"{base_key}_mark_{k}" if len(line_slices) == 1 else f"{base_key}_mark_{k}_{seg_idx}"
+            line_obj: dict[str, Any] = build_road_object(
+                level_id,
+                key=line_key,
+                nodes=line_nodes,
+                material=material,
+                drivability=0.0,
+                parent=parent,
+                over_objects=bool(road.bridge),
+                gated_road=False,
+                texture_length=tex_len,
+                render_priority=15,
+                distance_fade=(150.0, 50.0),
+            )
+            line_obj["name"] = line_key
+            line_obj["decalBias"] = 0.03
+            line_obj["autoJunction"] = False
+            line_obj["autoLanes"] = False
+            line_obj["oneWay"] = bool(road.oneway)
+            markings.append(line_obj)
 
     return markings
 
@@ -483,30 +809,25 @@ def _densify_with_z(
     return np.asarray(out, dtype=np.float64)
 
 
-def sample_surface_z(road: Road, build: object) -> np.ndarray:
-    """Sample the built terrain along a road's centreline.
-
-    DecalRoad nodes must lie on the graded surface, otherwise the ribbon
-    visibly floats over dips or disappears into crests.
-
-    Args:
-        road: The road whose centreline to sample.
-        build: A :class:`~ivanovo2beam.terrain.builder.TerrainBuild`.
-
-    Returns:
-        ``(n,)`` elevations in metres, one per centreline vertex.
-    """
+def sample_points_z(points: np.ndarray, build: object) -> np.ndarray:
+    """Sample built terrain elevations at arbitrary ``(n, 2)`` world XY points."""
     elevations = build.elevations  # type: ignore[attr-defined]
     origin_x = build.origin_x  # type: ignore[attr-defined]
     origin_y = build.origin_y  # type: ignore[attr-defined]
     cell = build.cell_size_m  # type: ignore[attr-defined]
-    n = elevations.shape[0]
+    rows, cols = elevations.shape[:2]
 
-    gx = (road.points[:, 0] - origin_x) / cell
-    gy = (road.points[:, 1] - origin_y) / cell
+    if points.shape[0] == 0:
+        return np.empty(0, dtype=np.float64)
+    if rows < 2 or cols < 2:
+        fill = float(elevations[0, 0]) if elevations.size else 0.0
+        return np.full(points.shape[0], fill, dtype=np.float64)
 
-    c0 = np.clip(np.floor(gx).astype(np.int64), 0, n - 2)
-    r0 = np.clip(np.floor(gy).astype(np.int64), 0, n - 2)
+    gx = (points[:, 0] - origin_x) / cell
+    gy = (points[:, 1] - origin_y) / cell
+
+    c0 = np.clip(np.floor(gx).astype(np.int64), 0, cols - 2)
+    r0 = np.clip(np.floor(gy).astype(np.int64), 0, rows - 2)
     c1 = c0 + 1
     r1 = r0 + 1
 
@@ -521,6 +842,22 @@ def sample_surface_z(road: Road, build: object) -> np.ndarray:
     z0 = z00 * (1.0 - tx) + z01 * tx
     z1 = z10 * (1.0 - tx) + z11 * tx
     return z0 * (1.0 - ty) + z1 * ty
+
+
+def sample_surface_z(road: Road, build: object) -> np.ndarray:
+    """Sample the built terrain along a road's centreline.
+
+    DecalRoad nodes must lie on the graded surface, otherwise the ribbon
+    visibly floats over dips or disappears into crests.
+
+    Args:
+        road: The road whose centreline to sample.
+        build: A :class:`~ivanovo2beam.terrain.builder.TerrainBuild`.
+
+    Returns:
+        ``(n,)`` elevations in metres, one per centreline vertex.
+    """
+    return sample_points_z(road.points, build)
 
 
 def add_network_to_scene(
@@ -547,25 +884,24 @@ def add_network_to_scene(
     skipped = 0
     nodes = 0
 
-    # Build vertex connection map to identify junctions for marking clipping
+    # Build vertex connection map (including interior vertices for T-junctions,
+    # deduplicating per road so closed loops do not self-flag as junctions).
     vertex_counts: dict[tuple[int, int], int] = {}
     for r in roads:
         if r.drivable and not r.tunnel and r.points.shape[0] >= 2:
-            p0 = (round(float(r.points[0, 0] * 2)), round(float(r.points[0, 1] * 2)))
-            p1 = (round(float(r.points[-1, 0] * 2)), round(float(r.points[-1, 1] * 2)))
-            vertex_counts[p0] = vertex_counts.get(p0, 0) + 1
-            vertex_counts[p1] = vertex_counts.get(p1, 0) + 1
+            seen_verts: set[tuple[int, int]] = set()
+            for pt in r.points:
+                if math.isfinite(float(pt[0])) and math.isfinite(float(pt[1])):
+                    seen_verts.add((round(float(pt[0] * 2)), round(float(pt[1] * 2))))
+            for v in seen_verts:
+                vertex_counts[v] = vertex_counts.get(v, 0) + 1
 
     for road in roads:
-        try:
-            ground_z = sample_surface_z(road, build)
-        except Exception:  # pragma: no cover - defensive; shape mismatches only
-            ground_z = None
-
+        terrain_arg: object | None = build if hasattr(build, "elevations") else None
         objs = road_to_decal_objects(
             road,
             tree.level_id,
-            ground_z=ground_z,
+            terrain_build=terrain_arg,
             max_node_spacing_m=max_node_spacing_m,
             parent=group_path[-1] if group_path else "road_network",
         )
@@ -578,8 +914,8 @@ def add_network_to_scene(
             exported += 1
             nodes += len(obj["nodes"])  # type: ignore[arg-type]
 
-        # Multi-lane GOST markings for roads with lanes >= 4
-        if road.lanes >= 4 and road.drivable and not road.tunnel:
+        # Multi-lane and wide 2-lane highway GOST markings
+        if _should_generate_markings(road):
             p0 = (round(float(road.points[0, 0] * 2)), round(float(road.points[0, 1] * 2)))
             p1 = (round(float(road.points[-1, 0] * 2)), round(float(road.points[-1, 1] * 2)))
             is_start_junc = vertex_counts.get(p0, 0) > 1

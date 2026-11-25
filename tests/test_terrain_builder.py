@@ -68,11 +68,13 @@ class TestSampleDemOntoGrid:
                 self.lats: list[float] = []
 
             def sample_array(self, lons, lats):
-                self.lats.append(float(np.ravel(lats)[0]))
+                arr = np.asarray(lats, dtype=np.float64).reshape(-1, 4)
+                self.lats.extend(arr[:, 0].tolist())
                 return np.zeros(np.shape(lons))
 
         dem = LatRecorder()
         sample_dem_onto_grid(dem, projection, 0.0, 0.0, 4, 1000.0)
+        assert len(dem.lats) == 4
         assert dem.lats == sorted(dem.lats), "latitude must increase with row index"
 
     def test_grid_coordinates_round_trip_through_the_projection(self, projection) -> None:
@@ -85,11 +87,14 @@ class TestSampleDemOntoGrid:
 
         class Capture:
             def sample_array(self, lons, lats):
-                captured.append((float(np.ravel(lons)[0]), float(np.ravel(lats)[0])))
+                lon_rows = np.asarray(lons, dtype=np.float64).reshape(-1, 3)
+                lat_rows = np.asarray(lats, dtype=np.float64).reshape(-1, 3)
+                for r in range(lon_rows.shape[0]):
+                    captured.append((float(lon_rows[r, 0]), float(lat_rows[r, 0])))
                 return np.zeros(np.shape(lons))
 
         sample_dem_onto_grid(Capture(), projection, -1000.0, -2000.0, 3, 500.0)
-        assert len(captured) == 3  # one call per row
+        assert len(captured) == 3
         expected = [(-1000.0, -2000.0), (-1000.0, -1500.0), (-1000.0, -1000.0)]
         for (lon, lat), (want_x, want_y) in zip(captured, expected, strict=True):
             got_x, got_y = projection.geo_to_world(lon, lat)
@@ -487,6 +492,29 @@ class TestGradeCorridors:
         assert elevations[0].min() < elevations[1].min() < elevations[3].min()
         np.testing.assert_allclose(elevations[5], 100.0)
 
+    def test_zero_shoulder_corridor_still_grades_and_paints(self) -> None:
+        size, cell = 32, 10.0
+        elevations = self._grid(size, 100.0)
+        layers = self._layers(size)
+        corridor = RoadCorridor(
+            points=np.array([[0.0, 160.0], [310.0, 160.0]]),
+            half_width_m=8.0,
+            corridor_half_width_m=8.0,
+            surface_z=np.array([110.0, 110.0]),
+        )
+        graded, _ = grade_corridors(
+            elevations,
+            layers,
+            {"Asphalt": 5, "Gravel": 8},
+            [corridor],
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=cell,
+        )
+        assert graded > 0
+        np.testing.assert_allclose(elevations[16, 5:25], 110.0, atol=0.01)
+        assert (layers[16, 5:25] == 5).all()
+
 
 class TestBuildTerrain:
     def test_flat_dem_produces_a_valid_terrain_file(self, projection) -> None:
@@ -869,29 +897,70 @@ class TestForestCanopyStripping:
         assert layers[60, 60] == mat_idx["ForestFloor"]
 
     def test_build_terrain_with_forest_canopy_and_road_grading(self, projection) -> None:
-        """Road cut through woods must not sit in a 20m trench when canopy is stripped."""
+        """Road cut through woods must follow canopy-stripped ground, not canopy top."""
         wood_poly = np.array([
-            [200.0, 200.0],
-            [600.0, 200.0],
-            [600.0, 600.0],
-            [200.0, 600.0],
-            [200.0, 200.0],
+            [195.0, 195.0],
+            [605.0, 195.0],
+            [605.0, 605.0],
+            [195.0, 605.0],
+            [195.0, 195.0],
         ], dtype=np.float64)
 
-        # Sloped DEM with forest
-        dem = FlatDem(115.0)
+        class CanopyDem:
+            def sample_array(self, lons, lats):
+                xs, ys = projection.geo_to_world_array(np.asarray(lons), np.asarray(lats))
+                in_forest = (xs >= 195.0) & (xs <= 605.0) & (ys >= 195.0) & (ys <= 605.0)
+                return np.where(in_forest, 114.0, 100.0)
 
+        corridor = RoadCorridor(
+            points=np.array([[100.0, 400.0], [700.0, 400.0]]),
+            half_width_m=5.0,
+            corridor_half_width_m=15.0,
+            key="forest_road",
+        )
         build = build_terrain(
-            dem,
+            CanopyDem(),
             projection,
             origin_x=0.0,
             origin_y=0.0,
             grid_size=128,
             cell_size_m=10.0,
+            corridors=[corridor],
             forest_polygons=[wood_poly],
-            canopy_height_m=15.0,
         )
         assert build.stats.get("forest_cells", 0) > 0
+        assert build.stats.get("canopy_height_m", 0.0) == pytest.approx(14.0, abs=0.5)
+        # Road profile and graded carriageway inside forest must sit at ~100m, not 114m.
+        assert corridor.surface_z is not None
+        assert float(corridor.surface_z.max()) < 103.0
+        assert build.elevations[40, 40] == pytest.approx(100.0, abs=1.0)
+
+    def test_custom_material_order_guards_missing_keys(self, projection) -> None:
+        """Water carving and canopy stripping must not emit out-of-range layer indices."""
+        from ivanovo2beam.water.extract import RiverChannel, WaterNetwork
+
+        river = RiverChannel(
+            osm_id=1,
+            name="R",
+            waterway_type="river",
+            points=np.array([[100.0, 200.0], [500.0, 200.0]]),
+            width_m=12.0,
+            depth_m=2.0,
+            z_water=np.array([100.0, 100.0]),
+        )
+        wood_poly = np.array([[200.0, 400.0], [400.0, 400.0], [400.0, 600.0], [200.0, 600.0], [200.0, 400.0]])
+        build = build_terrain(
+            FlatDem(100.0),
+            projection,
+            origin_x=0.0,
+            origin_y=0.0,
+            grid_size=128,
+            cell_size_m=10.0,
+            material_order=("Grass", "Asphalt"),
+            water_network=WaterNetwork(rivers=[river]),
+            forest_polygons=[wood_poly],
+        )
+        assert int(build.layers.max()) < 2
 
 
 class TestLandcoverAndSatelliteSupport:

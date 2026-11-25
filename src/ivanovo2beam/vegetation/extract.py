@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from shapely.geometry import LineString, MultiPolygon, Polygon
-from shapely.ops import linemerge, polygonize
+from shapely.geometry import LineString, MultiPolygon, Polygon, box
+from shapely.ops import linemerge, polygonize, unary_union
 from shapely.validation import make_valid
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -104,43 +104,89 @@ def _classify_vegetation(tags: dict[str, str]) -> str | None:
     return None
 
 
-def _clean_ring(
-    points: NDArray[np.float64], tolerance_m: float
-) -> NDArray[np.float64] | None:
-    """Validate, close, and simplify a ring."""
-    if points.shape[0] < 3:
+def _orient_ring(coords: NDArray[np.float64], *, ccw: bool) -> NDArray[np.float64]:
+    """Return ring coordinates oriented counter-clockwise (ccw=True) or clockwise (ccw=False)."""
+    if coords.shape[0] < 4:
+        return coords
+    signed_area = float(
+        0.5 * np.sum(coords[:-1, 0] * coords[1:, 1] - coords[1:, 0] * coords[:-1, 1])
+    )
+    if (ccw and signed_area < 0) or (not ccw and signed_area > 0):
+        return coords[::-1].copy()
+    return coords
+
+
+def _extract_polygons(geom: Any) -> list[Polygon]:
+    """Extract all non-empty valid Polygon parts from any Shapely geometry."""
+    if geom is None or geom.is_empty:
+        return []
+    if isinstance(geom, Polygon):
+        return [geom] if geom.area > 0 else []
+    if isinstance(geom, MultiPolygon):
+        return [g for g in geom.geoms if isinstance(g, Polygon) and not g.is_empty and g.area > 0]
+    if hasattr(geom, "geoms"):
+        out: list[Polygon] = []
+        for g in geom.geoms:
+            out.extend(_extract_polygons(g))
+        return out
+    return []
+
+
+def _polygon_to_rings(
+    poly: Polygon,
+) -> tuple[NDArray[np.float64], tuple[NDArray[np.float64], ...]] | None:
+    """Convert a Shapely Polygon into CCW exterior ring and CW hole rings."""
+    ext = _orient_ring(np.asarray(poly.exterior.coords, dtype=np.float64), ccw=True)
+    if ext.shape[0] < 4:
         return None
+    holes: list[NDArray[np.float64]] = []
+    for interior in poly.interiors:
+        h = _orient_ring(np.asarray(interior.coords, dtype=np.float64), ccw=False)
+        if h.shape[0] >= 4:
+            holes.append(h)
+    return ext, tuple(holes)
+
+
+def _clean_polygon(points: NDArray[np.float64], tolerance_m: float) -> list[Polygon]:
+    """Validate, close, and simplify a ring into one or more valid Polygons."""
+    if points.shape[0] < 3:
+        return []
     closed = points
     if not np.array_equal(points[0], points[-1]):
         closed = np.vstack((points, points[0]))
     if closed.shape[0] < 4:
-        return None
+        return []
 
-    poly = Polygon(closed)
-    if not poly.is_valid:
-        poly = make_valid(poly)
-        if isinstance(poly, MultiPolygon):
-            poly = max(poly.geoms, key=lambda g: g.area)
-        if not isinstance(poly, Polygon) or poly.is_empty:
-            return None
+    geom: Any = Polygon(closed)
+    if not geom.is_valid:
+        geom = make_valid(geom)
 
-    if poly.area <= 0:
-        return None
+    polys = _extract_polygons(geom)
+    if not polys:
+        return []
 
     if tolerance_m > 0:
-        poly = poly.simplify(tolerance_m, preserve_topology=True)
-        if not isinstance(poly, Polygon) or poly.area <= 0:
-            return None
+        simplified: list[Polygon] = []
+        for poly in polys:
+            simp = poly.simplify(tolerance_m, preserve_topology=True)
+            if not simp.is_valid:
+                simp = make_valid(simp)
+            simplified.extend(_extract_polygons(simp))
+        polys = simplified
 
-    coords = np.asarray(poly.exterior.coords, dtype=np.float64)
-    if coords.shape[0] < 4:
+    return polys
+
+
+def _clean_ring(
+    points: NDArray[np.float64], tolerance_m: float
+) -> NDArray[np.float64] | None:
+    """Validate, close, and simplify a ring (returning largest polygon exterior)."""
+    polys = _clean_polygon(points, tolerance_m)
+    if not polys:
         return None
-
-    # Ensure counter-clockwise exterior
-    signed_area = float(0.5 * np.sum(coords[:-1, 0] * coords[1:, 1] - coords[1:, 0] * coords[:-1, 1]))
-    if signed_area < 0:
-        coords = coords[::-1].copy()
-    return coords
+    poly = max(polys, key=lambda g: g.area)
+    coords = _orient_ring(np.asarray(poly.exterior.coords, dtype=np.float64), ccw=True)
+    return coords if coords.shape[0] >= 4 else None
 
 
 def _assemble_vegetation_multipolygon(
@@ -176,18 +222,20 @@ def _assemble_vegetation_multipolygon(
     if not outers:
         return []
 
+    outer_polys: list[Polygon] = []
     try:
         merged_outer = linemerge(outers)
-        outer_polys = list(polygonize(merged_outer))
+        outer_polys = [p for p in polygonize(merged_outer) if p.area > 0]
     except Exception:
         outer_polys = []
 
     if not outer_polys:
         for line in outers:
             if line.is_ring and len(line.coords) >= 4:
-                p = Polygon(line)
-                if p.is_valid and p.area > 0:
-                    outer_polys.append(p)
+                geom: Any = Polygon(line)
+                if not geom.is_valid:
+                    geom = make_valid(geom)
+                outer_polys.extend(_extract_polygons(geom))
 
     if not outer_polys:
         return []
@@ -196,46 +244,133 @@ def _assemble_vegetation_multipolygon(
     if inners:
         try:
             merged_inner = linemerge(inners)
-            inner_polys = list(polygonize(merged_inner))
+            inner_polys = [p for p in polygonize(merged_inner) if p.area > 0]
         except Exception:
-            pass
+            inner_polys = []
         if not inner_polys:
             for line in inners:
                 if line.is_ring and len(line.coords) >= 4:
-                    p = Polygon(line)
-                    if p.is_valid and p.area > 0:
-                        inner_polys.append(p)
+                    geom_i: Any = Polygon(line)
+                    if not geom_i.is_valid:
+                        geom_i = make_valid(geom_i)
+                    inner_polys.extend(_extract_polygons(geom_i))
+
+    # Validate outer shells without premature hole-punching from nested outer rings
+    valid_outers: list[Polygon] = []
+    for p in outer_polys:
+        shell = Polygon(p.exterior)
+        if not shell.is_valid:
+            valid_outers.extend(_extract_polygons(make_valid(shell)))
+        elif shell.area > 0:
+            valid_outers.append(shell)
+
+    # Assign each inner clearing to its smallest enclosing outer shell whose area > inner.area
+    inners_by_outer: dict[int, list[Polygon]] = {i: [] for i in range(len(valid_outers))}
+    for inner in inner_polys:
+        fixed_inners = _extract_polygons(make_valid(inner)) if not inner.is_valid else [inner]
+        for fi in fixed_inners:
+            rep = fi.representative_point()
+            candidates = [
+                (idx, op.area)
+                for idx, op in enumerate(valid_outers)
+                if op.area > fi.area and op.covers(rep)
+            ]
+            if candidates:
+                best_idx = min(candidates, key=lambda item: item[1])[0]
+                inners_by_outer[best_idx].append(fi)
 
     assembled: list[Polygon] = []
-    for outer_poly in outer_polys:
-        if not outer_poly.is_valid or outer_poly.area <= 0:
-            continue
-        holes = []
-        for inner in inner_polys:
-            if outer_poly.contains(inner.representative_point()):
-                holes.append(inner.exterior.coords)
-        try:
-            poly = Polygon(outer_poly.exterior.coords, holes)
-            if not poly.is_valid:
-                poly = make_valid(poly)
-            if isinstance(poly, MultiPolygon):
-                assembled.extend([p for p in poly.geoms if p.area > 0])
-            elif isinstance(poly, Polygon) and poly.area > 0:
-                assembled.append(poly)
-        except Exception:
+    for idx, outer_poly in enumerate(valid_outers):
+        assigned = inners_by_outer[idx]
+        if not assigned:
             assembled.append(outer_poly)
+            continue
+        try:
+            cut_geom: Any = outer_poly.difference(unary_union(assigned))
+            if not cut_geom.is_valid:
+                cut_geom = make_valid(cut_geom)
+            assembled.extend(_extract_polygons(cut_geom))
+        except Exception:
+            # Fallback to direct hole construction before dropping
+            holes = [fi.exterior.coords for fi in assigned]
+            poly_fb: Any = Polygon(outer_poly.exterior.coords, holes)
+            if not poly_fb.is_valid:
+                poly_fb = make_valid(poly_fb)
+            assembled.extend(_extract_polygons(poly_fb))
 
     if simplify_tolerance_m > 0:
         simplified: list[Polygon] = []
         for poly in assembled:
             simp = poly.simplify(simplify_tolerance_m, preserve_topology=True)
-            if isinstance(simp, Polygon) and simp.area > 0:
-                simplified.append(simp)
-            elif isinstance(simp, MultiPolygon):
-                simplified.extend([p for p in simp.geoms if p.area > 0])
+            if not simp.is_valid:
+                simp = make_valid(simp)
+            simplified.extend(_extract_polygons(simp))
         assembled = simplified
 
     return assembled
+
+
+def _append_clipped_polygons(
+    polys: list[Polygon],
+    *,
+    clip_box: Polygon | None,
+    min_area_m2: float,
+    osm_id_base: int,
+    kind: str,
+    leaf_type: str | None,
+    name: str,
+    areas: list[VegetationArea],
+    stats: VegetationStats,
+    is_relation: bool,
+) -> None:
+    """Clip polygons to bounds, validate winding, and append VegetationArea records."""
+    part_idx = 0
+    for poly in polys:
+        if poly.is_empty or poly.area <= 0:
+            continue
+
+        target_polys: list[Polygon]
+        if clip_box is not None:
+            if not poly.intersects(clip_box):
+                continue
+            clipped = poly.intersection(clip_box)
+            target_polys = _extract_polygons(clipped)
+        else:
+            target_polys = [poly]
+
+        for tp in target_polys:
+            area_m2 = float(tp.area)
+            if area_m2 < min_area_m2:
+                stats.skipped_area += 1
+                continue
+
+            rings = _polygon_to_rings(tp)
+            if rings is None:
+                stats.skipped_invalid += 1
+                continue
+            ring, holes = rings
+
+            if is_relation:
+                oid = -(abs(osm_id_base) * 1_000_000 + part_idx + 1)
+            else:
+                oid = osm_id_base if part_idx == 0 else (osm_id_base * 1_000_000 + part_idx)
+            part_idx += 1
+
+            areas.append(
+                VegetationArea(
+                    osm_id=oid,
+                    ring=ring,
+                    kind=kind,
+                    holes=holes,
+                    area_m2=area_m2,
+                    leaf_type=leaf_type,
+                    name=name,
+                )
+            )
+            if is_relation:
+                stats.relations += 1
+            else:
+                stats.ways += 1
 
 
 def extract_vegetation(
@@ -248,12 +383,14 @@ def extract_vegetation(
 ) -> tuple[list[VegetationArea], VegetationStats]:
     """Extract vegetation areas (forests, scrub, meadows) from OSM data.
 
-    Supports both closed ways and multipolygon relations with inner clearings.
+    Supports closed ways, linear ``natural=tree_row`` ways (buffered to narrow
+    belts), and multipolygon relations with inner clearings.
     """
     stats = VegetationStats()
     areas: list[VegetationArea] = []
     ways_by_id: dict[int, OsmWay] = {w.id: w for w in osm.ways}
-    relation_way_ids: set[int] = set()
+    relation_outer_way_ids: set[int] = set()
+    clip_box = box(*clip_bounds) if clip_bounds is not None else None
 
     # 1. Process multipolygon relations
     for relation in osm.relations:
@@ -269,89 +406,72 @@ def extract_vegetation(
         if not polys:
             continue
 
-        for _, ref, _ in relation.members:
-            relation_way_ids.add(ref)
+        for mtype, ref, role in relation.members:
+            if mtype == "way" and role in {"outer", ""}:
+                relation_outer_way_ids.add(ref)
 
-        leaf_type = relation.tags.get("leaf_type")
-        name = relation.tags.get("name", "")
+        _append_clipped_polygons(
+            polys,
+            clip_box=clip_box,
+            min_area_m2=min_area_m2,
+            osm_id_base=relation.id,
+            kind=kind,
+            leaf_type=relation.tags.get("leaf_type"),
+            name=relation.tags.get("name", ""),
+            areas=areas,
+            stats=stats,
+            is_relation=True,
+        )
 
-        for p_idx, poly in enumerate(polys):
-            area_m2 = float(poly.area)
-            if area_m2 < min_area_m2:
-                stats.skipped_area += 1
-                continue
-
-            ring = np.asarray(poly.exterior.coords, dtype=np.float64)
-            # Ensure counter-clockwise exterior
-            signed_a = float(0.5 * np.sum(ring[:-1, 0] * ring[1:, 1] - ring[1:, 0] * ring[:-1, 1]))
-            if signed_a < 0:
-                ring = ring[::-1].copy()
-
-            holes = tuple(np.asarray(h.coords, dtype=np.float64) for h in poly.interiors)
-
-            if clip_bounds is not None:
-                x0, y0, x1, y1 = clip_bounds
-                cx = float(ring[:, 0].mean())
-                cy = float(ring[:, 1].mean())
-                if not (x0 <= cx <= x1 and y0 <= cy <= y1):
-                    stats.skipped_invalid += 1
-                    continue
-
-            v_area = VegetationArea(
-                osm_id=-relation.id if p_idx == 0 else -abs(relation.id * 1000 + p_idx),
-                ring=ring,
-                kind=kind,
-                holes=holes,
-                area_m2=area_m2,
-                leaf_type=leaf_type,
-                name=name,
-            )
-            areas.append(v_area)
-            stats.relations += 1
-
-    # 2. Process closed ways
+    # 2. Process closed ways and linear tree_row ways
     for way in osm.ways:
-        if not way.is_closed or way.id in relation_way_ids:
+        if way.id in relation_outer_way_ids:
             continue
         kind = _classify_vegetation(dict(way.tags))
         if kind is None:
             continue
 
+        is_tree_row = (
+            not way.is_closed
+            and way.tags.get("natural", "").strip().lower() == "tree_row"
+        )
+        if not way.is_closed and not is_tree_row:
+            continue
+
         coords = osm.way_coords(way)
-        if len(coords) < 3:
+        min_pts = 2 if is_tree_row else 3
+        if len(coords) < min_pts:
             continue
         lons = np.asarray([c[0] for c in coords], dtype=np.float64)
         lats = np.asarray([c[1] for c in coords], dtype=np.float64)
         xs, ys = projection.geo_to_world_array(lons, lats)
-        ring = _clean_ring(np.column_stack((xs, ys)), simplify_tolerance_m)
-        if ring is None:
+        pts = np.column_stack((xs, ys))
+
+        if is_tree_row:
+            line = LineString(pts)
+            if line.is_empty or line.length <= 0:
+                stats.skipped_invalid += 1
+                continue
+            polys = _extract_polygons(line.buffer(3.0, cap_style="flat"))
+        else:
+            polys = _clean_polygon(pts, simplify_tolerance_m)
+
+        if not polys:
             stats.skipped_invalid += 1
             continue
 
-        area_m2 = float(Polygon(ring).area)
-        if area_m2 < min_area_m2:
-            stats.skipped_area += 1
-            continue
-
-        if clip_bounds is not None:
-            x0, y0, x1, y1 = clip_bounds
-            cx = float(ring[:, 0].mean())
-            cy = float(ring[:, 1].mean())
-            if not (x0 <= cx <= x1 and y0 <= cy <= y1):
-                stats.skipped_invalid += 1
-                continue
-
-        v_area = VegetationArea(
-            osm_id=way.id,
-            ring=ring,
+        _append_clipped_polygons(
+            polys,
+            clip_box=clip_box,
+            min_area_m2=min_area_m2,
+            osm_id_base=way.id,
             kind=kind,
-            holes=(),
-            area_m2=area_m2,
             leaf_type=way.tags.get("leaf_type"),
             name=way.tags.get("name", ""),
+            areas=areas,
+            stats=stats,
+            is_relation=False,
         )
-        areas.append(v_area)
-        stats.ways += 1
 
     for a in areas:
         stats.by_kind[a.kind] = stats.by_kind.get(a.kind, 0) + 1

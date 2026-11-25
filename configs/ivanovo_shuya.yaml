@@ -10,9 +10,9 @@
 #   * build and load behaviour at a grid size 4x the MVP
 #
 # The level is a square, because a BeamNG TerrainBlock must be square, centred on
-# the midpoint of the two cities so that both fit inside it. 8192 vertices at
-# 4.0 m spacing spans 32.76 km, which leaves roughly 4.5 km of margin beyond
-# Shuya and the same beyond Ivanovo.
+# the midpoint of the two cities so that both fit inside it. 4096 vertices at
+# 8.0 m spacing spans 32.76 km, which leaves roughly 4.5 km of margin beyond
+# Shuya and the same beyond Ivanovo with sharp road corridors and 48 MiB .ter.
 #
 # The spawn point is anchored on Ivanovo, not on the level centre. The centre is
 # farmland halfway between the two cities; the whole point of the level is to
@@ -59,6 +59,9 @@ level:
     grid_size: 4096
     square_size_m: 8.0
   ground_margin_m: 8.0
+  # Summer visual atmosphere: midday sun (12:00 noon), positive axial tilt (+23.44°)
+  time_of_day: 0.5
+  axis_tilt: 23.44
 
 # Feature flags
 buildings:

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import shutil
 import time
 import zipfile
@@ -41,6 +42,7 @@ from ivanovo2beam.beamng.materials import (
     DEFAULT_MATERIAL_ORDER,
     build_materials_json,
     referenced_asset_paths,
+    write_terrain_base_textures,
 )
 from ivanovo2beam.beamng.preview import generate_level_preview_png
 from ivanovo2beam.beamng.ter import write_ter
@@ -63,10 +65,7 @@ from ivanovo2beam.roads.build import (
 from ivanovo2beam.roads.materials import write_road_materials
 from ivanovo2beam.roads.network import extract_roads, road_network_stats
 from ivanovo2beam.roads.railways import (
-    build_railway_geometry,
-    build_railway_scene_object,
-    emit_railways_materials,
-    export_railway_dae,
+    export_railways,
     extract_railways,
     railways_to_corridors,
 )
@@ -95,8 +94,6 @@ _TERRAIN_BINARY_FORMAT = (
 #: leaving the mapped area should visibly continue rather than stop dead at the
 #: boundary, but must not drag corridors to the horizon.
 ROAD_RENDER_MARGIN_M = 250.0
-
-ProgressFn = "Callable[[float, str], None]"
 
 
 @dataclass(slots=True)
@@ -274,6 +271,44 @@ def _level_geographic_bbox(
     return bbox, (origin_x, origin_y), extent
 
 
+def _cached_overlapping_osm_files(
+    cache_dir: Path,
+    bbox: Any,
+    read_cache_meta: Any,
+) -> tuple[list[Path], float, float]:
+    """Return cached ``.osm`` files whose sidecar bbox overlaps ``bbox``, plus span coverage."""
+    if not cache_dir.is_dir():
+        return [], 0.0, 0.0
+    matched: list[Path] = []
+    u_west, u_south, u_east, u_north = math.inf, math.inf, -math.inf, -math.inf
+    for cp in sorted(cache_dir.glob("*.osm")):
+        meta = read_cache_meta(cp)
+        if not isinstance(meta, dict):
+            continue
+        mb = meta.get("bbox") or meta.get("request", {}).get("bbox")
+        if not isinstance(mb, dict):
+            continue
+        mw = mb.get("west")
+        ms = mb.get("south")
+        me = mb.get("east")
+        mn = mb.get("north")
+        if None in (mw, ms, me, mn):
+            continue
+        if me >= bbox.west and mw <= bbox.east and mn >= bbox.south and ms <= bbox.north:
+            matched.append(cp)
+            u_west = min(u_west, float(mw))
+            u_south = min(u_south, float(ms))
+            u_east = max(u_east, float(me))
+            u_north = max(u_north, float(mn))
+    if not matched:
+        return [], 0.0, 0.0
+    bbox_w = max(1e-9, float(bbox.east - bbox.west))
+    bbox_h = max(1e-9, float(bbox.north - bbox.south))
+    lon_cov = max(0.0, min(float(bbox.east), u_east) - max(float(bbox.west), u_west)) / bbox_w
+    lat_cov = max(0.0, min(float(bbox.north), u_north) - max(float(bbox.south), u_south)) / bbox_h
+    return matched, lon_cov, lat_cov
+
+
 def fetch_level_osm(
     config: ProjectConfig,
     bbox: Any,
@@ -307,7 +342,9 @@ def fetch_level_osm(
     Returns:
         ``(osm_data, stats)``.
     """
-    from ivanovo2beam.osm import fetch_overpass, parse_osm
+    from ivanovo2beam.gis.projection import BBox
+    from ivanovo2beam.osm import cache_paths, fetch_overpass, parse_osm, read_cache_meta
+    from ivanovo2beam.osm.pbf import parse_osm_pbf
 
     tiles = osm_bbox_tiles(bbox.west, bbox.south, bbox.east, bbox.north, tile_km=tile_km)
     cache_dir = config.cache_path("osm")
@@ -317,19 +354,43 @@ def fetch_level_osm(
     started = time.perf_counter()
     timed_out = False
 
-    # If the local cache already contains a multi-tile extract, reuse it
+    # Prefer a local regional .osm.pbf extract when present (complete coverage,
+    # zero Overpass rate-limiting or 502 timeouts).
     if not force and cache_dir.is_dir():
-        cached_files = sorted(cache_dir.glob("*.osm"))
-        if len(cached_files) >= 10:
-            for i, cp in enumerate(cached_files):
+        pbf_files = sorted(cache_dir.glob("*.osm.pbf"))
+        if pbf_files:
+            pbf_path = pbf_files[0]
+            if progress is not None:
+                progress(0.05, f"loading OSM PBF {pbf_path.name}")
+            osm_data = parse_osm_pbf(pbf_path, bbox=bbox)
+            elapsed = round(time.perf_counter() - started, 1)
+            return osm_data, {
+                "source": str(pbf_path),
+                "load_seconds": elapsed,
+                "tiles_requested": 1,
+                "tiles_succeeded": 1,
+                "tiles_failed": 0,
+                "tiles_skipped": 0,
+                "budget_exhausted": False,
+                "fetch_seconds": elapsed,
+                "merge": {},
+                "merge_summary": f"loaded {pbf_path.name} ({len(osm_data.nodes)} nodes, {len(osm_data.ways)} ways)",
+            }
+
+    # Reuse a cached multi-tile extract whose sidecar bboxes cover this level,
+    # avoiding 240s Overpass hangs or loading unrelated regions' cache files.
+    if not force:
+        cached_overlap, lon_cov, lat_cov = _cached_overlapping_osm_files(cache_dir, bbox, read_cache_meta)
+        if len(cached_overlap) >= 10 and lon_cov >= 0.5 and lat_cov >= 0.5:
+            for i, cp in enumerate(cached_overlap):
                 if progress is not None:
-                    progress(0.05 + 0.25 * (i / len(cached_files)), f"cached OSM {i + 1}/{len(cached_files)}")
+                    progress(0.05 + 0.25 * (i / len(cached_overlap)), f"cached OSM {i + 1}/{len(cached_overlap)}")
                 with contextlib.suppress(Exception):
                     extracts.append(parse_osm(cp))
             if extracts:
                 merged, report = merge_osm_data(extracts)
                 return merged, {
-                    "tiles_requested": len(cached_files),
+                    "tiles_requested": len(cached_overlap),
                     "tiles_succeeded": len(extracts),
                     "tiles_failed": 0,
                     "tiles_skipped": 0,
@@ -345,8 +406,6 @@ def fetch_level_osm(
         if timed_out:
             skipped.append(f"tile {i + 1}")
             continue
-        from ivanovo2beam.gis.projection import BBox
-
         tile_bbox = BBox(west=west, south=south, east=east, north=north)
         try:
             path = fetch_overpass(tile_bbox, cache_dir, force=force)
@@ -356,12 +415,22 @@ def fetch_level_osm(
         if time.perf_counter() - started > budget_s and i + 1 < len(tiles):
             timed_out = True
 
-    if not extracts:
-        cached_files = sorted(cache_dir.glob("*.osm"))
-        if cached_files:
-            for cp in cached_files:
+    if len(extracts) < len(tiles) and cache_dir.is_dir():
+        if not extracts:
+            for west, south, east, north in tiles:
+                tile_bbox = BBox(west=west, south=south, east=east, north=north)
+                osm_path, _ = cache_paths(cache_dir, tile_bbox)
+                if osm_path.is_file():
+                    with contextlib.suppress(Exception):
+                        extracts.append(parse_osm(osm_path))
+        cached_overlap, _, _ = _cached_overlapping_osm_files(cache_dir, bbox, read_cache_meta)
+        if len(cached_overlap) > len(extracts):
+            fallback_extracts = []
+            for cp in cached_overlap:
                 with contextlib.suppress(Exception):
-                    extracts.append(parse_osm(cp))
+                    fallback_extracts.append(parse_osm(cp))
+            if len(fallback_extracts) > len(extracts):
+                extracts = fallback_extracts
     if not extracts:
         raise RuntimeError(
             "every OSM tile failed; the Overpass API may be rate limiting. "
@@ -418,7 +487,8 @@ def package_level(build_dir: Path, level_id: str, output_zip: Path | None = None
             info = zipfile.ZipInfo(filename=f"levels/{level_id}/{relative}", date_time=(2026, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o644 << 16
-            archive.writestr(info, path.read_bytes())
+            with archive.open(info, "w") as dst, path.open("rb") as src:
+                shutil.copyfileobj(src, dst, length=1024 * 1024)
     return target
 
 
@@ -540,7 +610,8 @@ def build_level(
     if config.water_enabled:
         report(0.33, "extracting hydrology and water bodies")
         try:
-            water_network = extract_water(osm_data, config.projection)
+            water_clip = (origin_x, origin_y, origin_x + extent, origin_y + extent)
+            water_network = extract_water(osm_data, config.projection, clip_bounds=water_clip)
             water_stats.update({
                 "rivers": len(water_network.rivers),
                 "river_length_km": round(water_network.total_river_length_m / 1000.0, 2),
@@ -612,10 +683,12 @@ def build_level(
             corridors.extend(railways_to_corridors(railways))
 
         landcover_polys: dict[str, list[Any]] = {}
-        field_rings = [v.ring for v in vegetation_areas if v.kind in {"scrub", "meadow"}]
+        field_rings = [v.ring for v in vegetation_areas if v.kind == "scrub"]
         farmland_rings = []
+        grass_rings = [v.ring for v in vegetation_areas if v.kind == "meadow"]
         industrial_rings = []
         residential_rings = []
+        clip_min_x, clip_min_y, clip_max_x, clip_max_y = clip_bounds
         if osm_data is not None and getattr(osm_data, "ways", None):
             for way in osm_data.ways:
                 if not way.is_closed or len(way.nodes) < 4:
@@ -629,12 +702,23 @@ def build_level(
                 lons = np.asarray([c[0] for c in coords], dtype=np.float64)
                 lats = np.asarray([c[1] for c in coords], dtype=np.float64)
                 xs, ys = config.projection.geo_to_world_array(lons, lats)
+                if (
+                    float(xs.max()) < clip_min_x
+                    or float(xs.min()) > clip_max_x
+                    or float(ys.max()) < clip_min_y
+                    or float(ys.min()) > clip_max_y
+                ):
+                    continue
                 ring = np.column_stack((xs, ys))
-                if lu in ("farmland", "farmyard", "allotments", "orchard", "meadow", "grass", "greenfield", "recreation_ground"):
+                if lu in ("farmland", "farmyard") or (lu in ("allotments", "orchard") and not vegetation_areas):
                     farmland_rings.append(ring)
-                elif lu in ("industrial", "commercial", "retail", "construction", "railway"):
+                elif lu in ("greenfield", "recreation_ground") or (
+                    lu in ("meadow", "grass", "village_green") and not vegetation_areas
+                ):
+                    grass_rings.append(ring)
+                elif lu in ("industrial", "commercial", "retail", "construction"):
                     industrial_rings.append(ring)
-                elif lu in ("residential",):
+                elif lu == "residential":
                     residential_rings.append(ring)
 
         if field_rings or farmland_rings:
@@ -644,8 +728,10 @@ def build_level(
         if forest_rings:
             landcover_polys["ForestFloor"] = forest_rings
 
-        if residential_rings:
-            landcover_polys["Asphalt_worn"] = residential_rings
+        # Paint meadows/residential yards as lush summer grass after farmland/fields
+        # so village areas stay green instead of worn asphalt or dry stubble.
+        if grass_rings or residential_rings:
+            landcover_polys["Grass"] = grass_rings + residential_rings
 
         building_rings = [b.ring for b in buildings] if buildings else []
         if industrial_rings or building_rings:
@@ -678,6 +764,8 @@ def build_level(
     report(0.74, "assembling the level scene")
     tree = SceneTree(level_id=level.id)
     level_dir = config.build_path("levels", level.id)
+    if level_dir.exists():
+        shutil.rmtree(level_dir)
     ground_z = float(np.median(build.elevations))
     terrain_placement = TerrainPlacement(
         name="theTerrain",
@@ -688,7 +776,7 @@ def build_level(
         square_size=level.grid.square_size_m,
         grid_size=build.grid_size,
         terrain_file=f"/levels/{level.id}/theTerrain.ter",
-        base_tex_size=1024,
+        base_tex_size=512,
         material_texture_set=f"{level.id}TerrainMaterialTextureSet",
     )
     tree.add_group(("level_objects", "terrain"))
@@ -700,7 +788,10 @@ def build_level(
         latitude=level.center_lat,
         longitude=level.center_lon,
         elevation_m=ground_z,
-        visible_distance_m=float(max(4000.0, extent * 2.5)),
+        time_of_day=level.time_of_day,
+        axis_tilt=level.axis_tilt,
+        visible_distance_m=min(float(max(4000.0, extent * 2.5)), 12000.0),
+        fog_density=0.00018,
     )
 
     export_stats = add_network_to_scene(
@@ -719,11 +810,13 @@ def build_level(
 
     # -- bridges 3D meshes -------------------------------------------------
     bridge_stats: dict[str, Any] = {"enabled": config.bridges_enabled}
+    bridges_dir = level_dir / "art" / "shapes" / "bridges"
+    if bridges_dir.exists():
+        shutil.rmtree(bridges_dir)
     if config.bridges_enabled:
         bridge_roads = [r for r in roads if r.bridge and len(r.points) >= 2]
         if bridge_roads:
             report(0.78, f"generating {len(bridge_roads)} 3D bridge structures")
-            bridges_dir = level_dir / "art" / "shapes" / "bridges"
             bridges_dir.mkdir(parents=True, exist_ok=True)
             exported_bridges = 0
             total_bridge_len = 0.0
@@ -731,40 +824,47 @@ def build_level(
                 try:
                     gz = sample_surface_z(r, build)
                     deck_z = compute_bridge_deck_profile(r, ground_z=gz)
-                    geom = build_bridge_geometry(r, deck_z)
+                    geom = build_bridge_geometry(r, deck_z, localize=True)
                     dae_path = bridges_dir / f"bridge_way{r.osm_id}.dae"
                     export_bridge_dae(dae_path, geom, f"bridge_way{r.osm_id}")
-                    obj = build_bridge_scene_object(r, level.id)
+                    obj = build_bridge_scene_object(r, level.id, position=geom.origin)
                     tree.add_object(("level_objects", "bridges"), obj)
                     exported_bridges += 1
                     total_bridge_len += r.length_m
                 except Exception as exc:
                     warnings.append(f"bridge way {r.osm_id} export failed: {exc}")
-            emit_bridges_materials(level_dir, level.id)
+            if exported_bridges > 0:
+                emit_bridges_materials(level_dir, level.id)
+            elif bridges_dir.exists():
+                shutil.rmtree(bridges_dir)
             bridge_stats["bridges"] = exported_bridges
             bridge_stats["total_length_m"] = round(total_bridge_len, 1)
     durations["bridges"] = time.perf_counter() - stage
 
     # -- railways 3D meshes ------------------------------------------------
     stage = time.perf_counter()
+    railways_dir = level_dir / "art" / "shapes" / "railways"
+    if railways_dir.exists():
+        shutil.rmtree(railways_dir)
     if config.railways_enabled and railways:
         report(0.80, f"generating {len(railways)} 1520mm railway tracks")
-        railways_dir = level_dir / "art" / "shapes" / "railways"
-        railways_dir.mkdir(parents=True, exist_ok=True)
-        exported_rw = 0
-        for rw in railways:
-            if len(rw.points) >= 2:
-                try:
-                    mesh = build_railway_geometry(rw, roads=roads)
-                    dae_path = railways_dir / f"railway_way{rw.osm_id}.dae"
-                    export_railway_dae(dae_path, mesh, f"railway_way{rw.osm_id}")
-                    obj = build_railway_scene_object(rw, level.id)
-                    tree.add_object(("level_objects", "railways"), obj)
-                    exported_rw += 1
-                except Exception as exc:
-                    warnings.append(f"railway way {rw.osm_id} export failed: {exc}")
-        emit_railways_materials(level_dir, level.id)
-        railway_stats["exported"] = exported_rw
+        try:
+            rw_objects, rw_export = export_railways(
+                railways,
+                level.id,
+                level_dir,
+                roads=roads,
+                chunk_size_m=float(config.sector_size_m),
+                batch_chunks=True,
+                parent="railways",
+            )
+            for obj in rw_objects:
+                tree.add_object(("level_objects", "railways"), obj)
+            if rw_export.get("exported", 0) == 0 and railways_dir.exists():
+                shutil.rmtree(railways_dir)
+            railway_stats.update(rw_export)
+        except Exception as exc:
+            warnings.append(f"railway export failed: {exc}")
     durations["railways_export"] = time.perf_counter() - stage
 
     # -- buildings ---------------------------------------------------------
@@ -800,7 +900,7 @@ def build_level(
 
     # -- vegetation export -------------------------------------------------
     stage = time.perf_counter()
-    veg_export_stats: dict[str, Any] = {"enabled": config.vegetation_enabled}
+    veg_export_stats: dict[str, Any] = dict(veg_stats)
     if config.vegetation_enabled and vegetation_areas:
         report(0.85, f"generating forest and vegetation across {len(vegetation_areas)} areas")
         water_items = []
@@ -845,6 +945,7 @@ def build_level(
 
     spawn_points_info: list[dict[str, Any]] = []
     stats_spawn_anchor = [0.0, 0.0]
+    default_spawn: tuple[float, float, float, float, float] | None = None
     for sp in spawn_presets:
         lon, lat = sp["geo"]
         anchor_x, anchor_y = config.projection.geo_to_world(lon, lat)
@@ -867,6 +968,9 @@ def build_level(
         })
         if sp["name"] == "spawn_default":
             stats_spawn_anchor = [round(anchor_x, 1), round(anchor_y, 1)]
+            default_spawn = spawn
+        elif default_spawn is None:
+            default_spawn = spawn
 
     # -- files -------------------------------------------------------------
     stage = time.perf_counter()
@@ -910,6 +1014,7 @@ def build_level(
         level_dir / "theTerrain.terrain.json",
         build_terrain_json(level.id, "theTerrain", size=build.grid_size, materials=build.materials),
     )
+    write_terrain_base_textures(level_dir, DEFAULT_MATERIAL_ORDER, size=terrain_placement.base_tex_size)
     write_json(
         level_dir / "art" / "terrains" / "main.materials.json",
         build_materials_json(level.id, DEFAULT_MATERIAL_ORDER, base_tex_size=terrain_placement.base_tex_size),
@@ -940,6 +1045,7 @@ def build_level(
         mod_zip = package_level(config.build_dir, level.id)
     durations["package"] = time.perf_counter() - stage
 
+    spawn_for_stats = default_spawn if default_spawn is not None else (0.0, 0.0, ground_z, 0.0, 0.0)
     stats: dict[str, Any] = {
         "level_id": level.id,
         "terrain": build.stats,
@@ -953,11 +1059,11 @@ def build_level(
         "buildings": building_stats,
         "vegetation": veg_export_stats,
         "spawn": {
-            "x": spawn[0],
-            "y": spawn[1],
-            "z": spawn[2],
+            "x": spawn_for_stats[0],
+            "y": spawn_for_stats[1],
+            "z": spawn_for_stats[2],
             "anchor": stats_spawn_anchor,
-            "distance_from_anchor_m": round(spawn[3], 1),
+            "distance_from_anchor_m": round(spawn_for_stats[3], 1),
         },
         "files": sum(1 for p in level_dir.rglob("*") if p.is_file()),
         "terrain_bytes": terrain_bytes,
@@ -975,12 +1081,28 @@ def build_level(
     )
 
 
+_MAJOR_SPAWN_HIGHWAYS = frozenset(
+    {
+        "motorway",
+        "motorway_link",
+        "trunk",
+        "trunk_link",
+        "primary",
+        "primary_link",
+        "secondary",
+        "secondary_link",
+        "tertiary",
+        "tertiary_link",
+    }
+)
+
+
 def _choose_spawn(
     roads: Sequence[Any],
     build: Any,
     *,
     anchor: tuple[float, float],
-) -> tuple[float, float, float, float]:
+) -> tuple[float, float, float, float, float]:
     """Choose a spawn point on the drivable road nearest an anchor.
 
     Spawning on a road matters: a drop point in a field gives a poor first
@@ -996,12 +1118,14 @@ def _choose_spawn(
             possible, normally the region's world origin (Ivanovo centre).
 
     Returns:
-        ``(x, y, z, distance_from_anchor_m)``.
+        ``(x, y, z, distance_from_anchor_m, heading_rad)``.
     """
     elevations = build.elevations
     origin_x, origin_y = build.origin_x, build.origin_y
     cell = build.cell_size_m
     n = elevations.shape[0]
+    max_x = origin_x + (n - 1) * cell
+    max_y = origin_y + (n - 1) * cell
     anchor_x, anchor_y = anchor
 
     def sample(x: float, y: float) -> float:
@@ -1009,30 +1133,73 @@ def _choose_spawn(
         row = int(np.clip(round((y - origin_y) / cell), 0, n - 1))
         return float(elevations[row, col])
 
-    import math
+    def make_candidate(pts: Any, index: int, distance: float) -> tuple[float, float, float, float, float]:
+        # Avoid placing the vehicle on a terminal dead-end DecalRoad endpoint
+        # where startEndFade tapers to invisible and tangent faces off-road.
+        if pts.shape[0] == 2 and index == 1:
+            px = 0.5 * float(pts[0, 0] + pts[1, 0])
+            py = 0.5 * float(pts[0, 1] + pts[1, 1])
+            dx = float(pts[1, 0] - pts[0, 0])
+            dy = float(pts[1, 1] - pts[0, 1])
+            dist = math.hypot(px - anchor_x, py - anchor_y)
+            return (px, py, sample(px, py), dist, math.atan2(dy, dx))
+        point = pts[index]
+        if index < pts.shape[0] - 1:
+            dx = float(pts[index + 1, 0] - pts[index, 0])
+            dy = float(pts[index + 1, 1] - pts[index, 1])
+        elif index > 0:
+            dx = float(pts[index, 0] - pts[index - 1, 0])
+            dy = float(pts[index, 1] - pts[index - 1, 1])
+        else:
+            dx, dy = 1.0, 0.0
+        heading = math.atan2(dy, dx)
+        return (float(point[0]), float(point[1]), sample(float(point[0]), float(point[1])), distance, heading)
 
-    best: tuple[float, float, float, float, float] | None = None
+    best_major: tuple[float, float, float, float, float] | None = None
+    best_any: tuple[float, float, float, float, float] | None = None
+    best_fallback: tuple[float, float, float, float, float] | None = None
     for road in roads:
         if not road.drivable or road.bridge or road.tunnel:
             continue
-        # Use the vertex nearest the anchor rather than the road's midpoint, so
-        # a long road passing through the anchor is not penalised for being long.
-        distances = np.hypot(road.points[:, 0] - anchor_x, road.points[:, 1] - anchor_y)
-        index = int(np.argmin(distances))
-        distance = float(distances[index])
-        if best is None or distance < best[3]:
-            point = road.points[index]
-            if index < road.points.shape[0] - 1:
-                dx = float(road.points[index + 1, 0] - road.points[index, 0])
-                dy = float(road.points[index + 1, 1] - road.points[index, 1])
-            elif index > 0:
-                dx = float(road.points[index, 0] - road.points[index - 1, 0])
-                dy = float(road.points[index, 1] - road.points[index - 1, 1])
-            else:
-                dx, dy = 1.0, 0.0
-            heading = math.atan2(dy, dx)
-            best = (float(point[0]), float(point[1]), sample(float(point[0]), float(point[1])), distance, heading)
+        pts = road.points
+        if pts.shape[0] < 2:
+            continue
+        distances = np.hypot(pts[:, 0] - anchor_x, pts[:, 1] - anchor_y)
+        in_bounds = (
+            (pts[:, 0] >= origin_x)
+            & (pts[:, 0] <= max_x)
+            & (pts[:, 1] >= origin_y)
+            & (pts[:, 1] <= max_y)
+        )
+        if in_bounds.any():
+            candidate_mask = in_bounds
+            if pts.shape[0] >= 3:
+                interior_mask = in_bounds.copy()
+                interior_mask[0] = False
+                interior_mask[-1] = False
+                if interior_mask.any():
+                    candidate_mask = interior_mask
+            masked = np.where(candidate_mask, distances, np.inf)
+            index = int(np.argmin(masked))
+            distance = float(distances[index])
+            cand = make_candidate(pts, index, distance)
+            if best_any is None or cand[3] < best_any[3]:
+                best_any = cand
+            hw = getattr(road, "highway", "")
+            if hw in _MAJOR_SPAWN_HIGHWAYS and (best_major is None or cand[3] < best_major[3]):
+                best_major = cand
+        elif best_any is None:
+            index = int(np.argmin(distances))
+            distance = float(distances[index])
+            if best_fallback is None or distance < best_fallback[3]:
+                best_fallback = make_candidate(pts, index, distance)
 
-    if best is None:
-        return (anchor_x, anchor_y, sample(anchor_x, anchor_y), 0.0, 0.0)
-    return best
+    if best_major is not None and best_major[3] <= 2500.0:
+        return best_major
+    if best_any is not None:
+        return best_any
+    if best_major is not None:
+        return best_major
+    if best_fallback is not None:
+        return best_fallback
+    return (anchor_x, anchor_y, sample(anchor_x, anchor_y), 0.0, 0.0)

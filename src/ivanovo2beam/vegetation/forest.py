@@ -19,7 +19,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from shapely.geometry import Point, Polygon
+from shapely import contains_xy
+from shapely.geometry import LineString, MultiPolygon, Polygon
+from shapely.validation import make_valid
 
 try:
     from PIL import Image, ImageDraw
@@ -32,6 +34,16 @@ except (ImportError, OSError, Exception):
     ImageDraw = None  # type: ignore[assignment]
     _HAS_PIL = False
 
+try:
+    from affine import Affine
+    from rasterio.features import rasterize as _rio_rasterize
+
+    _HAS_RASTERIO = True
+except (ImportError, OSError, Exception):
+    Affine = None  # type: ignore[assignment,misc]
+    _rio_rasterize = None  # type: ignore[assignment]
+    _HAS_RASTERIO = False
+
 from ivanovo2beam.beamng.level import stable_uuid
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -43,15 +55,70 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 #: Deterministic UUID namespace for forest items and materials.
 _FOREST_NS = uuid.UUID("9c42a5e0-4182-41f6-b192-3a55b1f0981b")
 
-#: Central Russian species definitions referencing base-game BeamNG meshes.
+#: Priority order for area kinds when allocating max_trees budget.
+_KIND_PRIORITY: dict[str, int] = {
+    "forest": 0,
+    "scrub": 1,
+    "meadow": 2,
+}
+
+#: Road-corridor distance bucket (m) for prioritizing roadside forests.
+_CORRIDOR_BUCKET_M = 250.0
+
+#: Priority highway classes used when ranking roadside forest proximity.
+_PRIORITY_HIGHWAY_CLASSES = frozenset(
+    {
+        "motorway",
+        "motorway_link",
+        "trunk",
+        "trunk_link",
+        "primary",
+        "primary_link",
+        "secondary",
+        "secondary_link",
+        "tertiary",
+        "tertiary_link",
+    }
+)
+
+#: Per-polygon tree cap in Pass 1 so every roadside forest gets coverage.
+_PASS1_MAX_TREES_PER_POLY = 300
+
+#: Default terrain grid resolution / cell size fallbacks.
+_DEFAULT_GRID_SIZE = 2048
+_DEFAULT_CELL_SIZE_M = 1.0
+
+#: Minimum trunk-to-trunk spacing in metres to prevent overlapping trees.
+_MIN_TREE_SPACING_M = 2.5
+
+#: Lean 7-species Central Russian summer mix referencing verified /assets/ meshes.
 SPECIES_DATA: dict[str, dict[str, Any]] = {
-    # 1. Silver Birch (Берёза, 35% in forest)
+    # 1. Silver Birch (Берёза)
+    "tree_aspen_forest_a": {
+        "class": "TSForestItemData",
+        "shapeFile": "/assets/meshes/foliage/trees_library/birch/tree_aspen_forest_a.dae",
+        "radius": 0.35,
+        "mass": 10.0,
+        "windScale": 0.5,
+        "lodReflectScalar": 0.0,
+        "category": "birch",
+    },
+    "tree_aspen_forest_b": {
+        "class": "TSForestItemData",
+        "shapeFile": "/assets/meshes/foliage/trees_library/birch/tree_aspen_forest_b.dae",
+        "radius": 0.35,
+        "mass": 10.0,
+        "windScale": 0.5,
+        "lodReflectScalar": 0.0,
+        "category": "birch",
+    },
     "tree_aspen_large_a": {
         "class": "TSForestItemData",
         "shapeFile": "/assets/meshes/foliage/trees_library/birch/tree_aspen_large_a.dae",
         "radius": 0.35,
         "mass": 10.0,
         "windScale": 0.5,
+        "lodReflectScalar": 0.0,
         "category": "birch",
     },
     "tree_aspen_small_a": {
@@ -60,271 +127,156 @@ SPECIES_DATA: dict[str, dict[str, Any]] = {
         "radius": 0.30,
         "mass": 10.0,
         "windScale": 0.5,
+        "lodReflectScalar": 0.0,
         "category": "birch",
     },
-    "tree_aspen_forest_a": {
+    # 2. Broadleaf Canopy & Undergrowth (Бук)
+    "tree_beech_forest_a": {
         "class": "TSForestItemData",
-        "shapeFile": "/assets/meshes/foliage/trees_library/birch/tree_aspen_forest_a.dae",
-        "radius": 0.35,
-        "mass": 10.0,
-        "windScale": 0.5,
-        "category": "birch",
-    },
-    # 2. Scots Pine (Сосна обыкновенная, 30% in forest)
-    "scots_pine": {
-        "class": "TSForestItemData",
-        "shapeFile": "/levels/italy/art/shapes/trees/trees_italy/scots_pine.dae",
+        "shapeFile": "/assets/meshes/foliage/trees_library/beech/tree_beech_forest_a.dae",
         "radius": 0.40,
         "mass": 10.0,
         "windScale": 0.5,
-        "category": "pine",
+        "lodReflectScalar": 0.0,
+        "category": "beech",
     },
-    "scots_pine_filler": {
+    "tree_beech_small_b": {
         "class": "TSForestItemData",
-        "shapeFile": "/levels/italy/art/shapes/trees/trees_italy/scots_pine_filler.dae",
-        "radius": 0.35,
+        "shapeFile": "/assets/meshes/foliage/trees_library/beech/tree_beech_small_b.dae",
+        "radius": 0.32,
         "mass": 10.0,
         "windScale": 0.5,
-        "category": "pine",
+        "lodReflectScalar": 0.0,
+        "category": "beech",
     },
-    # 3. Spruce / Fir (Ель, 20% in forest)
-    "tree_douglasfir_large_a": {
-        "class": "TSForestItemData",
-        "shapeFile": "/levels/east_coast_usa/art/shapes/trees/trees_douglasfir/tree_douglasfir_large_a.dae",
-        "radius": 0.45,
-        "mass": 10.0,
-        "windScale": 0.5,
-        "category": "fir",
-    },
-    "tree_douglasfir_small_a": {
-        "class": "TSForestItemData",
-        "shapeFile": "/levels/east_coast_usa/art/shapes/trees/trees_douglasfir/tree_douglasfir_small_a.dae",
-        "radius": 0.35,
-        "mass": 10.0,
-        "windScale": 0.5,
-        "category": "fir",
-    },
-    # 4. Oak & Mixed Broadleaf (Дуб, 15% in forest)
-    "tree_oak_large_a": {
-        "class": "TSForestItemData",
-        "shapeFile": "/assets/meshes/foliage/trees_library/oak/tree_oak_large_a.dae",
-        "radius": 0.50,
-        "mass": 10.0,
-        "windScale": 0.5,
-        "category": "oak",
-    },
-    "tree_beech_large_b": {
-        "class": "TSForestItemData",
-        "shapeFile": "/assets/meshes/foliage/trees_library/beech/tree_beech_large_b.dae",
-        "radius": 0.45,
-        "mass": 10.0,
-        "windScale": 0.5,
-        "category": "oak",
-    },
-    # 5. Undergrowth (Подлесок / scrub / forest edges)
-    "generibush": {
+    "tree_beech_bush_a": {
         "class": "ForestItemData",
-        "shapeFile": "/assets/meshes/foliage/bushes/generibush.dae",
-        "radius": 0.25,
-        "snapRotationToTerrain": True,
-        "category": "bush",
-    },
-    "generibush_small": {
-        "class": "ForestItemData",
-        "shapeFile": "/assets/meshes/foliage/bushes/generibush_small.dae",
-        "radius": 0.20,
-        "snapRotationToTerrain": True,
-        "category": "bush",
-    },
-    "tree_aspen_bush_a": {
-        "class": "ForestItemData",
-        "shapeFile": "/assets/meshes/foliage/trees_library/birch/tree_aspen_bush_a.dae",
+        "shapeFile": "/assets/meshes/foliage/trees_library/beech/tree_beech_bush_a.dae",
         "radius": 0.30,
         "snapRotationToTerrain": True,
+        "lodReflectScalar": 0.0,
         "category": "bush",
     },
 }
 
-#: Category weights in Central Russian forests
+#: Category weights in Central Russian forests (birch 70%, beech 30%).
 FOREST_SPECIES_DISTRIBUTION: list[tuple[str, float]] = [
-    ("tree_aspen_large_a", 0.15),
-    ("tree_aspen_small_a", 0.10),
-    ("tree_aspen_forest_a", 0.10),
-    ("scots_pine", 0.20),
-    ("scots_pine_filler", 0.10),
-    ("tree_douglasfir_large_a", 0.12),
-    ("tree_douglasfir_small_a", 0.08),
-    ("tree_oak_large_a", 0.10),
-    ("tree_beech_large_b", 0.05),
+    ("tree_aspen_large_a", 0.20),
+    ("tree_aspen_forest_a", 0.20),
+    ("tree_aspen_forest_b", 0.15),
+    ("tree_aspen_small_a", 0.15),
+    ("tree_beech_forest_a", 0.15),
+    ("tree_beech_small_b", 0.15),
 ]
 
 SCRUB_SPECIES_DISTRIBUTION: list[tuple[str, float]] = [
-    ("generibush", 0.40),
-    ("generibush_small", 0.30),
-    ("tree_aspen_bush_a", 0.20),
-    ("tree_aspen_small_a", 0.05),
-    ("scots_pine_filler", 0.05),
+    ("tree_beech_bush_a", 0.75),
+    ("tree_aspen_small_a", 0.15),
+    ("tree_beech_small_b", 0.10),
 ]
 
-#: Native tree materials referenced by stock meshes
+#: Native tree materials referenced by the 7 lean /assets/meshes/foliage/ meshes.
+#: All texture paths resolve directly inside /assets/materials/tree.zip.
 STOCK_TREE_MATERIALS: dict[str, dict[str, Any]] = {
     # Birch
     "Birch_Bark_01": {
-        "colorMap": "/assets/materials/tree/birch/t_birch_bark_01_b.color.png",
-        "normalMap": "/assets/materials/tree/birch/t_birch_bark_01_nm.normal.png",
-        "roughnessMap": "/assets/materials/tree/birch/t_birch_bark_01_r.data.png",
+        "baseColorMap": "/assets/materials/tree/birch/t_birch_bark/t_birch_bark_b.color.dds",
+        "normalMap": "/assets/materials/tree/birch/t_birch_bark/t_birch_bark_nm.normal.dds",
+        "roughnessMap": "/assets/materials/tree/birch/t_birch_bark/t_birch_bark_r.data.dds",
+        "ambientOcclusionMap": "/assets/materials/tree/birch/t_birch_bark/t_birch_bark_ao.data.dds",
         "groundType": "WOOD",
     },
     "Birch_Branch_01": {
-        "colorMap": "/assets/materials/tree/birch/t_birch_branch_01_b.color.png",
-        "normalMap": "/assets/materials/tree/birch/t_birch_branch_01_nm.normal.png",
-        "opacityMap": "/assets/materials/tree/birch/t_birch_branch_01_o.data.png",
+        "baseColorMap": "/assets/materials/tree/birch/t_birch_branch/t_birch_branch_b.color.dds",
+        "normalMap": "/assets/materials/tree/birch/t_birch_branch/t_birch_branch_nm.normal.dds",
+        "opacityMap": "/assets/materials/tree/birch/t_birch_branch/t_birch_branch_o.data.dds",
+        "roughnessMap": "/assets/materials/tree/birch/t_birch_branch/t_birch_branch_r.data.dds",
+        "ambientOcclusionMap": "/assets/materials/tree/birch/t_birch_branch/t_birch_branch_ao.data.dds",
         "alphaTest": True,
+        "alphaRef": 60,
         "doubleSided": True,
-        "groundType": "LEAVES_THIN",
+        "groundType": "WOOD",
     },
     "m_ind_birch_leaves_01": {
-        "colorMap": "/assets/materials/tree/birch/t_ind_birch_leaves_01_b.color.png",
-        "normalMap": "/assets/materials/tree/birch/t_ind_birch_leaves_01_nm.normal.png",
-        "opacityMap": "/assets/materials/tree/birch/t_ind_birch_leaves_01_o.data.png",
+        "baseColorMap": "/assets/materials/tree/birch/t_birch_leaves_ind/t_birch_leaves_ind_b.color.dds",
+        "normalMap": "/assets/materials/tree/birch/t_birch_leaves/t_birch_leaves_nm.normal.dds",
+        "opacityMap": "/assets/materials/tree/birch/t_birch_leaves/t_birch_leaves_o.data.dds",
+        "roughnessMap": "/assets/materials/tree/birch/t_birch_leaves/t_birch_leaves_r.data.dds",
+        "ambientOcclusionMap": "/assets/materials/tree/birch/t_birch_leaves/t_birch_leaves_ao.data.dds",
         "alphaTest": True,
-        "doubleSided": True,
-        "groundType": "LEAVES_THIN",
-    },
-    # Pine
-    "scots_pine": {
-        "colorMap": "/levels/italy/art/shapes/trees/trees_italy/scots_pine_b.color.png",
-        "normalMap": "/levels/italy/art/shapes/trees/trees_italy/scots_pine_nm.normal.png",
-        "opacityMap": "/levels/italy/art/shapes/trees/trees_italy/scots_pine_o.data.png",
-        "alphaTest": True,
-        "doubleSided": True,
-        "groundType": "LEAVES_THIN",
-    },
-    "scots_pine_branches": {
-        "colorMap": "/levels/italy/art/shapes/trees/trees_italy/scots_pine_branches_b.color.png",
-        "normalMap": "/levels/italy/art/shapes/trees/trees_italy/scots_pine_branches_nm.normal.png",
-        "opacityMap": "/levels/italy/art/shapes/trees/trees_italy/scots_pine_branches_o.data.png",
-        "alphaTest": True,
-        "doubleSided": True,
-        "groundType": "LEAVES_THIN",
-    },
-    "scots_pine_trunk": {
-        "colorMap": "/levels/italy/art/shapes/trees/trees_italy/scots_pine_trunk_b.color.png",
-        "normalMap": "/levels/italy/art/shapes/trees/trees_italy/scots_pine_trunk_nm.normal.png",
-        "groundType": "WOOD",
-    },
-    # Fir
-    "fir_bark": {
-        "colorMap": "/assets/materials/tree/fir/t_fir_bark/t_fir_bark_b.color.png",
-        "normalMap": "/assets/materials/tree/fir/t_fir_bark/t_fir_bark_nm.normal.png",
-        "roughnessMap": "/assets/materials/tree/fir/t_fir_bark/t_fir_bark_r.data.png",
-        "groundType": "WOOD",
-    },
-    "fir_leaves": {
-        "colorMap": "/assets/materials/tree/fir/t_fir_leaves/t_fir_leaves_b.color.png",
-        "normalMap": "/assets/materials/tree/fir/t_fir_leaves/t_fir_leaves_nm.normal.png",
-        "opacityMap": "/assets/materials/tree/fir/t_fir_leaves/t_fir_leaves_o.data.png",
-        "alphaTest": True,
-        "doubleSided": True,
-        "groundType": "LEAVES_THIN",
-    },
-    "fir_leaves_dead": {
-        "colorMap": "/assets/materials/tree/fir/t_fir_leaves/t_fir_leaves_dead_b.color.png",
-        "normalMap": "/assets/materials/tree/fir/t_fir_leaves/t_fir_leaves_nm.normal.png",
-        "opacityMap": "/assets/materials/tree/fir/t_fir_leaves/t_fir_leaves_o.data.png",
-        "alphaTest": True,
-        "doubleSided": True,
-        "groundType": "LEAVES_THIN",
-    },
-    "m_fir_leaves_distant": {
-        "colorMap": "/assets/materials/tree/fir/t_fir_leaves/t_fir_leaves_b.color.png",
-        "normalMap": "/assets/materials/tree/fir/t_fir_leaves/t_fir_leaves_nm.normal.png",
-        "opacityMap": "/assets/materials/tree/fir/t_fir_leaves/t_fir_leaves_o.data.png",
-        "alphaTest": True,
-        "doubleSided": True,
-        "groundType": "LEAVES_THIN",
-    },
-    # Oak
-    "Oak_bark_01": {
-        "colorMap": "/assets/materials/tree/oak/t_oak_bark_01/t_oak_bark_01_b.color.png",
-        "normalMap": "/assets/materials/tree/oak/t_oak_bark_01/t_oak_bark_01_nm.normal.png",
-        "roughnessMap": "/assets/materials/tree/oak/t_oak_bark_01/t_oak_bark_01_r.data.png",
-        "groundType": "WOOD",
-    },
-    "Oak_branch_01": {
-        "colorMap": "/assets/materials/tree/oak/t_oak_branch_01/t_oak_branch_01_b.color.png",
-        "normalMap": "/assets/materials/tree/oak/t_oak_branch_01/t_oak_branch_01_nm.normal.png",
-        "opacityMap": "/assets/materials/tree/oak/t_oak_branch_01/t_oak_branch_01_o.data.png",
-        "alphaTest": True,
-        "doubleSided": True,
-        "groundType": "LEAVES_THIN",
-    },
-    "Oak_branch_02": {
-        "colorMap": "/assets/materials/tree/oak/t_oak_branch_02/t_oak_branch_02_b.color.png",
-        "normalMap": "/assets/materials/tree/oak/t_oak_branch_02/t_oak_branch_02_nm.normal.png",
-        "opacityMap": "/assets/materials/tree/oak/t_oak_branch_02/t_oak_branch_02_o.data.png",
-        "alphaTest": True,
-        "doubleSided": True,
-        "groundType": "LEAVES_THIN",
-    },
-    "m_oak_leaves_01": {
-        "colorMap": "/assets/materials/tree/oak/t_oak_leaves_01/t_oak_leaves_01_b.color.png",
-        "normalMap": "/assets/materials/tree/oak/t_oak_leaves_01/t_oak_leaves_01_nm.normal.png",
-        "opacityMap": "/assets/materials/tree/oak/t_oak_leaves_01/t_oak_leaves_01_o.data.png",
-        "alphaTest": True,
+        "alphaRef": 100,
         "doubleSided": True,
         "groundType": "LEAVES_THIN",
     },
     # Beech
     "beech_trunk": {
-        "colorMap": "/assets/materials/tree/beech/t_beech_trunk_b.color.png",
-        "normalMap": "/assets/materials/tree/beech/t_beech_trunk_nm.normal.png",
+        "baseColorMap": "/assets/materials/tree/beech/t_beech_trunk/t_beech_bark_b.color.dds",
+        "normalMap": "/assets/materials/tree/beech/t_beech_trunk/t_beech_bark_nm.normal.dds",
+        "roughnessMap": "/assets/materials/tree/beech/t_beech_trunk/t_beech_bark_r.data.dds",
+        "ambientOcclusionMap": "/assets/materials/tree/beech/t_beech_trunk/t_beech_bark_ao.data.dds",
         "groundType": "WOOD",
     },
     "beech_branch_01": {
-        "colorMap": "/assets/materials/tree/beech/t_beech_branch_01_b.color.png",
-        "normalMap": "/assets/materials/tree/beech/t_beech_branch_01_nm.normal.png",
-        "opacityMap": "/assets/materials/tree/beech/t_beech_branch_01_o.data.png",
+        "baseColorMap": "/assets/materials/tree/beech/t_beech_branch_01/t_beech_branch_b.color.dds",
+        "normalMap": "/assets/materials/tree/beech/t_beech_branch_01/t_beech_branch_nm.normal.dds",
+        "opacityMap": "/assets/materials/tree/beech/t_beech_branch_01/t_beech_branch_o.data.dds",
+        "roughnessMap": "/assets/materials/tree/beech/t_beech_branch_01/t_beech_branch_r.data.dds",
+        "ambientOcclusionMap": "/assets/materials/tree/beech/t_beech_branch_01/t_beech_branch_ao.data.dds",
         "alphaTest": True,
+        "alphaRef": 75,
+        "doubleSided": True,
+        "groundType": "WOOD",
+    },
+    "beech_leaves": {
+        "baseColorMap": "/assets/materials/tree/beech/t_beech_leaves/t_beech_leaves_b.color.dds",
+        "normalMap": "/assets/materials/tree/beech/t_beech_leaves/t_beech_leaves_nm.normal.dds",
+        "opacityMap": "/assets/materials/tree/beech/t_beech_leaves/t_beech_leaves_o.data.dds",
+        "roughnessMap": "/assets/materials/tree/beech/t_beech_leaves/t_beech_leaves_r.data.dds",
+        "ambientOcclusionMap": "/assets/materials/tree/beech/t_beech_leaves/t_beech_leaves_ao.data.dds",
+        "alphaTest": True,
+        "alphaRef": 105,
         "doubleSided": True,
         "groundType": "LEAVES_THIN",
     },
-    "m_ind_beech_leaves": {
-        "colorMap": "/assets/materials/tree/beech/t_beech_leaves_b.color.png",
-        "normalMap": "/assets/materials/tree/beech/t_beech_leaves_nm.normal.png",
-        "opacityMap": "/assets/materials/tree/beech/t_beech_leaves_o.data.png",
+    "beech_blocker": {
+        "baseColorMap": "/assets/materials/tree/beech/t_beech_blocker/t_beech_blocker_b.color.dds",
+        "normalMap": "/assets/materials/tree/beech/t_beech_blocker/t_beech_blocker_nm.normal.dds",
+        "opacityMap": "/assets/materials/tree/beech/t_beech_blocker/t_beech_blocker_o.data.dds",
+        "roughnessMap": "/assets/materials/tree/beech/t_beech_blocker/t_beech_blocker_r.data.dds",
+        "ambientOcclusionMap": "/assets/materials/tree/beech/t_beech_blocker/t_beech_blocker_ao.data.dds",
         "alphaTest": True,
+        "alphaRef": 90,
+        "doubleSided": True,
+        "groundType": "WOOD",
+    },
+    # Compiled .cdae material names for beech meshes
+    "m_ind_beech_leaves": {
+        "baseColorMap": "/assets/materials/tree/beech/t_beech_leaves/t_beech_leaves_b.color.dds",
+        "normalMap": "/assets/materials/tree/beech/t_beech_leaves/t_beech_leaves_nm.normal.dds",
+        "opacityMap": "/assets/materials/tree/beech/t_beech_leaves/t_beech_leaves_o.data.dds",
+        "roughnessMap": "/assets/materials/tree/beech/t_beech_leaves/t_beech_leaves_r.data.dds",
+        "ambientOcclusionMap": "/assets/materials/tree/beech/t_beech_leaves/t_beech_leaves_ao.data.dds",
+        "alphaTest": True,
+        "alphaRef": 105,
         "doubleSided": True,
         "groundType": "LEAVES_THIN",
     },
     "m_ind_beech_blocker": {
-        "colorMap": "/assets/materials/tree/beech/t_beech_leaves_b.color.png",
-        "normalMap": "/assets/materials/tree/beech/t_beech_leaves_nm.normal.png",
-        "opacityMap": "/assets/materials/tree/beech/t_beech_leaves_o.data.png",
+        "baseColorMap": "/assets/materials/tree/beech/t_beech_blocker/t_beech_blocker_b.color.dds",
+        "normalMap": "/assets/materials/tree/beech/t_beech_blocker/t_beech_blocker_nm.normal.dds",
+        "opacityMap": "/assets/materials/tree/beech/t_beech_blocker/t_beech_blocker_o.data.dds",
+        "roughnessMap": "/assets/materials/tree/beech/t_beech_blocker/t_beech_blocker_r.data.dds",
+        "ambientOcclusionMap": "/assets/materials/tree/beech/t_beech_blocker/t_beech_blocker_ao.data.dds",
         "alphaTest": True,
+        "alphaRef": 90,
         "doubleSided": True,
-        "groundType": "LEAVES_THIN",
+        "groundType": "WOOD",
     },
-    # Bushes & Leaves collision proxies
-    "generibush_leaves": {
-        "colorMap": "/assets/materials/foliage/bush/t_generibush_leaves/t_generibush_leaves_b.color.png",
-        "normalMap": "/assets/materials/foliage/bush/t_generibush_leaves/t_generibush_leaves_nm.normal.png",
-        "opacityMap": "/assets/materials/foliage/bush/t_generibush_leaves/t_generibush_leaves_o.data.png",
-        "alphaTest": True,
-        "doubleSided": True,
-        "groundType": "LEAVES_THIN",
-    },
+    # Collision proxy material
     "leaves_strong": {
-        "colorMap": "/assets/materials/tree/birch/t_birch_branch_01_b.color.png",
-        "alphaTest": True,
-        "doubleSided": True,
-        "groundType": "LEAVES_THIN",
-    },
-    "leaves_thin": {
-        "colorMap": "/assets/materials/tree/birch/t_birch_branch_01_b.color.png",
-        "alphaTest": True,
-        "doubleSided": True,
-        "groundType": "LEAVES_THIN",
+        "collisionProxy": True,
+        "groundDepth": 0.6,
+        "groundType": "leaves_strong",
     },
 }
 
@@ -464,6 +416,141 @@ class _RasterCanvas:
         return np.zeros((1, 1), dtype=bool)
 
 
+def _resolve_float(obj: Any, attr: str, fallback: float | None, default: float) -> float:
+    """Resolve a float attribute from ``obj``, treating ``None`` as missing."""
+    val = getattr(obj, attr, None) if obj is not None else None
+    if val is not None:
+        return float(val)
+    if fallback is not None:
+        return float(fallback)
+    return default
+
+
+def _resolve_grid_params(
+    build: Any,
+    *,
+    grid_size: int | None = None,
+    cell_size_m: float | None = None,
+    origin_x: float | None = None,
+    origin_y: float | None = None,
+) -> tuple[int, float, float, float]:
+    """Resolve terrain grid (size, origin_x, origin_y, cell_size_m) consistently."""
+    elevations = getattr(build, "elevations", None) if build is not None else None
+    if elevations is not None:
+        sz = int(elevations.shape[0])
+    else:
+        sz = int(grid_size) if grid_size is not None else _DEFAULT_GRID_SIZE
+    ox = _resolve_float(build, "origin_x", origin_x, 0.0)
+    oy = _resolve_float(build, "origin_y", origin_y, 0.0)
+    cell = _resolve_float(build, "cell_size_m", cell_size_m, _DEFAULT_CELL_SIZE_M)
+    return sz, ox, oy, cell
+
+
+def _rasterize_buffered_ring(
+    canvas: _RasterCanvas,
+    ring: np.ndarray,
+    to_pixel: Any,
+    buffer_m: float,
+) -> None:
+    """Rasterize a world-space polygon ring onto ``canvas`` with optional outward buffer."""
+    if buffer_m > 0:
+        try:
+            geom: Any = Polygon(ring)
+            if not geom.is_valid:
+                geom = make_valid(geom)
+            buffered = geom.buffer(buffer_m)
+            polys: list[Polygon] = []
+            if isinstance(buffered, Polygon):
+                polys = [buffered]
+            elif isinstance(buffered, MultiPolygon):
+                polys = list(buffered.geoms)
+            elif hasattr(buffered, "geoms"):
+                polys = [g for g in buffered.geoms if isinstance(g, Polygon)]
+            if polys:
+                for p in polys:
+                    if not p.is_empty and p.area > 0:
+                        pix_pts = [
+                            to_pixel(float(c[0]), float(c[1])) for c in p.exterior.coords
+                        ]
+                        canvas.polygon(pix_pts)
+                return
+        except Exception:
+            pass
+    pix_pts = [to_pixel(float(p[0]), float(p[1])) for p in ring]
+    canvas.polygon(pix_pts)
+
+
+def _collect_keepout_shapes(
+    roads: Sequence[Any] | None,
+    buildings: Sequence[BuildingFootprint] | None,
+    water: Sequence[Any] | None,
+    railways: Sequence[Any] | None,
+) -> list[Any]:
+    """Build world-space Shapely polygons for rasterio keep-out rasterization."""
+    shapes: list[Any] = []
+
+    if roads:
+        for road in roads:
+            pts = getattr(road, "points", None)
+            if pts is None and isinstance(road, (list, tuple)):
+                pts = road
+            if pts is None or len(pts) < 2:
+                continue
+            width_m = float(getattr(road, "width_m", 6.0) or 6.0)
+            half_w = (width_m + 6.0) / 2.0
+            geom = LineString([(float(p[0]), float(p[1])) for p in pts]).buffer(half_w)
+            if not geom.is_empty:
+                shapes.append(geom)
+
+    if railways:
+        for rail in railways:
+            pts = getattr(rail, "points", None)
+            if pts is None and isinstance(rail, (list, tuple)):
+                pts = rail
+            if pts is None or len(pts) < 2:
+                continue
+            geom = LineString([(float(p[0]), float(p[1])) for p in pts]).buffer(4.0)
+            if not geom.is_empty:
+                shapes.append(geom)
+
+    if buildings:
+        for bld in buildings:
+            ring = getattr(bld, "ring", None)
+            if ring is None and isinstance(bld, np.ndarray):
+                ring = bld
+            if ring is None or len(ring) < 3:
+                continue
+            poly: Any = Polygon(ring)
+            if not poly.is_valid:
+                poly = make_valid(poly)
+            geom = poly.buffer(2.0)
+            if not geom.is_empty:
+                shapes.append(geom)
+
+    if water:
+        for w in water:
+            ring = getattr(w, "ring", None)
+            if ring is None and isinstance(w, np.ndarray):
+                ring = w
+            if ring is not None and len(ring) >= 3:
+                poly_w: Any = Polygon(ring)
+                if not poly_w.is_valid:
+                    poly_w = make_valid(poly_w)
+                geom = poly_w.buffer(2.0)
+                if not geom.is_empty:
+                    shapes.append(geom)
+            pts = getattr(w, "points", None)
+            if pts is not None and len(pts) >= 2:
+                width_m = float(getattr(w, "width_m", 8.0) or 8.0)
+                geom = LineString([(float(p[0]), float(p[1])) for p in pts]).buffer(
+                    (width_m + 4.0) / 2.0
+                )
+                if not geom.is_empty:
+                    shapes.append(geom)
+
+    return shapes
+
+
 def build_keepout_mask(
     build: Any,
     roads: Sequence[Any] | None = None,
@@ -478,20 +565,33 @@ def build_keepout_mask(
 ) -> tuple[np.ndarray, float, float, float]:
     """Build a fast 2D boolean keep-out mask raster (True = keep out).
 
-    Burns road corridors + shoulders, railways, water bodies, and building footprints
-    into a boolean raster mask for O(1) clearance checks.
+    Burns road corridors + shoulders, railways, water bodies (+2m shoreline buffer),
+    and building footprints (+2m wall clearance) into a boolean raster mask for
+    O(1) clearance checks. Uses ``PIL.ImageDraw``, ``rasterio.features.rasterize``,
+    or a pure-NumPy scanline fallback.
     """
-    if build is not None:
-        elevations = getattr(build, "elevations", None)
-        sz = elevations.shape[0] if elevations is not None else (grid_size or 2048)
-        ox = getattr(build, "origin_x", origin_x or 0.0)
-        oy = getattr(build, "origin_y", origin_y or 0.0)
-        cell = getattr(build, "cell_size_m", cell_size_m or 1.25)
-    else:
-        sz = grid_size or 2048
-        ox = origin_x or 0.0
-        oy = origin_y or 0.0
-        cell = cell_size_m or 1.25
+    sz, ox, oy, cell = _resolve_grid_params(
+        build,
+        grid_size=grid_size,
+        cell_size_m=cell_size_m,
+        origin_x=origin_x,
+        origin_y=origin_y,
+    )
+
+    if not _HAS_PIL and _HAS_RASTERIO and _rio_rasterize is not None and Affine is not None:
+        shapes = _collect_keepout_shapes(roads, buildings, water, railways)
+        if not shapes:
+            return np.zeros((sz, sz), dtype=bool), ox, oy, cell
+        transform = Affine(cell, 0.0, ox - 0.5 * cell, 0.0, cell, oy - 0.5 * cell)
+        burned = _rio_rasterize(
+            [(g, 1) for g in shapes],
+            out_shape=(sz, sz),
+            transform=transform,
+            fill=0,
+            dtype=np.uint8,
+            all_touched=True,
+        )
+        return burned.astype(bool), ox, oy, cell
 
     canvas = _RasterCanvas(sz)
 
@@ -508,7 +608,7 @@ def build_keepout_mask(
                 pts = road
             if pts is None or len(pts) < 2:
                 continue
-            width_m = getattr(road, "width_m", 6.0)
+            width_m = float(getattr(road, "width_m", 6.0) or 6.0)
             clearance_m = width_m + 6.0  # includes shoulders
             width_px = max(1, round(clearance_m / cell))
             pix_pts = [to_pixel(float(p[0]), float(p[1])) for p in pts]
@@ -526,7 +626,7 @@ def build_keepout_mask(
             pix_pts = [to_pixel(float(p[0]), float(p[1])) for p in pts]
             canvas.line(pix_pts, width=width_px)
 
-    # 3. Buildings
+    # 3. Buildings (+2m clearance around walls/eaves)
     if buildings:
         for bld in buildings:
             ring = getattr(bld, "ring", None)
@@ -534,21 +634,21 @@ def build_keepout_mask(
                 ring = bld
             if ring is None or len(ring) < 3:
                 continue
-            pix_pts = [to_pixel(float(p[0]), float(p[1])) for p in ring]
-            canvas.polygon(pix_pts)
+            _rasterize_buffered_ring(canvas, np.asarray(ring, dtype=np.float64), to_pixel, 2.0)
 
-    # 4. Water
+    # 4. Water (+2m shoreline buffer on polygons, +4m on rivers)
     if water:
         for w in water:
             ring = getattr(w, "ring", None)
             if ring is None and isinstance(w, np.ndarray):
                 ring = w
             if ring is not None and len(ring) >= 3:
-                pix_pts = [to_pixel(float(p[0]), float(p[1])) for p in ring]
-                canvas.polygon(pix_pts)
+                _rasterize_buffered_ring(
+                    canvas, np.asarray(ring, dtype=np.float64), to_pixel, 2.0
+                )
             pts = getattr(w, "points", None)
             if pts is not None and len(pts) >= 2:
-                width_m = getattr(w, "width_m", 8.0)
+                width_m = float(getattr(w, "width_m", 8.0) or 8.0)
                 width_px = max(1, round((width_m + 4.0) / cell))
                 pix_pts = [to_pixel(float(p[0]), float(p[1])) for p in pts]
                 canvas.line(pix_pts, width=width_px)
@@ -568,6 +668,7 @@ def build_managed_item_data_json() -> dict[str, Any]:
             "class": spec.get("class", "TSForestItemData"),
             "persistentId": item_id,
             "shapeFile": spec["shapeFile"],
+            "lodReflectScalar": float(spec.get("lodReflectScalar", 0.0)),
         }
         if "radius" in spec:
             entry["radius"] = spec["radius"]
@@ -588,6 +689,20 @@ def build_forest_materials_json() -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, spec in sorted(STOCK_TREE_MATERIALS.items()):
         mat_id = str(uuid.uuid5(_FOREST_NS, f"mat_{key}"))
+        if spec.get("collisionProxy"):
+            entry: dict[str, Any] = {
+                "name": key,
+                "mapTo": key,
+                "class": "Material",
+                "persistentId": mat_id,
+                "Stages": [{}, {}, {}, {}],
+                "annotation": "NATURE",
+                "groundDepth": spec.get("groundDepth", 0.6),
+                "groundType": spec.get("groundType", key),
+            }
+            out[key] = entry
+            continue
+
         stage: dict[str, Any] = {}
         if "baseColorMap" in spec:
             stage["baseColorMap"] = spec["baseColorMap"]
@@ -597,10 +712,12 @@ def build_forest_materials_json() -> dict[str, Any]:
             stage["normalMap"] = spec["normalMap"]
         if "roughnessMap" in spec:
             stage["roughnessMap"] = spec["roughnessMap"]
+        if "ambientOcclusionMap" in spec:
+            stage["ambientOcclusionMap"] = spec["ambientOcclusionMap"]
         if "opacityMap" in spec:
             stage["opacityMap"] = spec["opacityMap"]
 
-        entry: dict[str, Any] = {
+        entry = {
             "name": key,
             "mapTo": key,
             "class": "Material",
@@ -615,7 +732,7 @@ def build_forest_materials_json() -> dict[str, Any]:
         }
         if spec.get("alphaTest"):
             entry["alphaTest"] = True
-            entry["alphaRef"] = 75
+            entry["alphaRef"] = int(spec.get("alphaRef", 75))
         if spec.get("doubleSided"):
             entry["doubleSided"] = True
             entry["invertBackFaceNormals"] = True
@@ -630,13 +747,199 @@ def _sample_ground(build: Any, x: float, y: float) -> float:
     elevations = getattr(build, "elevations", None)
     if elevations is None:
         return 0.0
-    ox = getattr(build, "origin_x", 0.0)
-    oy = getattr(build, "origin_y", 0.0)
-    cell = getattr(build, "cell_size_m", 1.0)
-    n = elevations.shape[0]
+    n, ox, oy, cell = _resolve_grid_params(build)
     col = int(np.clip(round((x - ox) / cell), 0, n - 1))
     row = int(np.clip(round((y - oy) / cell), 0, n - 1))
     return float(elevations[row, col])
+
+
+def _extract_valid_polygons(area: VegetationArea) -> list[Polygon]:
+    """Build valid Polygon(s) from a VegetationArea, repairing self-intersections."""
+    geom: Any = Polygon(area.ring, area.holes)
+    if not geom.is_valid:
+        geom = make_valid(geom)
+    if geom.is_empty:
+        return []
+    if isinstance(geom, Polygon):
+        return [geom] if geom.area > 0 else []
+    if isinstance(geom, MultiPolygon):
+        return [g for g in geom.geoms if isinstance(g, Polygon) and not g.is_empty and g.area > 0]
+    if hasattr(geom, "geoms"):
+        return [g for g in geom.geoms if isinstance(g, Polygon) and not g.is_empty and g.area > 0]
+    return []
+
+
+def _collect_corridor_points(
+    roads: Sequence[Any] | None,
+    railways: Sequence[Any] | None,
+) -> np.ndarray | None:
+    """Collect sample points from priority highways (falling back to all roads/railways)."""
+    priority_chunks: list[np.ndarray] = []
+    all_chunks: list[np.ndarray] = []
+
+    if roads:
+        for item in roads:
+            pts = getattr(item, "points", None)
+            if pts is None and isinstance(item, (list, tuple)):
+                pts = item
+            if pts is None or len(pts) == 0:
+                continue
+            arr = np.asarray(pts, dtype=np.float64)[:, :2]
+            step = max(1, len(arr) // 16)
+            sampled = arr[::step]
+            all_chunks.append(sampled)
+            hw = str(getattr(item, "highway", "") or "").strip().lower()
+            if hw in _PRIORITY_HIGHWAY_CLASSES:
+                priority_chunks.append(sampled)
+
+    if priority_chunks:
+        return np.vstack(priority_chunks)
+
+    if railways:
+        for item in railways:
+            pts = getattr(item, "points", None)
+            if pts is None and isinstance(item, (list, tuple)):
+                pts = item
+            if pts is None or len(pts) == 0:
+                continue
+            arr = np.asarray(pts, dtype=np.float64)[:, :2]
+            step = max(1, len(arr) // 16)
+            all_chunks.append(arr[::step])
+
+    if not all_chunks:
+        return None
+    return np.vstack(all_chunks)
+
+
+def _area_corridor_distance(area: VegetationArea, corridor_pts: np.ndarray | None) -> float:
+    """Return distance (m) from ``area`` bounding box to nearest road/railway point."""
+    if corridor_pts is None or corridor_pts.shape[0] == 0:
+        return 0.0
+    minx, miny, maxx, maxy = area.bounds
+    dx = np.maximum(0.0, np.maximum(minx - corridor_pts[:, 0], corridor_pts[:, 0] - maxx))
+    dy = np.maximum(0.0, np.maximum(miny - corridor_pts[:, 1], corridor_pts[:, 1] - maxy))
+    return float(np.sqrt(np.min(dx * dx + dy * dy)))
+
+
+def _populate_polygon(
+    poly: Polygon,
+    n_target: int,
+    rng: np.random.Generator,
+    species_keys: list[str],
+    species_weights: np.ndarray,
+    *,
+    mask: np.ndarray,
+    ox: float,
+    oy: float,
+    cell: float,
+    elevations: Any,
+    g_sz: int,
+    g_ox: float,
+    g_oy: float,
+    g_cell: float,
+    spacing_cells: dict[tuple[int, int], list[tuple[float, float]]],
+    trees_by_type: dict[str, list[dict[str, Any]]],
+) -> int:
+    """Place up to ``n_target`` deterministic trees inside ``poly``."""
+    if n_target <= 0:
+        return 0
+    minx, miny, maxx, maxy = poly.bounds
+    if maxx <= minx or maxy <= miny:
+        return 0
+
+    n_mask = mask.shape[0]
+    min_spacing_sq = _MIN_TREE_SPACING_M * _MIN_TREE_SPACING_M
+    placed = 0
+    max_attempts = max(n_target * 15, n_target + 200)
+    attempts = 0
+
+    while placed < n_target and attempts < max_attempts:
+        rem_attempts = max_attempts - attempts
+        rem_needed = n_target - placed
+        batch_size = min(rem_attempts, max(rem_needed * 3, 64))
+        attempts += batch_size
+
+        cand_xs = rng.uniform(minx, maxx, size=batch_size)
+        cand_ys = rng.uniform(miny, maxy, size=batch_size)
+
+        cols = np.rint((cand_xs - ox) / cell).astype(np.int64)
+        rows = np.rint((cand_ys - oy) / cell).astype(np.int64)
+        valid = (cols >= 0) & (cols < n_mask) & (rows >= 0) & (rows < n_mask)
+        if not np.any(valid):
+            continue
+
+        cand_xs = cand_xs[valid]
+        cand_ys = cand_ys[valid]
+        clear = ~mask[rows[valid], cols[valid]]
+        if not np.any(clear):
+            continue
+
+        cand_xs = cand_xs[clear]
+        cand_ys = cand_ys[clear]
+        inside = contains_xy(poly, cand_xs, cand_ys)
+        if not np.any(inside):
+            continue
+
+        cand_xs = cand_xs[inside]
+        cand_ys = cand_ys[inside]
+
+        for cx_f, cy_f in zip(cand_xs.tolist(), cand_ys.tolist(), strict=True):
+            gx = math.floor(cx_f / _MIN_TREE_SPACING_M)
+            gy = math.floor(cy_f / _MIN_TREE_SPACING_M)
+            too_close = False
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for px, py in spacing_cells.get((gx + dx, gy + dy), ()):
+                        if (cx_f - px) ** 2 + (cy_f - py) ** 2 < min_spacing_sq:
+                            too_close = True
+                            break
+                    if too_close:
+                        break
+                if too_close:
+                    break
+            if too_close:
+                continue
+
+            if elevations is not None:
+                ec = int(np.clip(round((cx_f - g_ox) / g_cell), 0, g_sz - 1))
+                er = int(np.clip(round((cy_f - g_oy) / g_cell), 0, g_sz - 1))
+                gz = float(elevations[er, ec])
+            else:
+                gz = 0.0
+
+            sp_key = str(rng.choice(species_keys, p=species_weights))
+            yaw = float(rng.uniform(0.0, 2 * math.pi))
+            cos_y = math.cos(yaw)
+            sin_y = math.sin(yaw)
+            scale = float(round(rng.uniform(0.85, 1.25), 4))
+
+            rot_mat = [
+                round(cos_y, 6),
+                round(sin_y, 6),
+                0.0,
+                round(-sin_y, 6),
+                round(cos_y, 6),
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+            ]
+
+            trees_by_type[sp_key].append(
+                {
+                    "ctxid": 0,
+                    "pos": [round(cx_f, 4), round(cy_f, 4), round(gz, 4)],
+                    "rotationMatrix": rot_mat,
+                    "scale": scale,
+                    "type": sp_key,
+                }
+            )
+            spacing_cells.setdefault((gx, gy), []).append((cx_f, cy_f))
+            placed += 1
+            if placed >= n_target:
+                break
+
+    return placed
 
 
 def export_vegetation(
@@ -649,18 +952,25 @@ def export_vegetation(
     buildings: Sequence[BuildingFootprint] | None = None,
     water: Sequence[Any] | None = None,
     railways: Sequence[Any] | None = None,
-    max_trees: int = 15000,
+    max_trees: int = 35000,
     target_density_trees_per_ha: float = 120.0,
 ) -> tuple[list[dict[str, Any]], VegetationExportStats]:
     """Generate BeamNG .forest4.json, managedItemData.json, materials, and scene objects.
 
-    Uses deterministic PCG64(osm_id) placement and fast raster keep-out masking.
+    Uses deterministic PCG64(osm_id) placement, forest-first & priority-highway
+    proximity ordering, 2-pass allocation so roadside forests are never starved,
+    vectorized ``shapely.contains_xy`` candidate filtering, minimum trunk
+    spacing, and fast raster keep-out masking.
     """
     stats = VegetationExportStats()
     forest_dir = level_dir / "forest"
     art_forest_dir = level_dir / "art" / "forest"
     forest_dir.mkdir(parents=True, exist_ok=True)
     art_forest_dir.mkdir(parents=True, exist_ok=True)
+
+    # Remove stale .forest4.json files from previous builds
+    for stale_forest in forest_dir.glob("*.forest4.json"):
+        stale_forest.unlink()
 
     # 1. Write managedItemData.json and main.materials.json
     mid_path = art_forest_dir / "managedItemData.json"
@@ -682,103 +992,115 @@ def export_vegetation(
         build, roads=roads, buildings=buildings, water=water, railways=railways
     )
     n_mask = mask.shape[0]
+    elevations = getattr(build, "elevations", None) if build is not None else None
+    g_sz, g_ox, g_oy, g_cell = _resolve_grid_params(build)
 
-    # 3. Deterministic placement per area
+    # 3. Deterministic 2-pass placement per kind tier (forest > scrub > meadow)
+    # Within each tier, Pass 1 caps per-polygon count at _PASS1_MAX_TREES_PER_POLY
+    # so every roadside polygon receives coverage before Pass 2 fills remaining deficits.
     trees_by_type: dict[str, list[dict[str, Any]]] = {k: [] for k in SPECIES_DATA}
     total_placed = 0
+    spacing_cells: dict[tuple[int, int], list[tuple[float, float]]] = {}
 
-    # Sort areas by area_m2 descending
-    sorted_areas = sorted(vegetation_areas, key=lambda a: -a.area_m2)
+    corridor_pts = _collect_corridor_points(roads, railways)
+    areas_by_tier: dict[int, list[VegetationArea]] = {}
+    for area in vegetation_areas:
+        tier = _KIND_PRIORITY.get(area.kind, 2)
+        areas_by_tier.setdefault(tier, []).append(area)
 
-    for area in sorted_areas:
+    for tier in sorted(areas_by_tier):
         if total_placed >= max_trees:
             break
 
-        poly = Polygon(area.ring, area.holes)
-        if not poly.is_valid or poly.area <= 0:
-            continue
+        tier_areas = sorted(
+            areas_by_tier[tier],
+            key=lambda a: (
+                int(_area_corridor_distance(a, corridor_pts) // _CORRIDOR_BUCKET_M),
+                -a.area_m2,
+            ),
+        )
+        pass2_queue: list[tuple[Polygon, int, np.random.Generator, list[str], np.ndarray]] = []
 
-        minx, miny, maxx, maxy = area.bounds
-        width = maxx - minx
-        height = maxy - miny
-        if width <= 0 or height <= 0:
-            continue
-
-        # Density based on kind
-        if area.kind == "forest":
-            density = target_density_trees_per_ha
-            species_dist = FOREST_SPECIES_DISTRIBUTION
-        elif area.kind == "scrub":
-            density = target_density_trees_per_ha * 0.4
-            species_dist = SCRUB_SPECIES_DISTRIBUTION
-        else:  # meadow / grass
-            density = target_density_trees_per_ha * 0.15
-            species_dist = SCRUB_SPECIES_DISTRIBUTION
-
-        n_target = max(1, round((area.area_m2 / 10000.0) * density))
-        n_target = min(n_target, max_trees - total_placed)
-
-        # Deterministic RNG per OSM polygon
-        seed = abs(int(area.osm_id))
-        rng = np.random.Generator(np.random.PCG64(seed))
-
-        species_keys = [s[0] for s in species_dist]
-        species_weights = np.array([s[1] for s in species_dist], dtype=np.float64)
-        species_weights /= species_weights.sum()
-
-        placed_in_area = 0
-        max_attempts = n_target * 5
-        attempts = 0
-
-        while placed_in_area < n_target and attempts < max_attempts:
-            attempts += 1
-            cand_x = float(rng.uniform(minx, maxx))
-            cand_y = float(rng.uniform(miny, maxy))
-
-            # Polygon point-in-polygon check
-            if not poly.contains(Point(cand_x, cand_y)):
-                continue
-
-            # Keep-out mask check
-            col = round((cand_x - ox) / cell)
-            row = round((cand_y - oy) / cell)
-            if 0 <= col < n_mask and 0 <= row < n_mask and mask[row, col]:
-                continue
-
-            gz = _sample_ground(build, cand_x, cand_y)
-            sp_key = str(rng.choice(species_keys, p=species_weights))
-
-            yaw = float(rng.uniform(0.0, 2 * math.pi))
-            cos_y = math.cos(yaw)
-            sin_y = math.sin(yaw)
-            scale = float(round(rng.uniform(0.85, 1.25), 4))
-
-            # Standard BeamNG rotation matrix [c, s, 0, -s, c, 0, 0, 0, 1]
-            rot_mat = [
-                round(cos_y, 6),
-                round(sin_y, 6),
-                0.0,
-                round(-sin_y, 6),
-                round(cos_y, 6),
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-            ]
-
-            tree_entry = {
-                "ctxid": 0,
-                "pos": [round(cand_x, 4), round(cand_y, 4), round(gz, 4)],
-                "rotationMatrix": rot_mat,
-                "scale": scale,
-                "type": sp_key,
-            }
-
-            trees_by_type[sp_key].append(tree_entry)
-            placed_in_area += 1
-            total_placed += 1
+        for area in tier_areas:
             if total_placed >= max_trees:
                 break
+
+            polys = _extract_valid_polygons(area)
+            if not polys:
+                continue
+
+            if area.kind == "forest":
+                density = target_density_trees_per_ha
+                species_dist = FOREST_SPECIES_DISTRIBUTION
+                min_target = 1
+            elif area.kind == "scrub":
+                density = target_density_trees_per_ha * 0.4
+                species_dist = SCRUB_SPECIES_DISTRIBUTION
+                min_target = 1
+            else:  # meadow / grass: sparse bushes only if budget remains after forests
+                density = target_density_trees_per_ha * 0.05
+                species_dist = SCRUB_SPECIES_DISTRIBUTION
+                min_target = 0
+
+            rng = np.random.Generator(np.random.PCG64(abs(int(area.osm_id))))
+            species_keys = [s[0] for s in species_dist]
+            species_weights = np.array([s[1] for s in species_dist], dtype=np.float64)
+            species_weights /= species_weights.sum()
+
+            for poly in polys:
+                if total_placed >= max_trees:
+                    break
+                n_total = max(min_target, round((poly.area / 10000.0) * density))
+                if n_total <= 0:
+                    continue
+
+                p1_target = min(n_total, _PASS1_MAX_TREES_PER_POLY, max_trees - total_placed)
+                placed_p1 = _populate_polygon(
+                    poly,
+                    p1_target,
+                    rng,
+                    species_keys,
+                    species_weights,
+                    mask=mask,
+                    ox=ox,
+                    oy=oy,
+                    cell=cell,
+                    elevations=elevations,
+                    g_sz=g_sz,
+                    g_ox=g_ox,
+                    g_oy=g_oy,
+                    g_cell=g_cell,
+                    spacing_cells=spacing_cells,
+                    trees_by_type=trees_by_type,
+                )
+                total_placed += placed_p1
+                if n_total > placed_p1 and placed_p1 >= _PASS1_MAX_TREES_PER_POLY:
+                    pass2_queue.append(
+                        (poly, n_total - placed_p1, rng, species_keys, species_weights)
+                    )
+
+        for poly, remaining, rng, species_keys, species_weights in pass2_queue:
+            if total_placed >= max_trees:
+                break
+            p2_target = min(remaining, max_trees - total_placed)
+            total_placed += _populate_polygon(
+                poly,
+                p2_target,
+                rng,
+                species_keys,
+                species_weights,
+                mask=mask,
+                ox=ox,
+                oy=oy,
+                cell=cell,
+                elevations=elevations,
+                g_sz=g_sz,
+                g_ox=g_ox,
+                g_oy=g_oy,
+                g_cell=g_cell,
+                spacing_cells=spacing_cells,
+                trees_by_type=trees_by_type,
+            )
 
     # 4. Write .forest4.json for each species with instances
     for sp_key, items in sorted(trees_by_type.items()):
@@ -796,13 +1118,15 @@ def export_vegetation(
     stats.species_types = sum(1 for items in trees_by_type.values() if items)
 
     # 5. Emit scene objects for level SceneTree
+    # BeamNG 0.39 auto-discovers levels/<level_id>/forest/*.forest4.json;
+    # official levels (e.g. east_coast_usa) omit dataFile on theForest.
     scene_objects: list[dict[str, Any]] = [
         {
             "class": "Forest",
             "name": "theForest",
             "persistentId": stable_uuid(level_id, "forest", "theForest"),
             "__parent": "vegetation",
-            "lodReflectScalar": 0.15,
+            "lodReflectScalar": 0.0,
         },
         {
             "class": "ForestWindEmitter",

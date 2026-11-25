@@ -271,6 +271,8 @@ class LevelSpec:
     ground_margin_m: float = 5.0
     spawn_lon: float | None = None
     spawn_lat: float | None = None
+    time_of_day: float = 0.5
+    axis_tilt: float = 23.44
 
     def __post_init__(self) -> None:
         if not self.id or not self.id.replace("_", "").isalnum():
@@ -329,6 +331,8 @@ class LevelSpec:
             ground_margin_m=float(data.get("ground_margin_m", 5.0)),
             spawn_lon=None if spawn is None else float(spawn[0]),
             spawn_lat=None if spawn is None else float(spawn[1]),
+            time_of_day=float(data.get("time_of_day", 0.5)),
+            axis_tilt=float(data.get("axis_tilt", 23.44)),
         )
 
 

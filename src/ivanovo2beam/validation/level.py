@@ -289,7 +289,15 @@ def _check_materials(report: ValidationReport, install: Path | None) -> None:
     if not index:
         report.add("asset_paths", True, "no asset zips found; skipped", severity="warning")
         return
-    missing = sorted(p for p in paths if p.lstrip("/") not in index)
+    missing: list[str] = []
+    level_prefix = f"/levels/{report.level_dir.name}/"
+    for p in sorted(paths):
+        if p.startswith(level_prefix):
+            rel = p[len(level_prefix) :]
+            if not (report.level_dir / rel).is_file():
+                missing.append(p)
+        elif p.lstrip("/") not in index:
+            missing.append(p)
     report.add(
         "asset_paths",
         not missing,

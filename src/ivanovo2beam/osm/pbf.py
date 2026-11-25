@@ -23,9 +23,9 @@ from __future__ import annotations
 import logging
 import struct
 import zlib
-from collections.abc import Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from ivanovo2beam.gis.projection import BBox
 from ivanovo2beam.osm.types import OsmData, OsmParseError, OsmRelation, OsmWay
@@ -494,13 +494,178 @@ def _parse_relation(rel_bytes: bytes, stringtable: _StringTable) -> OsmRelation 
 # Two-Pass Streaming Parser
 # --------------------------------------------------------------------------- #
 
+_EXPAND_RELATION_KEYS = frozenset(
+    {
+        "natural",
+        "waterway",
+        "landuse",
+        "highway",
+        "railway",
+        "building",
+        "building:part",
+        "water",
+        "wetland",
+        "leisure",
+    }
+)
+_SKIP_RELATION_TYPES = frozenset(
+    {
+        "boundary",
+        "route",
+        "route_master",
+        "disused:route",
+        "restriction",
+        "public_transport",
+        "destination_sign",
+        "enforcement",
+        "network",
+        "superroute",
+    }
+)
+
+
+def _should_expand_relation(tags: Mapping[str, str]) -> bool:
+    """Return whether a bbox-crossing relation should pull out-of-bbox member geometry.
+
+    Geometry-bearing feature relations (``multipolygon``, ``natural``,
+    ``waterway``, ``landuse``, ``building``, etc.) need complete member ways
+    and nodes even outside the bbox so polygons stay closed. Region-spanning
+    ``boundary`` / ``route`` / ``restriction`` relations are not expanded so
+    they do not drag hundreds of kilometres of unrelated ways into memory.
+    """
+    rel_type = tags.get("type", "")
+    if rel_type in _SKIP_RELATION_TYPES or "boundary" in tags or "route" in tags:
+        return False
+    return rel_type == "multipolygon" or bool(_EXPAND_RELATION_KEYS.intersection(tags))
+
+
+def _iter_osm_data_payloads(fh: BinaryIO, path: Path) -> Iterator[bytes]:
+    """Yield decompressed ``OSMData`` block payloads from an open PBF stream."""
+    while True:
+        len_bytes = fh.read(4)
+        if not len_bytes:
+            break
+        if len(len_bytes) < 4:
+            raise OsmParseError(f"Truncated block header length in {path}")
+        header_len = struct.unpack(">I", len_bytes)[0]
+        header_bytes = fh.read(header_len)
+        if len(header_bytes) < header_len:
+            raise OsmParseError(f"Truncated block header in {path}")
+        btype, datasize = _read_block_header(header_bytes)
+        blob_bytes = fh.read(datasize)
+        if len(blob_bytes) < datasize:
+            raise OsmParseError(f"Truncated blob data in {path}")
+        if btype == "OSMData":
+            yield _decompress_blob(blob_bytes)
+
+
+def _parse_way_id_and_nodes(way_bytes: bytes) -> tuple[int, list[int]] | None:
+    """Decode only a Way's id and node reference list, skipping tags."""
+    pos = 0
+    end = len(way_bytes)
+    way_id = 0
+    refs_bytes = b""
+
+    while pos < end:
+        tag, pos = _read_varint(way_bytes, pos)
+        field_num = tag >> 3
+        wire_type = tag & 0x7
+
+        if wire_type == 0:
+            val, pos = _read_varint(way_bytes, pos)
+            if field_num == 1:
+                way_id = val
+        elif wire_type == 2:
+            length, pos = _read_varint(way_bytes, pos)
+            if field_num == 8:
+                refs_bytes = way_bytes[pos : pos + length]
+            pos += length
+        elif wire_type == 1:
+            pos += 8
+        elif wire_type == 5:
+            pos += 4
+
+    if not refs_bytes:
+        return None
+
+    ref_deltas = _unpack_packed_sint64(refs_bytes)
+    if len(ref_deltas) < 2:
+        return None
+
+    curr_ref = 0
+    refs: list[int] = []
+    append_ref = refs.append
+    for d in ref_deltas:
+        curr_ref += d
+        append_ref(curr_ref)
+    return way_id, refs
+
+
+def _collect_extra_way_nodes(
+    payload: bytes,
+    pending_way_ids: set[int],
+    needed_node_ids: set[int],
+) -> None:
+    """Scan a PrimitiveBlock for Way messages in ``pending_way_ids`` and collect their nodes."""
+    pos = 0
+    end = len(payload)
+    groups: list[bytes] = []
+
+    while pos < end:
+        tag, pos = _read_varint(payload, pos)
+        field_num = tag >> 3
+        wire_type = tag & 0x7
+
+        if wire_type == 2:
+            length, pos = _read_varint(payload, pos)
+            if field_num == 2:
+                groups.append(payload[pos : pos + length])
+            pos += length
+        elif wire_type == 0:
+            _, pos = _read_varint(payload, pos)
+        elif wire_type == 1:
+            pos += 8
+        elif wire_type == 5:
+            pos += 4
+
+    for group_bytes in groups:
+        gpos = 0
+        gend = len(group_bytes)
+        while gpos < gend:
+            tag, gpos = _read_varint(group_bytes, gpos)
+            field_num = tag >> 3
+            wire_type = tag & 0x7
+
+            if wire_type == 2:
+                length, gpos = _read_varint(group_bytes, gpos)
+                if field_num == 3:
+                    parsed = _parse_way_id_and_nodes(group_bytes[gpos : gpos + length])
+                    if parsed is not None:
+                        way_id, refs = parsed
+                        if way_id in pending_way_ids:
+                            needed_node_ids.update(refs)
+                            pending_way_ids.discard(way_id)
+                            if not pending_way_ids:
+                                return
+                gpos += length
+            elif wire_type == 0:
+                _, gpos = _read_varint(group_bytes, gpos)
+            elif wire_type == 1:
+                gpos += 8
+            elif wire_type == 5:
+                gpos += 4
+
 
 def _parse_pbf_pure_python(path: Path, bbox: BBox | None = None) -> OsmData:
     """Stream an OSM PBF file using pure-Python stdlib decoding.
 
-    When ``bbox`` is provided, two passes are executed:
-    * Pass 1: Streams all blocks to identify nodes and ways intersecting the bbox,
-      collecting all referenced node IDs.
+    When ``bbox`` is provided, multi-pass streaming is executed:
+    * Pass 1: Streams all blocks to identify nodes, ways, and relations
+      intersecting the bbox, collecting referenced node IDs and any
+      cross-boundary relation member way IDs.
+    * Conditional Way scan: If relation resolution added out-of-bbox member
+      ways whose nodes were not yet collected, scans Way blocks only to
+      populate ``needed_node_ids`` before emitting nodes.
     * Pass 2: Rewinds to populate ``OsmData`` containing only needed geometry,
       consuming < 250 MB RAM even on multi-gigabyte regional extracts.
     """
@@ -514,6 +679,7 @@ def _parse_pbf_pure_python(path: Path, bbox: BBox | None = None) -> OsmData:
     needed_node_ids: set[int] = set()
     needed_way_ids: set[int] = set()
     needed_rel_ids: set[int] = set()
+    extra_rel_way_ids: set[int] = set()
 
     data = OsmData(source=source_str)
 
@@ -557,7 +723,10 @@ def _parse_pbf_pure_python(path: Path, bbox: BBox | None = None) -> OsmData:
                         way = _parse_way(chunk, stringtable)
                         if way is not None:
                             if is_pass_1 and check_bbox is not None:
-                                if any(r in candidate_nodes for r in way.nodes):
+                                if way.id in extra_rel_way_ids:
+                                    needed_node_ids.update(way.nodes)
+                                    extra_rel_way_ids.discard(way.id)
+                                elif any(r in candidate_nodes for r in way.nodes):
                                     needed_way_ids.add(way.id)
                                     needed_node_ids.update(way.nodes)
                             else:
@@ -574,11 +743,13 @@ def _parse_pbf_pure_python(path: Path, bbox: BBox | None = None) -> OsmData:
                                     for mtype, ref, _ in rel.members
                                 ):
                                     needed_rel_ids.add(rel.id)
-                                    for mtype, ref, _ in rel.members:
-                                        if mtype == "way":
-                                            needed_way_ids.add(ref)
-                                        elif mtype == "node":
-                                            needed_node_ids.add(ref)
+                                    if _should_expand_relation(rel.tags):
+                                        for mtype, ref, _ in rel.members:
+                                            if mtype == "way" and ref not in needed_way_ids:
+                                                needed_way_ids.add(ref)
+                                                extra_rel_way_ids.add(ref)
+                                            elif mtype == "node":
+                                                needed_node_ids.add(ref)
                             else:
                                 if check_bbox is None or rel.id in needed_rel_ids:
                                     data.relations.append(rel)
@@ -593,45 +764,23 @@ def _parse_pbf_pure_python(path: Path, bbox: BBox | None = None) -> OsmData:
     with open(path, "rb") as fh:
         # Pass 1 if bbox filtering
         if bbox is not None:
-            while True:
-                len_bytes = fh.read(4)
-                if not len_bytes:
-                    break
-                if len(len_bytes) < 4:
-                    raise OsmParseError(f"Truncated block header length in {path}")
-                header_len = struct.unpack(">I", len_bytes)[0]
-                header_bytes = fh.read(header_len)
-                if len(header_bytes) < header_len:
-                    raise OsmParseError(f"Truncated block header in {path}")
-                btype, datasize = _read_block_header(header_bytes)
-                blob_bytes = fh.read(datasize)
-                if len(blob_bytes) < datasize:
-                    raise OsmParseError(f"Truncated blob data in {path}")
-                if btype == "OSMData":
-                    payload = _decompress_blob(blob_bytes)
-                    process_block(payload, is_pass_1=True)
+            for payload in _iter_osm_data_payloads(fh, path):
+                process_block(payload, is_pass_1=True)
+
+            # Resolve nodes of out-of-bbox member ways added by relations
+            if extra_rel_way_ids:
+                fh.seek(0)
+                for payload in _iter_osm_data_payloads(fh, path):
+                    _collect_extra_way_nodes(payload, extra_rel_way_ids, needed_node_ids)
+                    if not extra_rel_way_ids:
+                        break
 
             needed_node_ids.update(candidate_nodes)
             fh.seek(0)
 
         # Pass 2 (or single pass if bbox is None)
-        while True:
-            len_bytes = fh.read(4)
-            if not len_bytes:
-                break
-            if len(len_bytes) < 4:
-                raise OsmParseError(f"Truncated block header length in {path}")
-            header_len = struct.unpack(">I", len_bytes)[0]
-            header_bytes = fh.read(header_len)
-            if len(header_bytes) < header_len:
-                raise OsmParseError(f"Truncated block header in {path}")
-            btype, datasize = _read_block_header(header_bytes)
-            blob_bytes = fh.read(datasize)
-            if len(blob_bytes) < datasize:
-                raise OsmParseError(f"Truncated blob data in {path}")
-            if btype == "OSMData":
-                payload = _decompress_blob(blob_bytes)
-                process_block(payload, is_pass_1=False)
+        for payload in _iter_osm_data_payloads(fh, path):
+            process_block(payload, is_pass_1=False)
 
     return data
 

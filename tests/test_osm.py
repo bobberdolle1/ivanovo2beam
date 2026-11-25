@@ -59,6 +59,7 @@ from ivanovo2beam.osm import (
     parse_osm,
     parse_osm_pbf,
     read_cache_meta,
+    write_osm_pbf,
 )
 from ivanovo2beam.osm import fetch as fetch_module
 
@@ -413,7 +414,7 @@ class TestParseFixture:
         pond, boundary = tiny.relations
         assert pond.id == 301
         assert pond.type == "multipolygon"
-        assert pond.tags["name"] == "пруд у мельницы"  # noqa: RUF001 - real Russian text
+        assert pond.tags["name"] == "пруд у мельницы"
         assert pond.members == (("way", 205, "outer"), ("way", 206, "inner"))
         assert pond.members_of("way", "inner") == (206,)
         assert boundary.members_of("node") == (120,)
@@ -542,6 +543,72 @@ class TestParseRobustness:
         data = parse_osm(path)
         assert sorted(data.nodes) == [1]
         assert "Ivanovo" in data.node_tags[1]["name"]
+
+
+class TestPbfBBoxRelations:
+    """Verify cross-boundary relation member resolution in PBF bbox filtering."""
+
+    def test_cross_boundary_relation_preserves_out_of_bbox_member_way_nodes(self, work: Path) -> None:
+        bbox = BBox(west=40.96, south=56.99, east=40.98, north=57.01)
+
+        data = OsmData(source="synthetic")
+        # Nodes 1-3 are inside bbox; nodes 4-6 are well outside bbox.expanded(0.005);
+        # nodes 7-8 are well outside bbox for an administrative boundary segment.
+        data.nodes = {
+            1: (40.965, 56.995),
+            2: (40.975, 56.995),
+            3: (40.975, 57.005),
+            4: (41.050, 57.050),
+            5: (41.060, 57.060),
+            6: (41.050, 57.060),
+            7: (41.200, 57.200),
+            8: (41.210, 57.210),
+        }
+        data.ways = [
+            # In-bbox part of a cross-boundary lake multipolygon
+            OsmWay(id=2001, nodes=(1, 2, 3)),
+            # Completely out-of-bbox member way of the same lake multipolygon
+            OsmWay(id=2002, nodes=(4, 5, 6, 4)),
+            # Out-of-bbox member way of an administrative boundary
+            OsmWay(id=2003, nodes=(7, 8)),
+        ]
+        data.relations = [
+            OsmRelation(
+                id=3001,
+                members=(("way", 2001, "outer"), ("way", 2002, "outer")),
+                tags={"type": "multipolygon", "natural": "water", "name": "Cross Lake"},
+            ),
+            OsmRelation(
+                id=3002,
+                members=(("way", 2001, "outer"), ("way", 2003, "outer")),
+                tags={"type": "boundary", "boundary": "administrative", "name": "Oblast"},
+            ),
+        ]
+
+        pbf_path = work / "cross_boundary.osm.pbf"
+        write_osm_pbf(pbf_path, data)
+
+        parsed = parse_osm_pbf(pbf_path, bbox=bbox)
+
+        way_map = {w.id: w for w in parsed.ways}
+        rel_ids = {r.id for r in parsed.relations}
+
+        assert 3001 in rel_ids
+        assert 2001 in way_map
+        assert 2002 in way_map
+        # Every node of the completely out-of-bbox member way 2002 must be resolved
+        for nid in (4, 5, 6):
+            assert nid in parsed.nodes
+        assert len(parsed.way_coords(way_map[2002])) == len(way_map[2002].nodes)
+
+        # Province-wide boundary relations must not pull completely out-of-bbox ways/nodes
+        assert 2003 not in way_map
+        assert 7 not in parsed.nodes
+        assert 8 not in parsed.nodes
+
+        # Every emitted way must have complete node coordinates
+        for way in parsed.ways:
+            assert len(parsed.way_coords(way)) == len(way.nodes)
 
 
 class TestStreaming:

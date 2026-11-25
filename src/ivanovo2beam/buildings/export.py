@@ -649,7 +649,7 @@ def _export_buildings_archetypes(
         scale: tuple[float, float, float],
         roof: str,
     ) -> None:
-        width, depth, cx, cy = _bbox(footprint.ring)
+        _width, _depth, cx, cy = _bbox(footprint.ring)
         ground = _sample_ground(build, cx, cy)
         objects.append(
             {

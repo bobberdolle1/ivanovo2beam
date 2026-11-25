@@ -375,15 +375,19 @@ def build_sun_and_sky(
     latitude: float,
     longitude: float,
     elevation_m: float,
-    time_of_day: float = 0.35,
+    time_of_day: float = 0.5,
+    axis_tilt: float = 23.44,
     visible_distance_m: float = 12000.0,
+    fog_density: float = 4.99999987e-05,
     gravity: float = -9.81,
+    cloud_coverage: float = 0.25,
 ) -> None:
     """Add sun, atmosphere and time-of-day objects to the scene.
 
     The sky gradients are base-game assets referenced by path. ``TimeOfDay`` is
     configured for the region's real latitude and longitude so the sun tracks
-    the actual sky over Ivanovo rather than an arbitrary default.
+    the actual sky over Ivanovo rather than an arbitrary default. Defaults model
+    a bright summer midday atmosphere.
 
     Args:
         tree: Scene to populate.
@@ -392,8 +396,11 @@ def build_sun_and_sky(
         longitude: Real longitude of the level centre, degrees east.
         elevation_m: Representative ground elevation in metres.
         time_of_day: Initial time as a fraction of a day (0.5 is noon).
+        axis_tilt: Axial tilt in degrees (+23.44 for summer in Northern Hemisphere).
         visible_distance_m: Far clip distance in metres.
+        fog_density: Atmospheric fog density.
         gravity: Gravity in m/s^2.
+        cloud_coverage: Cloud coverage fraction (0.25 for clear summer sky).
     """
     origin_z = elevation_m
 
@@ -405,7 +412,7 @@ def build_sun_and_sky(
             "persistentId": stable_uuid(tree.level_id, "ScatterSky", "sunsky"),
             "position": [0, 0, origin_z + 1000.0],
             "azimuth": 315.0,
-            "elevation": 45.0,
+            "elevation": 56.5,
             "colorize": [0.215686277, 0.349019617, 0.603921592, 1],
             "colorizeGradientFile": "art/sky_gradients/default/gradient_colorize.png",
             "ambientScale": [1, 0.894117653, 0.78039217, 1],
@@ -435,7 +442,7 @@ def build_sun_and_sky(
             # Real solar geometry for the mapped area.
             "latitude": round(latitude, 5),
             "longitude": round(longitude, 5),
-            "axisTilt": -20,
+            "axisTilt": round(axis_tilt, 2),
             "startTime": time_of_day,
             "time": time_of_day,
         },
@@ -452,7 +459,7 @@ def build_sun_and_sky(
             "visibleDistance": visible_distance_m,
             "canvasClearColor": [1, 1, 1, 255],
             "fogColor": [0.741176009, 0.815685987, 0.925490022, 1],
-            "fogDensity": 4.99999987e-05,
+            "fogDensity": fog_density,
             "fogAtmosphereHeight": 1600,
             "globalEnviromentMap": "BNG_Sky_02_cubemap",
         },
@@ -471,8 +478,8 @@ def build_sun_and_sky(
                 {"texDirection": [0.2, 0.5], "texScale": 4.0, "texSpeed": 0.025},
             ],
             "baseColor": [0.95, 0.95, 0.95, 0.9],
-            "coverage": 0.65,
-            "exposure": 1.2,
+            "coverage": cloud_coverage,
+            "exposure": 1.3,
             "height": 3.0,
             "texture": "/levels/east_coast_usa/art/skies/SkyNormals_05.dds",
             "windSpeed": 0.2,
@@ -630,7 +637,7 @@ def write_level_files(level_dir: Path, files: dict[str, str]) -> list[Path]:
     root = level_dir.resolve()
     for relative, contents in sorted(files.items()):
         target = (level_dir / relative).resolve()
-        if not str(target).startswith(str(root)):
+        if not target.is_relative_to(root):
             raise ValueError(f"refusing to write outside the level directory: {relative}")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(contents, encoding="utf-8")

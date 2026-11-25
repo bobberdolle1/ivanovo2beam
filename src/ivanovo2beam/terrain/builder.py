@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 import shapely
+from numpy.lib.stride_tricks import sliding_window_view
 from shapely.geometry import Polygon
 from shapely.validation import make_valid
 
@@ -188,11 +189,13 @@ def sample_dem_onto_grid(
     origin_y: float,
     grid_size: int,
     cell_size_m: float,
+    *,
+    block_rows: int = 128,
 ) -> NDArray[np.float64]:
     """Sample a DEM onto the world grid.
 
-    Works row by row so peak memory stays at a few row buffers rather than the
-    16.7 million points a 4096 x 4096 grid would otherwise need at once.
+    Works in row blocks so peak memory stays small while avoiding per-row
+    projection and raster-window overhead on 2048+ grids.
 
     Args:
         dem: Elevation source.
@@ -201,18 +204,24 @@ def sample_dem_onto_grid(
         origin_y: World Y of the grid's minimum corner.
         grid_size: Vertices per side.
         cell_size_m: Ground spacing in metres.
+        block_rows: Number of rows sampled per DEM batch.
 
     Returns:
         ``(grid_size, grid_size)`` float64 elevations in metres, indexed
         ``[row, col]`` with row 0 at the southern edge.
     """
     x_vector = origin_x + np.arange(grid_size, dtype=np.float64) * cell_size_m
+    y_vector = origin_y + np.arange(grid_size, dtype=np.float64) * cell_size_m
     out = np.empty((grid_size, grid_size), dtype=np.float64)
-    for row in range(grid_size):
-        y = origin_y + row * cell_size_m
-        x_grid, y_grid = np.meshgrid(x_vector, np.array([y], dtype=np.float64))
-        lons, lats = projection.world_to_geo_array(x_grid.ravel(), y_grid.ravel())
-        out[row, :] = dem.sample_array(lons, lats)
+    step = max(1, block_rows)
+    for row_start in range(0, grid_size, step):
+        row_end = min(grid_size, row_start + step)
+        rows = row_end - row_start
+        xs = np.broadcast_to(x_vector[None, :], (rows, grid_size)).ravel()
+        ys = np.broadcast_to(y_vector[row_start:row_end, None], (rows, grid_size)).ravel()
+        lons, lats = projection.world_to_geo_array(xs, ys)
+        samples = np.asarray(dem.sample_array(lons, lats), dtype=np.float64)
+        out[row_start:row_end, :] = samples.reshape(rows, grid_size)
     return out
 
 
@@ -343,8 +352,11 @@ def derive_road_profile(
         the returned elevations.
     """
     resampled, _ = resample_polyline(points, sample_step_m)
-    lons, lats = projection.world_to_geo_array(resampled[:, 0], resampled[:, 1])
-    raw = np.asarray(dem.sample_array(lons, lats), dtype=np.float64)
+    if hasattr(dem, "sample_world_array"):
+        raw = np.asarray(dem.sample_world_array(resampled[:, 0], resampled[:, 1]), dtype=np.float64)
+    else:
+        lons, lats = projection.world_to_geo_array(resampled[:, 0], resampled[:, 1])
+        raw = np.asarray(dem.sample_array(lons, lats), dtype=np.float64)
 
     # A DEM can return NaN at the edge of coverage; fill from neighbours so a
     # single gap does not poison the whole profile.
@@ -369,7 +381,7 @@ def derive_road_profile(
 def _smoothstep(edge0: float, edge1: float, value: NDArray[np.float64]) -> NDArray[np.float64]:
     """Hermite smoothstep, clamped to ``[0, 1]``."""
     if edge1 <= edge0:
-        return np.ones_like(value)
+        return np.where(np.asarray(value, dtype=np.float64) > edge0, 1.0, 0.0)
     t = np.clip((value - edge0) / (edge1 - edge0), 0.0, 1.0)
     return t * t * (3.0 - 2.0 * t)
 
@@ -422,6 +434,8 @@ def grade_corridors(
     owner_material = np.zeros((n, n), dtype=np.uint8)
     owner_shoulder = np.zeros((n, n), dtype=np.uint8)
     per_material: dict[str, int] = {}
+    all_x = origin_x + np.arange(n, dtype=np.float64) * cell_size_m
+    all_y = origin_y + np.arange(n, dtype=np.float64) * cell_size_m
 
     graded = 0
     for corridor in corridors:
@@ -455,11 +469,8 @@ def grade_corridors(
             if col_hi < col_lo or row_hi < row_lo:
                 continue
 
-            cols = np.arange(col_lo, col_hi + 1, dtype=np.float64)
-            rows = np.arange(row_lo, row_hi + 1, dtype=np.float64)
-            cx = origin_x + cols * cell_size_m
-            cy = origin_y + rows * cell_size_m
-            grid_x, grid_y = np.meshgrid(cx, cy)
+            grid_x = all_x[col_lo : col_hi + 1][None, :]
+            grid_y = all_y[row_lo : row_hi + 1][:, None]
 
             # Distance from each cell centre to the segment.
             rel_x = grid_x - x0
@@ -602,6 +613,33 @@ def _fill_dem_gaps(
 # ---------------------------------------------------------------------------
 
 
+def _morph_mask(mask: NDArray[np.bool_], radius: int, *, erode: bool) -> NDArray[np.bool_]:
+    """Separably erode or dilate a 2D boolean mask by ``radius`` cells."""
+    if radius <= 0 or mask.shape[0] == 0 or mask.shape[1] == 0:
+        return mask.copy()
+    width = 2 * radius + 1
+    pad_x = np.pad(mask, ((0, 0), (radius, radius)), mode="constant", constant_values=False)
+    view_x = sliding_window_view(pad_x, width, axis=1)
+    row_pass = view_x.all(axis=-1) if erode else view_x.any(axis=-1)
+    pad_y = np.pad(row_pass, ((radius, radius), (0, 0)), mode="constant", constant_values=False)
+    view_y = sliding_window_view(pad_y, width, axis=0)
+    return view_y.all(axis=-1) if erode else view_y.any(axis=-1)
+
+
+def _normalize_polygonal(geom: Any) -> Any | None:
+    """Extract polygonal parts from a shapely geometry after validation/clipping."""
+    if geom.is_empty:
+        return None
+    if geom.geom_type in ("Polygon", "MultiPolygon"):
+        return geom
+    if geom.geom_type == "GeometryCollection":
+        polys = [g for g in geom.geoms if g.geom_type in ("Polygon", "MultiPolygon") and not g.is_empty]
+        if not polys:
+            return None
+        return shapely.unary_union(polys)
+    return None
+
+
 def carve_water(
     elevations: NDArray[np.float64],
     layers: NDArray[np.uint8],
@@ -636,12 +674,23 @@ def carve_water(
         (touched_cells_count, stats_dict).
     """
     n = elevations.shape[0]
-    idx_pebbles = material_index.get("Pebbles", 11)
-    idx_sand = material_index.get("Sand", 10)
-    idx_riverbank_soil = material_index.get("RiverbankSoil", 4)
+    idx_pebbles = material_index.get("Pebbles")
+    idx_sand = material_index.get("Sand")
+    idx_riverbank_soil = material_index.get("RiverbankSoil")
 
     bw = max(6.0, min(12.0, float(bank_transition_m)))
     touched_mask = np.zeros((n, n), dtype=bool)
+    all_x = origin_x + np.arange(n, dtype=np.float64) * cell_size_m
+    all_y = origin_y + np.arange(n, dtype=np.float64) * cell_size_m
+    terrain_max_x = origin_x + (n - 1) * cell_size_m
+    terrain_max_y = origin_y + (n - 1) * cell_size_m
+    clip_pad = bw + cell_size_m
+    clip_min_x = origin_x - clip_pad
+    clip_min_y = origin_y - clip_pad
+    clip_max_x = terrain_max_x + clip_pad
+    clip_max_y = terrain_max_y + clip_pad
+    shore_pad_cells = math.ceil(bw / cell_size_m) + 1
+    outer_pad_cells = math.ceil(0.75 * bw / cell_size_m) + 1
 
     # 1. Carve linear river channels
     rivers = getattr(water_network, "rivers", ())
@@ -668,11 +717,8 @@ def carve_water(
             if col_hi < col_lo or row_hi < row_lo:
                 continue
 
-            cols = np.arange(col_lo, col_hi + 1, dtype=np.float64)
-            rows = np.arange(row_lo, row_hi + 1, dtype=np.float64)
-            cx = origin_x + cols * cell_size_m
-            cy = origin_y + rows * cell_size_m
-            grid_x, grid_y = np.meshgrid(cx, cy)
+            grid_x = all_x[col_lo : col_hi + 1][None, :]
+            grid_y = all_y[row_lo : row_hi + 1][:, None]
 
             rel_x = grid_x - x0
             rel_y = grid_y - y0
@@ -684,9 +730,7 @@ def carve_water(
 
             inside_channel = dist <= hw
             in_bank = (dist > hw) & (dist <= total_reach)
-            affected = dist <= total_reach
-
-            if not affected.any():
+            if not (inside_channel.any() or in_bank.any()):
                 continue
 
             # Channel bed: depress to water_z - depth_m
@@ -697,31 +741,47 @@ def carve_water(
             if inside_channel.any():
                 bed_z = water_z - depth_m
                 sub_elev[inside_channel] = np.minimum(sub_elev[inside_channel], bed_z[inside_channel])
-                sub_layers[inside_channel] = idx_pebbles
+                if idx_pebbles is not None:
+                    sub_layers[inside_channel] = idx_pebbles
                 sub_touched[inside_channel] = True
 
             if in_bank.any():
                 frac = (dist[in_bank] - hw) / bw
                 smooth = frac * frac * (3.0 - 2.0 * frac)
-                bank_z = (water_z[in_bank] - depth_m) + smooth * depth_m
+                bed_z = water_z[in_bank] - depth_m
+                bank_z = bed_z + smooth * (sub_elev[in_bank] - bed_z)
                 sub_elev[in_bank] = np.minimum(sub_elev[in_bank], bank_z)
                 sub_touched[in_bank] = True
 
-                sub_layers[in_bank] = np.where(frac <= 0.45, idx_sand, idx_riverbank_soil)
+                shallow_bank = frac <= 0.45
+                if idx_sand is not None and idx_riverbank_soil is not None:
+                    sub_layers[in_bank] = np.where(shallow_bank, idx_sand, idx_riverbank_soil)
+                elif idx_sand is not None:
+                    sub_layers[in_bank] = np.where(shallow_bank, idx_sand, sub_layers[in_bank])
+                elif idx_riverbank_soil is not None:
+                    sub_layers[in_bank] = np.where(~shallow_bank, idx_riverbank_soil, sub_layers[in_bank])
 
     # 2. Carve standing water bodies (lakes, reservoirs, ponds)
     bodies = getattr(water_network, "water_bodies", ())
     for body in bodies:
         outer = body.outer_ring
+        if len(outer) < 4:
+            continue
         inners = [h for h in body.inner_rings if len(h) >= 4]
         z_water = float(body.z_water)
         depth_m = float(body.depth_m)
 
         poly = Polygon(outer, holes=inners)
         if not poly.is_valid:
-            poly = make_valid(poly)
-            if poly.is_empty:
+            poly = _normalize_polygonal(make_valid(poly))
+            if poly is None:
                 continue
+
+        # Clip to terrain bounds (+ bank transition) so off-map water bodies
+        # do not evaluate millions of interior/exterior cells.
+        poly = _normalize_polygonal(shapely.clip_by_rect(poly, clip_min_x, clip_min_y, clip_max_x, clip_max_y))
+        if poly is None:
+            continue
 
         min_x, min_y, max_x, max_y = poly.bounds
         col_lo = max(0, math.floor((min_x - bw - origin_x) / cell_size_m))
@@ -731,14 +791,13 @@ def carve_water(
         if col_hi < col_lo or row_hi < row_lo:
             continue
 
-        cols = np.arange(col_lo, col_hi + 1, dtype=np.float64)
-        rows = np.arange(row_lo, row_hi + 1, dtype=np.float64)
-        cx = origin_x + cols * cell_size_m
-        cy = origin_y + rows * cell_size_m
-        grid_x, grid_y = np.meshgrid(cx, cy)
+        ny = row_hi - row_lo + 1
+        nx = col_hi - col_lo + 1
+        grid_x = np.broadcast_to(all_x[col_lo : col_hi + 1][None, :], (ny, nx))
+        grid_y = np.broadcast_to(all_y[row_lo : row_hi + 1][:, None], (ny, nx))
 
         # Vectorized containment: True for lake basin, False for islands (holes)
-        inside = shapely.contains_xy(poly, grid_x.ravel(), grid_y.ravel()).reshape(grid_x.shape)
+        inside = shapely.contains_xy(poly, grid_x.ravel(), grid_y.ravel()).reshape(ny, nx)
         if not inside.any():
             continue
 
@@ -746,47 +805,60 @@ def carve_water(
         sub_layers = layers[row_lo : row_hi + 1, col_lo : col_hi + 1]
         sub_touched = touched_mask[row_lo : row_hi + 1, col_lo : col_hi + 1]
 
-        # Calculate distance to shoreline (boundary includes both outer ring and island rings)
-        pts_inside = shapely.points(grid_x[inside], grid_y[inside])
-        dist_to_shore = shapely.distance(poly.boundary, pts_inside)
+        # Erode/dilate so shapely.distance runs ONLY on the narrow shoreline band.
+        deep_interior = _morph_mask(inside, shore_pad_cells, erode=True)
+        if deep_interior.any():
+            sub_elev[deep_interior] = np.minimum(sub_elev[deep_interior], z_water - depth_m)
+            if idx_pebbles is not None:
+                sub_layers[deep_interior] = idx_pebbles
+            sub_touched[deep_interior] = True
 
-        deep_mask = dist_to_shore >= bw
-        shallow_mask = ~deep_mask
+        boundary = shapely.boundary(poly)
+        shore_band = inside & ~deep_interior
+        if shore_band.any():
+            pts_shore = shapely.points(grid_x[shore_band], grid_y[shore_band])
+            dist_to_shore = shapely.distance(boundary, pts_shore)
+            band_rows, band_cols = np.where(shore_band)
 
-        # Deep basin bed
-        inside_indices = np.where(inside)
-        deep_rows = inside_indices[0][deep_mask]
-        deep_cols = inside_indices[1][deep_mask]
-        sub_elev[deep_rows, deep_cols] = np.minimum(sub_elev[deep_rows, deep_cols], z_water - depth_m)
-        sub_layers[deep_rows, deep_cols] = idx_pebbles
-        sub_touched[deep_rows, deep_cols] = True
+            deep_mask = dist_to_shore >= bw
+            if deep_mask.any():
+                dr = band_rows[deep_mask]
+                dc = band_cols[deep_mask]
+                sub_elev[dr, dc] = np.minimum(sub_elev[dr, dc], z_water - depth_m)
+                if idx_pebbles is not None:
+                    sub_layers[dr, dc] = idx_pebbles
+                sub_touched[dr, dc] = True
 
-        # Shallow bank transition towards shore / island
-        shallow_rows = inside_indices[0][shallow_mask]
-        shallow_cols = inside_indices[1][shallow_mask]
-        t = dist_to_shore[shallow_mask] / bw
-        smooth = t * t * (3.0 - 2.0 * t)
-        bed_z = z_water - depth_m * smooth
-        sub_elev[shallow_rows, shallow_cols] = np.minimum(sub_elev[shallow_rows, shallow_cols], bed_z)
-        sub_touched[shallow_rows, shallow_cols] = True
+            shallow_mask = ~deep_mask
+            if shallow_mask.any():
+                sr = band_rows[shallow_mask]
+                sc = band_cols[shallow_mask]
+                t = dist_to_shore[shallow_mask] / bw
+                smooth = t * t * (3.0 - 2.0 * t)
+                bed_z = z_water - depth_m * smooth
+                sub_elev[sr, sc] = np.minimum(sub_elev[sr, sc], bed_z)
+                sub_touched[sr, sc] = True
 
-        pebbles_sub = t > 0.4
-        sand_sub = ~pebbles_sub
-        sub_layers[shallow_rows[pebbles_sub], shallow_cols[pebbles_sub]] = idx_pebbles
-        sub_layers[shallow_rows[sand_sub], shallow_cols[sand_sub]] = idx_sand
+                pebbles_sub = t > 0.4
+                sand_sub = ~pebbles_sub
+                if idx_pebbles is not None:
+                    sub_layers[sr[pebbles_sub], sc[pebbles_sub]] = idx_pebbles
+                if idx_sand is not None:
+                    sub_layers[sr[sand_sub], sc[sand_sub]] = idx_sand
 
-        # Paint wet bank immediately outside shoreline (e.g. within 0.75 * bw)
-        outside = ~inside
-        if outside.any():
-            pts_outside = shapely.points(grid_x[outside], grid_y[outside])
-            dist_out = shapely.distance(poly.boundary, pts_outside)
+        # Paint wet bank immediately outside shoreline (within 0.75 * bw)
+        outside_band = (~inside) & _morph_mask(inside, outer_pad_cells, erode=False)
+        if outside_band.any():
+            pts_outside = shapely.points(grid_x[outside_band], grid_y[outside_band])
+            dist_out = shapely.distance(boundary, pts_outside)
             wet_out_mask = dist_out <= (0.75 * bw)
             if wet_out_mask.any():
-                out_indices = np.where(outside)
-                wet_rows = out_indices[0][wet_out_mask]
-                wet_cols = out_indices[1][wet_out_mask]
-                sub_layers[wet_rows, wet_cols] = idx_riverbank_soil
-                sub_touched[wet_rows, wet_cols] = True
+                out_rows, out_cols = np.where(outside_band)
+                wr = out_rows[wet_out_mask]
+                wc = out_cols[wet_out_mask]
+                if idx_riverbank_soil is not None:
+                    sub_layers[wr, wc] = idx_riverbank_soil
+                sub_touched[wr, wc] = True
 
     touched_count = int(touched_mask.sum())
     stats = {
@@ -807,6 +879,7 @@ def strip_forest_canopy(
     origin_y: float,
     cell_size_m: float,
     fallback_canopy_m: float = 12.0,
+    canopy_height_m: float | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Rasterize forest mask, measure canopy jump across boundary, and subtract canopy height.
 
@@ -830,6 +903,8 @@ def strip_forest_canopy(
     """
     n = elevations.shape[0]
     forest_mask = np.zeros((n, n), dtype=bool)
+    all_x = origin_x + np.arange(n, dtype=np.float64) * cell_size_m
+    all_y = origin_y + np.arange(n, dtype=np.float64) * cell_size_m
 
     for shape in forest_polygons:
         if isinstance(shape, Polygon):
@@ -852,13 +927,12 @@ def strip_forest_canopy(
         if col_hi < col_lo or row_hi < row_lo:
             continue
 
-        cols = np.arange(col_lo, col_hi + 1, dtype=np.float64)
-        rows = np.arange(row_lo, row_hi + 1, dtype=np.float64)
-        cx = origin_x + cols * cell_size_m
-        cy = origin_y + rows * cell_size_m
-        grid_x, grid_y = np.meshgrid(cx, cy)
+        ny = row_hi - row_lo + 1
+        nx = col_hi - col_lo + 1
+        grid_x = np.broadcast_to(all_x[col_lo : col_hi + 1][None, :], (ny, nx))
+        grid_y = np.broadcast_to(all_y[row_lo : row_hi + 1][:, None], (ny, nx))
 
-        inside = shapely.contains_xy(poly, grid_x.ravel(), grid_y.ravel()).reshape(grid_x.shape)
+        inside = shapely.contains_xy(poly, grid_x.ravel(), grid_y.ravel()).reshape(ny, nx)
         forest_mask[row_lo : row_hi + 1, col_lo : col_hi + 1] |= inside
 
     if not forest_mask.any():
@@ -876,7 +950,9 @@ def strip_forest_canopy(
     )
     outside_edge = (~forest_mask) & has_inside_neighbor
 
-    if inside_edge.any() and outside_edge.any():
+    if canopy_height_m is not None:
+        jump = float(canopy_height_m)
+    elif inside_edge.any() and outside_edge.any():
         z_in = elevations[inside_edge]
         z_out = elevations[outside_edge]
         jump = float(np.mean(z_in) - np.mean(z_out))
@@ -887,8 +963,9 @@ def strip_forest_canopy(
     if canopy_height > 0.0:
         elevations[forest_mask] -= canopy_height
 
-    idx_forest_floor = material_index.get("ForestFloor", 2)
-    layers[forest_mask] = idx_forest_floor
+    idx_forest_floor = material_index.get("ForestFloor")
+    if idx_forest_floor is not None:
+        layers[forest_mask] = idx_forest_floor
 
     forest_cells = int(forest_mask.sum())
     stats = {
@@ -922,6 +999,8 @@ def paint_landcover(
     """
     total_painted = 0
     n = layers.shape[0]
+    all_x = origin_x + np.arange(n, dtype=np.float64) * cell_size_m
+    all_y = origin_y + np.arange(n, dtype=np.float64) * cell_size_m
     for mat_key, poly_list in polygons_by_material.items():
         mat_idx = material_index.get(mat_key)
         if mat_idx is None:
@@ -945,15 +1024,80 @@ def paint_landcover(
             row_hi = min(n - 1, math.ceil((max_y - origin_y) / cell_size_m))
             if col_hi < col_lo or row_hi < row_lo:
                 continue
-            cols = np.arange(col_lo, col_hi + 1, dtype=np.float64)
-            rows = np.arange(row_lo, row_hi + 1, dtype=np.float64)
-            cx = origin_x + cols * cell_size_m
-            cy = origin_y + rows * cell_size_m
-            gx, gy = np.meshgrid(cx, cy)
-            inside = shapely.contains_xy(poly, gx.ravel(), gy.ravel()).reshape(gx.shape)
+            ny = row_hi - row_lo + 1
+            nx = col_hi - col_lo + 1
+            gx = np.broadcast_to(all_x[col_lo : col_hi + 1][None, :], (ny, nx))
+            gy = np.broadcast_to(all_y[row_lo : row_hi + 1][:, None], (ny, nx))
+            inside = shapely.contains_xy(poly, gx.ravel(), gy.ravel()).reshape(ny, nx)
             layers[row_lo : row_hi + 1, col_lo : col_hi + 1][inside] = mat_idx
             total_painted += int(inside.sum())
     return total_painted
+
+
+class _GridOverlayDem:
+    """DemSampler backed by the prepared terrain grid with DEM fallback outside."""
+
+    def __init__(
+        self,
+        elevations: NDArray[np.float64],
+        projection: RegionProjection,
+        origin_x: float,
+        origin_y: float,
+        cell_size_m: float,
+        fallback_dem: DemSampler,
+    ) -> None:
+        self._elevations = elevations
+        self._projection = projection
+        self._origin_x = origin_x
+        self._origin_y = origin_y
+        self._cell_size_m = cell_size_m
+        self._fallback = fallback_dem
+
+    def sample_world_array(self, xs: Any, ys: Any) -> NDArray[np.float64]:
+        xs_arr = np.asarray(xs, dtype=np.float64)
+        ys_arr = np.asarray(ys, dtype=np.float64)
+        shape = xs_arr.shape
+        flat_x = xs_arr.ravel()
+        flat_y = ys_arr.ravel()
+        n = self._elevations.shape[0]
+        fc = (flat_x - self._origin_x) / self._cell_size_m
+        fr = (flat_y - self._origin_y) / self._cell_size_m
+        in_grid = (fc >= 0.0) & (fc <= n - 1) & (fr >= 0.0) & (fr <= n - 1)
+
+        out = np.empty(flat_x.shape, dtype=np.float64)
+        if in_grid.any():
+            fc_in = fc[in_grid]
+            fr_in = fr[in_grid]
+            c0 = np.floor(fc_in).astype(np.intp)
+            r0 = np.floor(fr_in).astype(np.intp)
+            c0 = np.minimum(c0, n - 2)
+            r0 = np.minimum(r0, n - 2)
+            dc = fc_in - c0
+            dr = fr_in - r0
+            z00 = self._elevations[r0, c0]
+            z01 = self._elevations[r0, c0 + 1]
+            z10 = self._elevations[r0 + 1, c0]
+            z11 = self._elevations[r0 + 1, c0 + 1]
+            out[in_grid] = (
+                z00 * (1.0 - dc) * (1.0 - dr)
+                + z01 * dc * (1.0 - dr)
+                + z10 * (1.0 - dc) * dr
+                + z11 * dc * dr
+            )
+        outside = ~in_grid
+        if outside.any():
+            out_lons, out_lats = self._projection.world_to_geo_array(flat_x[outside], flat_y[outside])
+            out[outside] = np.asarray(
+                self._fallback.sample_array(out_lons, out_lats),
+                dtype=np.float64,
+            )
+        return out.reshape(shape)
+
+    def sample_array(self, lons: Any, lats: Any) -> NDArray[np.float64]:
+        lons_arr = np.asarray(lons, dtype=np.float64)
+        lats_arr = np.asarray(lats, dtype=np.float64)
+        xs, ys = self._projection.geo_to_world_array(lons_arr.ravel(), lats_arr.ravel())
+        return self.sample_world_array(xs, ys).reshape(lons_arr.shape)
 
 
 def build_terrain(
@@ -968,7 +1112,7 @@ def build_terrain(
     material_order: Sequence[str] = DEFAULT_MATERIAL_ORDER,
     ground_margin_m: float = 5.0,
     max_height_m: float | None = None,
-    sample_step_m: float = 5.0,
+    sample_step_m: float | None = None,
     smooth_window_m: float = 120.0,
     max_grade: float = 0.12,
     progress: Any = None,
@@ -1058,7 +1202,6 @@ def build_terrain(
     # 1. Forest canopy stripping filter (BEFORE road grading!)
     if forest_polygons:
         report(0.38, f"stripping canopy from {len(forest_polygons)} forest polygons")
-        fallback_h = canopy_height_m if canopy_height_m is not None else 12.0
         forest_cells, forest_stats = strip_forest_canopy(
             elevations,
             layers,
@@ -1067,7 +1210,8 @@ def build_terrain(
             origin_x=origin_x,
             origin_y=origin_y,
             cell_size_m=cell_size_m,
-            fallback_canopy_m=fallback_h,
+            fallback_canopy_m=canopy_height_m if canopy_height_m is not None else 12.0,
+            canopy_height_m=canopy_height_m,
         )
         stats["forest_cells"] = forest_cells
         stats.update(forest_stats)
@@ -1097,14 +1241,23 @@ def build_terrain(
     graded_cells = 0
     if corridors:
         report(0.40, f"deriving profiles for {len(corridors)} road corridors")
+        profile_dem: DemSampler = _GridOverlayDem(
+            elevations,
+            projection,
+            origin_x,
+            origin_y,
+            cell_size_m,
+            dem,
+        )
+        effective_sample_step = sample_step_m if sample_step_m is not None else max(8.0, cell_size_m)
         prepared: list[RoadCorridor] = []
         for i, corridor in enumerate(corridors):
             if corridor.surface_z is None and corridor.grade_terrain:
                 points, profile = derive_road_profile(
-                    dem,
+                    profile_dem,
                     projection,
                     corridor.points,
-                    sample_step_m=sample_step_m,
+                    sample_step_m=effective_sample_step,
                     smooth_window_m=smooth_window_m,
                     max_grade=max_grade,
                 )

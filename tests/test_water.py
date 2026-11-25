@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
-from ivanovo2beam.beamng.level import SceneTree, build_info_json
+from ivanovo2beam.beamng.level import ROOT_GROUP, SceneTree, build_info_json
 from ivanovo2beam.gis.projection import BBox, make_projection
 from ivanovo2beam.osm.types import OsmData, OsmNode, OsmRelation, OsmWay
 from ivanovo2beam.water.export import (
@@ -15,6 +17,7 @@ from ivanovo2beam.water.export import (
     WATER_GROUP,
     build_river_object,
     build_water_block_object,
+    compute_water_block_grid_element_size,
     export_water_to_scene,
 )
 from ivanovo2beam.water.extract import (
@@ -208,6 +211,104 @@ class TestWaterExtraction:
         assert volga.depth_m >= 3.5
         assert len(volga.inner_rings) == 1  # Island preserved!
 
+    def test_clip_bounds_drops_offmap_and_clips_straddling_rivers_and_lakes(self, projection):
+        # Build synthetic world-coordinate water features converted back to geo for OsmData
+        world_pts = [
+            # River 1 (IDs 1-2): completely outside clip_bounds
+            (-5000.0, 500.0),
+            (-3000.0, 500.0),
+            # River 2 (IDs 3-4): enters clip_bounds from west to east
+            (-1000.0, 500.0),
+            (1000.0, 500.0),
+            # River 3 (IDs 5-8): crosses clip_bounds twice (exits and re-enters -> 2 parts)
+            (100.0, 200.0),
+            (100.0, 1500.0),
+            (400.0, 1500.0),
+            (400.0, 200.0),
+            # Off-map lake (IDs 9-12)
+            (-4000.0, -4000.0),
+            (-3000.0, -4000.0),
+            (-3000.0, -3000.0),
+            (-4000.0, -3000.0),
+            # Huge straddling reservoir (IDs 13-16): extends 10 km outside
+            (500.0, 200.0),
+            (10000.0, 200.0),
+            (10000.0, 10000.0),
+            (500.0, 10000.0),
+            # Multipolygon outer (IDs 17-20)
+            (-500.0, -500.0),
+            (1500.0, -500.0),
+            (1500.0, 1500.0),
+            (-500.0, 1500.0),
+            # Island 1 inside clip_bounds (IDs 21-24)
+            (200.0, 200.0),
+            (300.0, 200.0),
+            (300.0, 300.0),
+            (200.0, 300.0),
+            # Island 2 outside clip_bounds (IDs 25-28)
+            (-400.0, -400.0),
+            (-200.0, -400.0),
+            (-200.0, -200.0),
+            (-400.0, -200.0),
+        ]
+        xs = np.array([p[0] for p in world_pts], dtype=np.float64)
+        ys = np.array([p[1] for p in world_pts], dtype=np.float64)
+        lons, lats = projection.world_to_geo_array(xs, ys)
+        nodes = {
+            idx + 1: OsmNode(idx + 1, float(lons[idx]), float(lats[idx]))
+            for idx in range(len(world_pts))
+        }
+        ways = {
+            10: OsmWay(10, (1, 2), tags={"waterway": "river", "name": "OffmapRiver"}),
+            11: OsmWay(11, (3, 4), tags={"waterway": "river", "name": "CrossingRiver"}),
+            12: OsmWay(12, (5, 6, 7, 8), tags={"waterway": "stream", "name": "LoopStream"}),
+            20: OsmWay(20, (9, 10, 11, 12, 9), tags={"natural": "water", "name": "OffmapLake"}),
+            21: OsmWay(21, (13, 14, 15, 16, 13), tags={"natural": "water", "name": "StraddlingLake"}),
+            30: OsmWay(30, (17, 18, 19, 20, 17), tags={}),
+            31: OsmWay(31, (21, 22, 23, 24, 21), tags={}),
+            32: OsmWay(32, (25, 26, 27, 28, 25), tags={}),
+        }
+        relations = {
+            40: OsmRelation(
+                40,
+                members=(("way", 30, "outer"), ("way", 31, "inner"), ("way", 32, "inner")),
+                tags={"type": "multipolygon", "natural": "water", "name": "ClippedReservoir"},
+            )
+        }
+        osm_data = OsmData(nodes=nodes, ways=ways, relations=relations)
+        dem = MockDem(100.0)
+        clip_bounds = (0.0, 0.0, 1000.0, 1000.0)
+
+        # Without clip_bounds, everything is returned unclipped
+        unclipped = extract_water(osm_data, projection, dem)
+        assert len(unclipped.rivers) == 3
+        assert len(unclipped.water_bodies) == 3
+
+        clipped = extract_water(osm_data, projection, dem, clip_bounds=clip_bounds)
+
+        # Off-map river dropped; CrossingRiver clipped to [0, 1000]; LoopStream split into 2 parts
+        river_names = [r.name for r in clipped.rivers]
+        assert "OffmapRiver" not in river_names
+        assert river_names.count("CrossingRiver") == 1
+        assert river_names.count("LoopStream") == 2
+        assert len({r.osm_id for r in clipped.rivers}) == len(clipped.rivers)
+
+        crossing = next(r for r in clipped.rivers if r.name == "CrossingRiver")
+        assert crossing.points[0, 0] == pytest.approx(0.0, abs=1e-4)
+        assert crossing.points[-1, 0] == pytest.approx(1000.0, abs=1e-4)
+
+        # Off-map lake dropped; straddling lake & multipolygon clipped strictly inside clip_bounds
+        wb_names = {b.name for b in clipped.water_bodies}
+        assert wb_names == {"StraddlingLake", "ClippedReservoir"}
+        for wb in clipped.water_bodies:
+            min_x, min_y, max_x, max_y = wb.bounds
+            assert min_x >= -1e-4 and min_y >= -1e-4
+            assert max_x <= 1000.0 + 1e-4 and max_y <= 1000.0 + 1e-4
+
+        reservoir = next(b for b in clipped.water_bodies if b.name == "ClippedReservoir")
+        assert len(reservoir.inner_rings) == 1  # Only on-map island preserved!
+        assert reservoir.area_m2 == pytest.approx(1_000_000.0 - 10_000.0, rel=1e-4)
+
 
 class TestBeamNGExport:
     def test_build_river_object_schema(self):
@@ -254,11 +355,111 @@ class TestBeamNGExport:
 
         assert obj["class"] == "WaterBlock"
         assert obj["name"] == "waterblock_98765"
-        assert obj["position"] == [10.0, 10.0, 112.0]
+        assert obj["position"] == [55.0, 45.0, 112.0]
         assert obj["scale"] == [90.0, 70.0, 3.5]
         assert obj["rotationMatrix"] == [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        assert obj["gridElementSize"] == 8.0
+        assert 0.0 <= obj["foamAmbientLerp"] <= 1.0
         assert "Waves (vertex undulation)" in obj
         assert "Ripples (texture animation)" in obj
+        for layer in obj["Ripples (texture animation)"]:
+            assert isinstance(layer["rippleMagnitude"], float)
+
+    def test_water_block_adaptive_grid_element_size_for_large_lake(self):
+        # Regression test for multi-km reservoir (e.g. waterblock_87983155: 5852.34 x 2561.53 m)
+        body = WaterBody(
+            osm_id=87983155,
+            name="Горьковское водохранилище",
+            water_type="reservoir",
+            outer_ring=np.array(
+                [[0.0, 0.0], [5852.34, 0.0], [5852.34, 2561.53], [0.0, 2561.53], [0.0, 0.0]],
+                dtype=np.float64,
+            ),
+            depth_m=3.5,
+            z_water=84.0,
+        )
+        obj = build_water_block_object("ivanovo_shuya", body)
+        grid = obj["gridElementSize"]
+        assert grid == pytest.approx(compute_water_block_grid_element_size(5852.34, 2561.53))
+        assert 80.0 < grid <= 96.0
+        approx_vertices = (obj["scale"][0] / grid + 1.0) * (obj["scale"][1] / grid + 1.0)
+        assert 1000 <= approx_vertices <= 4500
+
+    def test_water_block_grid_element_size_clamped_below_100_and_min_scale(self):
+        # Mega reservoir (like waterblock_3235909: 5490.95 x 31406.45 m) must clamp <= 96.0
+        assert compute_water_block_grid_element_size(5490.95, 31406.45) == 96.0
+        mega = WaterBody(
+            osm_id=3235909,
+            name="Volga",
+            water_type="reservoir",
+            outer_ring=np.array(
+                [[0.0, 0.0], [5490.95, 0.0], [5490.95, 31406.45], [0.0, 31406.45], [0.0, 0.0]],
+                dtype=np.float64,
+            ),
+            depth_m=4.0,
+            z_water=84.0,
+        )
+        mega_obj = build_water_block_object("ivanovo_shuya", mega)
+        assert mega_obj["gridElementSize"] == 96.0
+        assert mega_obj["gridElementSize"] < 100.0
+
+        # Small pond (5 x 6 m) must not exceed min(size_x, size_y)
+        assert compute_water_block_grid_element_size(5.0, 6.0) == 5.0
+        # Tiny degenerate pond (< 1 m) clamped at 1.0
+        assert compute_water_block_grid_element_size(0.5, 0.5) == 1.0
+
+    def test_build_river_object_rejects_empty_or_single_point(self):
+        empty_channel = SimpleNamespace(
+            osm_id=999,
+            name="Empty",
+            waterway_type="stream",
+            points=np.empty((0, 2), dtype=np.float64),
+            width_m=4.0,
+            depth_m=0.8,
+            z_water=np.empty((0,), dtype=np.float64),
+            flow_speed=0.8,
+        )
+        single_channel = SimpleNamespace(
+            osm_id=1000,
+            name="Single",
+            waterway_type="stream",
+            points=np.array([[1.0, 2.0]], dtype=np.float64),
+            width_m=4.0,
+            depth_m=0.8,
+            z_water=np.array([100.0], dtype=np.float64),
+            flow_speed=0.8,
+        )
+        with pytest.raises(ValueError, match="at least 2 nodes"):
+            build_river_object("ivanovo_test", empty_channel)
+        with pytest.raises(ValueError, match="at least 2 nodes"):
+            build_river_object("ivanovo_test", single_channel)
+
+    def test_export_water_to_scene_skips_degenerate_river_and_allows_empty_group(self):
+        tree = SceneTree("ivanovo_test")
+        empty_river = SimpleNamespace(
+            osm_id=99,
+            name="Empty",
+            waterway_type="stream",
+            points=np.empty((0, 2), dtype=np.float64),
+            width_m=4.0,
+            depth_m=0.8,
+            z_water=np.empty((0,), dtype=np.float64),
+            flow_speed=0.8,
+        )
+        body = WaterBody(
+            osm_id=2,
+            name="Lake",
+            water_type="lake",
+            outer_ring=np.array([[0, 0], [50, 0], [50, 50], [0, 50], [0, 0]], dtype=np.float64),
+            depth_m=3.5,
+            z_water=98.0,
+        )
+        network = WaterNetwork(rivers=[empty_river], water_bodies=[body])
+
+        count = export_water_to_scene(tree, network, group_path=())
+        assert count == 1
+        assert () in tree.objects
+        assert tree.objects[()][0]["__parent"] == ROOT_GROUP
 
     def test_export_water_to_scene(self):
         tree = SceneTree("ivanovo_test")

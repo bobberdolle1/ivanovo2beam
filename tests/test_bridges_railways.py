@@ -14,12 +14,14 @@ from ivanovo2beam.gis.projection import BBox, make_projection
 from ivanovo2beam.osm.types import OsmData, OsmWay
 from ivanovo2beam.roads.bridges import (
     BRIDGE_DECAL_MATERIAL,
+    BridgeGeometry,
     build_bridge_geometry,
     build_bridge_scene_object,
     compute_bridge_deck_profile,
     create_bridgehead_ramps,
     emit_bridges_materials,
     export_bridge_dae,
+    localize_bridge_geometry,
 )
 from ivanovo2beam.roads.network import Road
 from ivanovo2beam.roads.railways import (
@@ -191,6 +193,105 @@ class TestBridgeDeckAndGeometry:
         assert ramp_end.surface_z[0] == pytest.approx(25.0)   # Pinned to deck_z[-1]
         assert ramp_end.surface_z[-1] == pytest.approx(20.0)  # Ground elevation 25m out
 
+    def test_bridge_mesh_localization_and_scene_position(self, tmp_path: Path) -> None:
+        # Distant bridge ~20 km from map origin (matching way183556845 pattern)
+        pts = np.array([[19929.0, 28.0], [19952.5, 29.7], [19976.0, 31.4]])
+        distant_road = Road(
+            osm_id=183556845,
+            highway="primary",
+            points=pts,
+            width_m=8.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=False,
+            bridge=True,
+            tunnel=False,
+            layer=1,
+            name="Distant Bridge",
+            maxspeed_kph=60.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        deck_z = np.array([95.4, 96.0, 96.6])
+
+        world_geom = build_bridge_geometry(distant_road, deck_z)
+        assert world_geom.origin == (0.0, 0.0, 0.0)
+        origin = world_geom.center
+        assert origin[0] == pytest.approx(19952.5, abs=0.5)
+        assert origin[1] == pytest.approx(29.7, abs=0.5)
+        assert origin[2] == pytest.approx(min(p[2] for p in world_geom.positions), abs=1e-3)
+
+        local_geom = build_bridge_geometry(distant_road, deck_z, localize=True)
+        assert local_geom.origin == origin
+        assert local_geom.center == origin
+        for wp, lp in zip(world_geom.positions, local_geom.positions, strict=True):
+            assert lp[0] + origin[0] == pytest.approx(wp[0], abs=1e-4)
+            assert lp[1] + origin[1] == pytest.approx(wp[1], abs=1e-4)
+            assert lp[2] + origin[2] == pytest.approx(wp[2], abs=1e-4)
+        assert max(abs(lp[0]) for lp in local_geom.positions) < 40.0
+        assert max(abs(lp[1]) for lp in local_geom.positions) < 20.0
+        assert min(lp[2] for lp in local_geom.positions) == pytest.approx(0.0, abs=1e-4)
+
+        # localize_bridge_geometry is idempotent
+        relocalized = localize_bridge_geometry(local_geom)
+        assert relocalized.origin == origin
+        assert relocalized.positions == local_geom.positions
+
+        # Backward compatibility: default BridgeGeometry has zero origin
+        manual_geom = BridgeGeometry()
+        assert manual_geom.origin == (0.0, 0.0, 0.0)
+        assert manual_geom.center == (0.0, 0.0, 0.0)
+
+        # Export both ways (world+origin vs pre-localized) and verify COLLADA vertices are local
+        dae_from_world = tmp_path / "world_origin.dae"
+        dae_from_local = tmp_path / "pre_local.dae"
+        dae_no_double = tmp_path / "no_double.dae"
+        export_bridge_dae(dae_from_world, world_geom, "bridge_way183556845", origin=origin)
+        export_bridge_dae(dae_from_local, local_geom, "bridge_way183556845")
+        export_bridge_dae(dae_no_double, local_geom, "bridge_way183556845", origin=origin)
+        assert dae_from_world.read_bytes() == dae_from_local.read_bytes() == dae_no_double.read_bytes()
+
+        ns = {"c": "http://www.collada.org/2005/11/COLLADASchema"}
+        root = ET.parse(dae_from_world).getroot()
+        pos_elem = root.find(".//c:float_array[@id='bridge_way183556845-mesh-positions-array']", ns)
+        assert pos_elem is not None and pos_elem.text is not None
+        vals = [float(v) for v in pos_elem.text.split()]
+        xs = vals[0::3]
+        assert max(abs(x) for x in xs) < 40.0
+
+        # Scene object carries world-space TSStatic.position matching origin
+        obj_default = build_bridge_scene_object(distant_road, "ivanovo_shuya")
+        assert obj_default["position"] == [0.0, 0.0, 0.0]
+        obj_loc = build_bridge_scene_object(distant_road, "ivanovo_shuya", position=origin)
+        assert obj_loc["position"] == list(origin)
+
+    @pytest.mark.parametrize(
+        ("material_key", "expected_shoulder"),
+        [
+            ("Asphalt", "Grass"),
+            ("Asphalt_worn", "Grass"),
+            ("Concrete", "Grass"),
+            ("Dirt", "Dirt"),
+            ("Gravel", "Gravel"),
+        ],
+    )
+    def test_create_bridgehead_ramps_shoulder_materials(
+        self, bridge_road, material_key: str, expected_shoulder: str
+    ) -> None:
+        from dataclasses import replace
+
+        road = replace(bridge_road, material_key=material_key)
+        ramps = create_bridgehead_ramps(
+            road,
+            RoadSettings(),
+            np.array([22.0, 22.0, 22.0]),
+            ground_sampler=lambda _x, _y: 20.0,
+        )
+        assert len(ramps) == 2
+        assert all(r.shoulder_material_key == expected_shoulder for r in ramps)
+
 
 # ===========================================================================
 # Railways & Trams Subsystem Tests
@@ -337,3 +438,146 @@ class TestRailwaysSubsystem:
         assert obj["class"] == "TSStatic"
         assert obj["collisionType"] == "Visible Mesh Final"
         assert "railway_way803.dae" in obj["shapeName"]
+
+
+class TestWindingAndEdgeCases:
+    @staticmethod
+    def _assert_outward_winding(positions, normals, triangles) -> None:
+        for (vi0, ni0, _), (vi1, _, _), (vi2, _, _) in triangles:
+            p0 = np.asarray(positions[vi0], dtype=np.float64)
+            p1 = np.asarray(positions[vi1], dtype=np.float64)
+            p2 = np.asarray(positions[vi2], dtype=np.float64)
+            n = np.asarray(normals[ni0], dtype=np.float64)
+            cross = np.cross(p1 - p0, p2 - p0)
+            assert float(np.dot(cross, n)) > 0.0
+
+    def test_bridge_mesh_winding_no_end_kink_and_zero_seg_safety(self) -> None:
+        # Include a duplicate point (zero-length segment) and bank points near ends
+        pts = np.array([[0.0, 0.0], [5.0, 0.0], [50.0, 0.0], [50.0, 0.0], [95.0, 0.0], [100.0, 0.0]])
+        road = Road(
+            osm_id=550,
+            highway="primary",
+            points=pts,
+            width_m=10.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=False,
+            bridge=True,
+            tunnel=False,
+            layer=1,
+            name="Winding Bridge",
+            maxspeed_kph=60.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        # Bank vertices near endpoints are at ground level (20m) while middle dips to 5m
+        raw_z = np.array([20.0, 20.0, 5.0, 5.0, 20.0, 20.0])
+        deck_z = compute_bridge_deck_profile(road, ground_z=raw_z, clearance_m=4.0)
+        # No 4m vertical jump between i=0 (20.0) and i=1 (5m from bridgehead)
+        assert deck_z[1] - deck_z[0] <= 0.5
+        assert deck_z[-2] - deck_z[-1] <= 0.5
+
+        geom = build_bridge_geometry(road, deck_z)
+        self._assert_outward_winding(geom.positions, geom.normals, geom.triangles)
+
+    def test_railway_mesh_winding_segment_crossing_and_tram_corridor(self, projection) -> None:
+        # 2-vertex railway crossing a road at x=50 without any intermediate vertex
+        rw_rail = extract_railways(
+            make_osm(projection, [(np.array([[0.0, 0.0], [100.0, 0.0]]), {"railway": "rail"}, 850)]),
+            projection,
+        )[0]
+        rw_tram = extract_railways(
+            make_osm(projection, [(np.array([[0.0, 20.0], [100.0, 20.0]]), {"railway": "tram"}, 851)]),
+            projection,
+        )[0]
+
+        road = Road(
+            osm_id=950,
+            highway="primary",
+            points=np.array([[50.0, -20.0], [50.0, 20.0]]),
+            width_m=8.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=False,
+            bridge=False,
+            tunnel=False,
+            layer=0,
+            name="Crossing Road",
+            maxspeed_kph=60.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+
+        mesh = build_railway_geometry(rw_rail, roads=[road])
+        self._assert_outward_winding(mesh.positions, mesh.normals, mesh.ballast_triangles)
+        self._assert_outward_winding(mesh.positions, mesh.normals, mesh.steel_triangles)
+
+        # Even without an intermediate vertex, the road crossing at x=50 must be flush (z == 0.0)
+        crossing_pts = [p for p in mesh.positions if abs(p[0] - 50.0) < 1.0]
+        assert crossing_pts
+        assert max(p[2] for p in crossing_pts) == pytest.approx(0.0, abs=1e-6)
+
+        # Tram must NOT produce gravel terrain corridors that overwrite city streets
+        corridors = railways_to_corridors([rw_rail, rw_tram])
+        assert len(corridors) == 1
+        assert corridors[0].key == f"railway_way{rw_rail.osm_id}"
+
+        # smooth_rail_grades must not propagate a single NaN across the whole profile
+        nan_z = np.array([10.0, float("nan"), 10.5])
+        smoothed = smooth_rail_grades(np.array([[0.0, 0.0], [50.0, 0.0], [100.0, 0.0]]), nan_z)
+        assert np.all(np.isfinite(smoothed))
+
+    def test_export_railways_sector_chunking_and_crossing_index(self, projection, tmp_path: Path) -> None:
+        from ivanovo2beam.roads.railways import RoadCrossingIndex, export_railways, is_crossing_road
+
+        # Two railways in sector (0, 0) and one railway in sector (1, 0) (chunk_size=4000m)
+        rws = extract_railways(
+            make_osm(
+                projection,
+                [
+                    (np.array([[100.0, 100.0], [300.0, 100.0]]), {"railway": "rail"}, 860),
+                    (np.array([[500.0, 200.0], [700.0, 200.0]]), {"railway": "rail"}, 861),
+                    (np.array([[4500.0, 100.0], [4700.0, 100.0]]), {"railway": "rail"}, 862),
+                ],
+            ),
+            projection,
+        )
+        road = Road(
+            osm_id=960,
+            highway="primary",
+            points=np.array([[200.0, 0.0], [200.0, 300.0]]),
+            width_m=8.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=False,
+            bridge=False,
+            tunnel=False,
+            layer=0,
+            name="Cross",
+            maxspeed_kph=60.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+
+        # RoadCrossingIndex matches unindexed crossing detection
+        idx = RoadCrossingIndex.from_roads([road])
+        assert is_crossing_road((200.0, 100.0), None, road_index=idx) is True
+        assert is_crossing_road((400.0, 100.0), None, road_index=idx) is False
+
+        objs, stats = export_railways(rws, "test_lvl", tmp_path, roads=[road], chunk_size_m=4000.0)
+        assert stats["railways"] == 3
+        assert stats["chunks"] == 2
+        assert len(objs) == 2
+        assert all(o["meshCulling"] is True for o in objs)
+        assert all("rail_chunk_" in o["name"] for o in objs)
+        for o in objs:
+            rel = o["shapeName"].removeprefix("/levels/test_lvl/")
+            assert (tmp_path / rel).is_file()
+        assert (tmp_path / "art" / "shapes" / "railways" / "main.materials.json").is_file()
+

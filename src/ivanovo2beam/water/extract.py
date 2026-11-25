@@ -24,7 +24,14 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from shapely.geometry import Polygon
+from shapely.geometry import (
+    GeometryCollection,
+    LineString,
+    MultiLineString,
+    MultiPolygon,
+    Polygon,
+    box,
+)
 from shapely.ops import linemerge, polygonize
 
 from ivanovo2beam.terrain.builder import smooth_profile
@@ -258,8 +265,6 @@ def _assemble_multipolygon(
     inner_ways: list[list[tuple[float, float]]],
 ) -> list[tuple[NDArray[np.float64], list[NDArray[np.float64]]]]:
     """Assemble outer and inner way coordinate lists into polygons with holes."""
-    from shapely.geometry import LineString
-
     lines = [LineString(w) for w in outer_ways if len(w) >= 2]
     if not lines:
         return []
@@ -294,6 +299,140 @@ def _assemble_multipolygon(
     return results
 
 
+def _dedupe_points(pts: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Drop consecutive duplicate points within 1 cm."""
+    if pts.shape[0] < 2:
+        return pts
+    dists = np.hypot(np.diff(pts[:, 0]), np.diff(pts[:, 1]))
+    keep = np.concatenate(([True], dists > 0.01))
+    return pts[keep]
+
+
+def _part_osm_id(base_id: int, part_idx: int) -> int:
+    """Return a deterministic unique OSM-style ID for multi-part clipped geometry."""
+    if part_idx == 0:
+        return base_id
+    return base_id * 1_000_000 + part_idx if base_id >= 0 else base_id * 1_000_000 - part_idx
+
+
+def _points_bbox_disjoint(pts: NDArray[np.float64], bounds: tuple[float, float, float, float]) -> bool:
+    """Return True if point array bbox is strictly outside `bounds`."""
+    bx0, by0, bx1, by1 = bounds
+    return bool(
+        pts[:, 0].max() < bx0
+        or pts[:, 0].min() > bx1
+        or pts[:, 1].max() < by0
+        or pts[:, 1].min() > by1
+    )
+
+
+def _clip_line_to_box(
+    pts: NDArray[np.float64],
+    clip_box: Polygon | None,
+) -> list[NDArray[np.float64]]:
+    """Clip a 2D polyline array to `clip_box`, returning >=2-point segments."""
+    if clip_box is None:
+        return [pts]
+    bx0, by0, bx1, by1 = clip_box.bounds
+    if _points_bbox_disjoint(pts, (bx0, by0, bx1, by1)):
+        return []
+    if (
+        pts[:, 0].min() >= bx0
+        and pts[:, 0].max() <= bx1
+        and pts[:, 1].min() >= by0
+        and pts[:, 1].max() <= by1
+    ):
+        return [pts]
+
+    clipped = LineString(pts).intersection(clip_box)
+    if clipped.is_empty:
+        return []
+
+    raw_lines: list[LineString] = []
+    if isinstance(clipped, LineString):
+        raw_lines = [clipped]
+    elif isinstance(clipped, (MultiLineString, GeometryCollection)):
+        raw_lines = [g for g in clipped.geoms if isinstance(g, LineString)]
+
+    parts: list[NDArray[np.float64]] = []
+    for line in raw_lines:
+        if line.is_empty or line.length <= 0.0:
+            continue
+        arr = _dedupe_points(np.asarray(line.coords, dtype=np.float64)[:, :2])
+        if arr.shape[0] >= 2:
+            parts.append(arr)
+    return parts
+
+
+def _clip_polygon_to_box(poly: Polygon, clip_box: Polygon | None) -> list[Polygon]:
+    """Clip a valid polygon (preserving holes) to `clip_box`."""
+    if clip_box is None:
+        return [poly]
+    bx0, by0, bx1, by1 = clip_box.bounds
+    px0, py0, px1, py1 = poly.bounds
+    if px1 < bx0 or px0 > bx1 or py1 < by0 or py0 > by1:
+        return []
+    if px0 >= bx0 and px1 <= bx1 and py0 >= by0 and py1 <= by1:
+        return [poly]
+    if not poly.intersects(clip_box):
+        return []
+
+    clipped = poly.intersection(clip_box)
+    if clipped.is_empty:
+        return []
+    if isinstance(clipped, Polygon):
+        return [clipped]
+    if isinstance(clipped, (MultiPolygon, GeometryCollection)):
+        return [g for g in clipped.geoms if isinstance(g, Polygon) and not g.is_empty]
+    return []
+
+
+def _append_water_bodies(
+    poly: Polygon,
+    *,
+    base_id: int,
+    name: str,
+    water_type: str,
+    clip_box: Polygon | None,
+    min_lake_area_m2: float,
+    projection: RegionProjection,
+    dem: DemSampler | None,
+    water_bodies: list[WaterBody],
+    part_offset: int = 0,
+) -> int:
+    """Clip `poly` if needed, filter by area, compute elevation, and append WaterBodies."""
+    depth_m = DEFAULT_LAKE_DEPTH_M
+    if "volga" in name.lower() or "волга" in name.lower():
+        depth_m = 4.0
+
+    added = 0
+    for tp in _clip_polygon_to_box(poly, clip_box):
+        if tp.is_empty or not tp.is_valid or tp.area < min_lake_area_m2:
+            continue
+        outer_coords = np.array(tp.exterior.coords, dtype=np.float64)
+        if outer_coords.shape[0] < 4:
+            continue
+        inner_coords_list = [
+            np.array(ring.coords, dtype=np.float64)
+            for ring in tp.interiors
+            if len(ring.coords) >= 4
+        ]
+        z_water = compute_lake_water_elevation(outer_coords, projection, dem)
+        water_bodies.append(
+            WaterBody(
+                osm_id=_part_osm_id(base_id, part_offset + added),
+                name=name,
+                water_type=water_type,
+                outer_ring=outer_coords,
+                inner_rings=inner_coords_list,
+                depth_m=depth_m,
+                z_water=z_water,
+            )
+        )
+        added += 1
+    return added
+
+
 def extract_water(
     osm_data: OsmData,
     projection: RegionProjection,
@@ -301,6 +440,7 @@ def extract_water(
     *,
     smooth_window_m: float = 150.0,
     min_lake_area_m2: float = 100.0,
+    clip_bounds: tuple[float, float, float, float] | None = None,
 ) -> WaterNetwork:
     """Extract waterways and water bodies from OSM data.
 
@@ -310,12 +450,15 @@ def extract_water(
         dem: Optional DEM elevation source.
         smooth_window_m: River profile smoothing window in metres.
         min_lake_area_m2: Minimum area for retained water bodies.
+        clip_bounds: Optional ``(min_x, min_y, max_x, max_y)`` world-metre bounds
+            to clip extracted rivers and standing water polygons to.
 
     Returns:
         Extracted WaterNetwork.
     """
     rivers: list[RiverChannel] = []
     water_bodies: list[WaterBody] = []
+    clip_box = box(*clip_bounds) if clip_bounds is not None else None
 
     all_ways = list(osm_data.ways.values()) if isinstance(osm_data.ways, dict) else list(osm_data.ways)
     all_relations = (
@@ -340,13 +483,12 @@ def extract_water(
             # Project to world coordinates
             geo_array = np.array(coords, dtype=np.float64)
             wx, wy = projection.geo_to_world_array(geo_array[:, 0], geo_array[:, 1])
-            pts = np.column_stack((wx, wy))
-
-            # Deduplicate consecutive identical points
-            dists = np.hypot(np.diff(pts[:, 0]), np.diff(pts[:, 1]))
-            keep = np.concatenate(([True], dists > 0.01))
-            pts = pts[keep]
+            pts = _dedupe_points(np.column_stack((wx, wy)))
             if pts.shape[0] < 2:
+                continue
+
+            clipped_parts = _clip_line_to_box(pts, clip_box)
+            if not clipped_parts:
                 continue
 
             spec = WATERWAY_SPECS[waterway]
@@ -355,25 +497,26 @@ def extract_water(
             flow_speed = spec["flow_speed"]
             name = way.tags.get("name", "")
 
-            z_water = compute_downstream_water_profile(
-                pts,
-                projection,
-                dem,
-                smooth_window_m=smooth_window_m,
-            )
-
-            rivers.append(
-                RiverChannel(
-                    osm_id=way.id,
-                    name=name,
-                    waterway_type=waterway,
-                    points=pts,
-                    width_m=width_m,
-                    depth_m=depth_m,
-                    z_water=z_water,
-                    flow_speed=flow_speed,
+            for part_idx, part_pts in enumerate(clipped_parts):
+                z_water = compute_downstream_water_profile(
+                    part_pts,
+                    projection,
+                    dem,
+                    smooth_window_m=smooth_window_m,
                 )
-            )
+
+                rivers.append(
+                    RiverChannel(
+                        osm_id=_part_osm_id(way.id, part_idx),
+                        name=name,
+                        waterway_type=waterway,
+                        points=part_pts,
+                        width_m=width_m,
+                        depth_m=depth_m,
+                        z_water=z_water,
+                        flow_speed=flow_speed,
+                    )
+                )
 
     # 2. Closed ways with natural=water, landuse=reservoir, waterway=riverbank
     for way in all_ways:
@@ -400,33 +543,25 @@ def extract_water(
             geo_array = np.array(coords, dtype=np.float64)
             wx, wy = projection.geo_to_world_array(geo_array[:, 0], geo_array[:, 1])
             pts = np.column_stack((wx, wy))
+            if clip_bounds is not None and _points_bbox_disjoint(pts, clip_bounds):
+                continue
 
             poly = Polygon(pts)
-            if not poly.is_valid:
-                continue
-            if poly.area < min_lake_area_m2:
+            if not poly.is_valid or poly.area < min_lake_area_m2:
                 continue
 
-            closed_ring = np.array(poly.exterior.coords, dtype=np.float64)
-            z_water = compute_lake_water_elevation(closed_ring, projection, dem)
             name = way.tags.get("name", "")
             water_type = water or natural or landuse or waterway or "water"
-
-            # Check for deeper basins (e.g. Volga reservoir)
-            depth_m = DEFAULT_LAKE_DEPTH_M
-            if "volga" in name.lower() or "волга" in name.lower():
-                depth_m = 4.0
-
-            water_bodies.append(
-                WaterBody(
-                    osm_id=way.id,
-                    name=name,
-                    water_type=water_type,
-                    outer_ring=closed_ring,
-                    inner_rings=[],
-                    depth_m=depth_m,
-                    z_water=z_water,
-                )
+            _append_water_bodies(
+                poly,
+                base_id=way.id,
+                name=name,
+                water_type=water_type,
+                clip_box=clip_box,
+                min_lake_area_m2=min_lake_area_m2,
+                projection=projection,
+                dem=dem,
+                water_bodies=water_bodies,
             )
 
     # 3. Multipolygon relations with natural=water, etc.
@@ -468,29 +603,27 @@ def extract_water(
             continue
 
         assembled = _assemble_multipolygon(outer_ways_pts, inner_ways_pts)
+        name = rel.tags.get("name", "")
+        water_type = water or natural or landuse or "water"
+        part_offset = 0
         for outer_coords, inner_coords_list in assembled:
+            if clip_bounds is not None and _points_bbox_disjoint(outer_coords, clip_bounds):
+                continue
             poly = Polygon(outer_coords, holes=[h for h in inner_coords_list if len(h) >= 4])
             if not poly.is_valid or poly.area < min_lake_area_m2:
                 continue
 
-            z_water = compute_lake_water_elevation(outer_coords, projection, dem)
-            name = rel.tags.get("name", "")
-            water_type = water or natural or landuse or "water"
-
-            depth_m = DEFAULT_LAKE_DEPTH_M
-            if "volga" in name.lower() or "волга" in name.lower():
-                depth_m = 4.0
-
-            water_bodies.append(
-                WaterBody(
-                    osm_id=rel.id,
-                    name=name,
-                    water_type=water_type,
-                    outer_ring=outer_coords,
-                    inner_rings=inner_coords_list,
-                    depth_m=depth_m,
-                    z_water=z_water,
-                )
+            part_offset += _append_water_bodies(
+                poly,
+                base_id=rel.id,
+                name=name,
+                water_type=water_type,
+                clip_box=clip_box,
+                min_lake_area_m2=min_lake_area_m2,
+                projection=projection,
+                dem=dem,
+                water_bodies=water_bodies,
+                part_offset=part_offset,
             )
 
     stats = {

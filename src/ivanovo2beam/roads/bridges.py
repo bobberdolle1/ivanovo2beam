@@ -19,6 +19,7 @@ generates:
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -60,6 +61,24 @@ PIER_THICKNESS_M = 1.6
 ABUTMENT_LENGTH_M = 3.5
 
 
+def _quad_face_normal(
+    v0: tuple[float, float, float],
+    v1: tuple[float, float, float],
+    v2: tuple[float, float, float],
+    fallback: tuple[float, float, float] = (0.0, 0.0, 1.0),
+) -> tuple[float, float, float]:
+    """Compute the unit outward normal of a CCW quad ``(v0, v1, v2, v3)``."""
+    ax, ay, az = v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]
+    bx, by, bz = v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]
+    nx = ay * bz - az * by
+    ny = az * bx - ax * bz
+    nz = ax * by - ay * bx
+    length = float(np.sqrt(nx * nx + ny * ny + nz * nz))
+    if length < 1e-9:
+        return fallback
+    return (nx / length, ny / length, nz / length)
+
+
 @dataclass(slots=True)
 class BridgeGeometry:
     """Procedural 3D mesh representation for a bridge."""
@@ -71,6 +90,21 @@ class BridgeGeometry:
     triangles: list[tuple[tuple[int, int, int], tuple[int, int, int], tuple[int, int, int]]] = field(
         default_factory=list
     )
+    origin: tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+    @property
+    def center(self) -> tuple[float, float, float]:
+        """Return world-space bounding center ``(cx, cy, min_z)`` for localization."""
+        if not self.positions:
+            return self.origin
+        xs = [p[0] for p in self.positions]
+        ys = [p[1] for p in self.positions]
+        zs = [p[2] for p in self.positions]
+        return (
+            round(self.origin[0] + 0.5 * (min(xs) + max(xs)), 4),
+            round(self.origin[1] + 0.5 * (min(ys) + max(ys)), 4),
+            round(self.origin[2] + min(zs), 4),
+        )
 
     def add_triangle(
         self,
@@ -118,19 +152,17 @@ class BridgeGeometry:
         c111: tuple[float, float, float],
         c011: tuple[float, float, float],
     ) -> None:
-        """Add a closed 6-sided box defined by 8 corner vertices."""
-        # Top (+Z): c001, c101, c111, c011
-        self.add_quad(c001, c101, c111, c011, (0.0, 0.0, 1.0))
-        # Bottom (-Z): c000, c010, c110, c100
-        self.add_quad(c000, c010, c110, c100, (0.0, 0.0, -1.0))
-        # Front (-Y): c000, c100, c101, c001
-        self.add_quad(c000, c100, c101, c001, (0.0, -1.0, 0.0))
-        # Back (+Y): c110, c010, c011, c111
-        self.add_quad(c110, c010, c011, c111, (0.0, 1.0, 0.0))
-        # Left (-X): c010, c000, c001, c011
-        self.add_quad(c010, c000, c001, c011, (-1.0, 0.0, 0.0))
-        # Right (+X): c100, c110, c111, c101
-        self.add_quad(c100, c110, c111, c101, (1.0, 0.0, 0.0))
+        """Add a closed 6-sided box defined by 8 corner vertices (right-handed)."""
+        faces = (
+            (c001, c101, c111, c011, (0.0, 0.0, 1.0)),   # Top (+Z)
+            (c000, c010, c110, c100, (0.0, 0.0, -1.0)),  # Bottom (-Z)
+            (c000, c100, c101, c001, (0.0, -1.0, 0.0)),  # Front (-N)
+            (c110, c010, c011, c111, (0.0, 1.0, 0.0)),   # Back (+N)
+            (c010, c000, c001, c011, (-1.0, 0.0, 0.0)),  # Left (-T)
+            (c100, c110, c111, c101, (1.0, 0.0, 0.0)),   # Right (+T)
+        )
+        for v0, v1, v2, v3, fallback in faces:
+            self.add_quad(v0, v1, v2, v3, _quad_face_normal(v0, v1, v2, fallback))
 
 
 def compute_bridge_deck_profile(
@@ -142,7 +174,8 @@ def compute_bridge_deck_profile(
     """Compute the longitudinal 3D deck elevation profile for a bridge.
 
     Pins endpoints to terrain/ground elevation, and ensures carriageway spans
-    at least clearance_m above the bed/valley below.
+    at least clearance_m above the bed/valley below without introducing step
+    kinks near the bridgeheads.
     """
     n = road.points.shape[0]
     if ground_z is not None and len(ground_z) == n:
@@ -165,19 +198,23 @@ def compute_bridge_deck_profile(
     z0 = float(raw_z[0])
     z1 = float(raw_z[-1])
 
-    # A smooth linear chord between bridgehead endpoints
+    # A smooth linear chord between bridgehead endpoints, with tapered clearance
+    # over interior spans so bank vertices near the ends do not cause a step kink.
+    taper_len = max(total_len * 0.25, 1.0)
     deck_z = np.zeros(n, dtype=np.float64)
     for i in range(n):
         t = float(cum_lens[i] / total_len)
         chord_z = z0 + t * (z1 - z0)
-        # Ensure clearance over dips/valleys, pinning exactly at endpoints
         if i == 0:
             deck_z[i] = z0
         elif i == n - 1:
             deck_z[i] = z1
         else:
-            # Over the middle span, deck must clear ground by at least clearance_m
-            deck_z[i] = max(chord_z, float(raw_z[i]) + clearance_m)
+            d_nearest = float(min(cum_lens[i], total_len - cum_lens[i]))
+            s = min(1.0, d_nearest / taper_len)
+            smooth_s = s * s * (3.0 - 2.0 * s)
+            target_z = max(chord_z, float(raw_z[i]) + clearance_m * smooth_s)
+            deck_z[i] = min(target_z, chord_z + 0.08 * d_nearest)
 
     return deck_z
 
@@ -186,6 +223,8 @@ def build_bridge_geometry(
     road: Road,
     deck_z: np.ndarray,
     ground_sampler: Callable[[float, float], float] | None = None,
+    *,
+    localize: bool = False,
 ) -> BridgeGeometry:
     """Generate complete 3D procedural bridge geometry.
 
@@ -195,21 +234,38 @@ def build_bridge_geometry(
         road: The bridge road.
         deck_z: Longitudinal elevations along road.points.
         ground_sampler: Optional function returning ground elevation at (x, y).
+        localize: When True, shift vertex positions relative to ``geom.center``
+            and store that world-space offset in ``geom.origin``.
 
     Returns:
         BridgeGeometry container ready for COLLADA export.
     """
     geom = BridgeGeometry()
-    pts = road.points
+    pts = np.asarray(road.points, dtype=np.float64)
+    z_arr = np.asarray(deck_z, dtype=np.float64)
+    if pts.shape[0] < 2:
+        return geom
+
+    # Deduplicate consecutive zero-length points while preserving endpoints
+    keep = np.ones(pts.shape[0], dtype=bool)
+    last_x, last_y = float(pts[0, 0]), float(pts[0, 1])
+    for i in range(1, pts.shape[0]):
+        if math.hypot(float(pts[i, 0]) - last_x, float(pts[i, 1]) - last_y) < 1e-6:
+            keep[i] = False
+        else:
+            last_x, last_y = float(pts[i, 0]), float(pts[i, 1])
+    pts = pts[keep]
+    z_arr = z_arr[keep]
     n = pts.shape[0]
     if n < 2:
         return geom
+    deck_z = z_arr
 
-    # Calculate 2D unit normals along centerline
+    # Calculate 2D unit tangents and left-hand normals without mutating raw lengths
     diffs = np.diff(pts, axis=0)
-    seg_lens = np.hypot(diffs[:, 0], diffs[:, 1])
-    seg_lens[seg_lens < 1e-6] = 1.0
-    seg_tangents = diffs / seg_lens[:, None]
+    raw_seg_lens = np.hypot(diffs[:, 0], diffs[:, 1])
+    safe_seg_lens = np.where(raw_seg_lens < 1e-6, 1.0, raw_seg_lens)
+    seg_tangents = diffs / safe_seg_lens[:, None]
 
     normals = np.zeros((n, 2), dtype=np.float64)
     normals[0] = [-seg_tangents[0, 1], seg_tangents[0, 0]]
@@ -217,7 +273,11 @@ def build_bridge_geometry(
     if n > 2:
         mid_tangents = (seg_tangents[:-1] + seg_tangents[1:]) * 0.5
         mid_lens = np.hypot(mid_tangents[:, 0], mid_tangents[:, 1])
-        mid_lens[mid_lens < 1e-6] = 1.0
+        degenerate = mid_lens < 1e-6
+        if np.any(degenerate):
+            mid_tangents[degenerate] = seg_tangents[:-1][degenerate]
+            mid_lens = np.hypot(mid_tangents[:, 0], mid_tangents[:, 1])
+            mid_lens = np.where(mid_lens < 1e-6, 1.0, mid_lens)
         mid_tangents /= mid_lens[:, None]
         normals[1:-1] = np.column_stack((-mid_tangents[:, 1], mid_tangents[:, 0]))
 
@@ -226,7 +286,7 @@ def build_bridge_geometry(
     thickness = SLAB_THICKNESS_M
 
     # 1. Deck slab closed manifold
-    # Precompute cross-section vertices: TL, TR, BR, BL
+    # Precompute cross-section vertices: TL (-N), TR (+N), BR (+N), BL (-N)
     tl: list[tuple[float, float, float]] = []
     tr: list[tuple[float, float, float]] = []
     br: list[tuple[float, float, float]] = []
@@ -242,47 +302,47 @@ def build_bridge_geometry(
         br.append((px + deck_half * nx, py + deck_half * ny, bot_z))
         bl.append((px - deck_half * nx, py - deck_half * ny, bot_z))
 
-    # Extrude deck slab segments
+    # Extrude deck slab segments (CCW outward winding)
     cum_s = 0.0
     for i in range(n - 1):
-        ds = float(seg_lens[i])
+        ds = float(raw_seg_lens[i])
         s0, s1 = cum_s * 0.25, (cum_s + ds) * 0.25
         cum_s += ds
 
         # Top face (+Z)
         geom.add_quad(
-            tl[i], tr[i], tr[i + 1], tl[i + 1],
-            (0.0, 0.0, 1.0),
-            (0.0, s0), (1.0, s0), (1.0, s1), (0.0, s1),
+            tl[i], tl[i + 1], tr[i + 1], tr[i],
+            _quad_face_normal(tl[i], tl[i + 1], tr[i + 1], (0.0, 0.0, 1.0)),
+            (0.0, s0), (0.0, s1), (1.0, s1), (1.0, s0),
         )
         # Bottom face (-Z)
         geom.add_quad(
-            bl[i], bl[i + 1], br[i + 1], br[i],
-            (0.0, 0.0, -1.0),
-            (0.0, s0), (0.0, s1), (1.0, s1), (1.0, s0),
-        )
-        # Left side (-N)
-        geom.add_quad(
-            tl[i], tl[i + 1], bl[i + 1], bl[i],
-            (-float(normals[i, 0]), -float(normals[i, 1]), 0.0),
-            (0.0, s0), (0.0, s1), (1.0, s1), (1.0, s0),
-        )
-        # Right side (+N)
-        geom.add_quad(
-            tr[i], br[i], br[i + 1], tr[i + 1],
-            (float(normals[i, 0]), float(normals[i, 1]), 0.0),
+            bl[i], br[i], br[i + 1], bl[i + 1],
+            _quad_face_normal(bl[i], br[i], br[i + 1], (0.0, 0.0, -1.0)),
             (0.0, s0), (1.0, s0), (1.0, s1), (0.0, s1),
+        )
+        # -N side (right of tangent)
+        geom.add_quad(
+            bl[i], bl[i + 1], tl[i + 1], tl[i],
+            _quad_face_normal(bl[i], bl[i + 1], tl[i + 1], (-float(normals[i, 0]), -float(normals[i, 1]), 0.0)),
+            (0.0, s0), (0.0, s1), (1.0, s1), (1.0, s0),
+        )
+        # +N side (left of tangent)
+        geom.add_quad(
+            tr[i], tr[i + 1], br[i + 1], br[i],
+            _quad_face_normal(tr[i], tr[i + 1], br[i + 1], (float(normals[i, 0]), float(normals[i, 1]), 0.0)),
+            (0.0, s0), (0.0, s1), (1.0, s1), (1.0, s0),
         )
 
     # Deck slab end caps
     t0 = seg_tangents[0]
     geom.add_quad(
-        tl[0], bl[0], br[0], tr[0],
+        tl[0], tr[0], br[0], bl[0],
         (-float(t0[0]), -float(t0[1]), 0.0),
     )
     t_end = seg_tangents[-1]
     geom.add_quad(
-        tl[-1], tr[-1], br[-1], bl[-1],
+        tl[-1], bl[-1], br[-1], tr[-1],
         (float(t_end[0]), float(t_end[1]), 0.0),
     )
 
@@ -296,7 +356,7 @@ def build_bridge_geometry(
         px0, py0, z0 = float(pts[i, 0]), float(pts[i, 1]), float(deck_z[i])
         px1, py1, z1 = float(pts[i + 1, 0]), float(pts[i + 1, 1]), float(deck_z[i + 1])
 
-        # Left Guardrail: outer edge at -deck_half, inner edge at -(deck_half - gw)
+        # -N Guardrail: outer edge at -deck_half, inner edge at -(deck_half - gw)
         l_out_bot0 = (px0 - deck_half * nx0, py0 - deck_half * ny0, z0)
         l_out_top0 = (px0 - deck_half * nx0, py0 - deck_half * ny0, z0 + gh)
         l_in_top0 = (px0 - (deck_half - gw) * nx0, py0 - (deck_half - gw) * ny0, z0 + gh)
@@ -307,14 +367,23 @@ def build_bridge_geometry(
         l_in_top1 = (px1 - (deck_half - gw) * nx1, py1 - (deck_half - gw) * ny1, z1 + gh)
         l_in_bot1 = (px1 - (deck_half - gw) * nx1, py1 - (deck_half - gw) * ny1, z1)
 
-        # Left top face
-        geom.add_quad(l_out_top0, l_in_top0, l_in_top1, l_out_top1, (0.0, 0.0, 1.0))
-        # Left inner face (facing road, normal = +N)
-        geom.add_quad(l_in_top0, l_in_bot0, l_in_bot1, l_in_top1, (nx0, ny0, 0.0))
-        # Left outer face (facing outward, normal = -N)
-        geom.add_quad(l_out_top0, l_out_top1, l_out_bot1, l_out_bot0, (-nx0, -ny0, 0.0))
+        # -N guardrail top face (+Z)
+        geom.add_quad(
+            l_out_top0, l_out_top1, l_in_top1, l_in_top0,
+            _quad_face_normal(l_out_top0, l_out_top1, l_in_top1, (0.0, 0.0, 1.0)),
+        )
+        # -N guardrail inner face (facing road, normal = +N)
+        geom.add_quad(
+            l_in_top0, l_in_top1, l_in_bot1, l_in_bot0,
+            _quad_face_normal(l_in_top0, l_in_top1, l_in_bot1, (nx0, ny0, 0.0)),
+        )
+        # -N guardrail outer face (facing outward, normal = -N)
+        geom.add_quad(
+            l_out_bot0, l_out_bot1, l_out_top1, l_out_top0,
+            _quad_face_normal(l_out_bot0, l_out_bot1, l_out_top1, (-nx0, -ny0, 0.0)),
+        )
 
-        # Right Guardrail: inner edge at +(deck_half - gw), outer edge at +deck_half
+        # +N Guardrail: inner edge at +(deck_half - gw), outer edge at +deck_half
         r_in_bot0 = (px0 + (deck_half - gw) * nx0, py0 + (deck_half - gw) * ny0, z0)
         r_in_top0 = (px0 + (deck_half - gw) * nx0, py0 + (deck_half - gw) * ny0, z0 + gh)
         r_out_top0 = (px0 + deck_half * nx0, py0 + deck_half * ny0, z0 + gh)
@@ -325,49 +394,58 @@ def build_bridge_geometry(
         r_out_top1 = (px1 + deck_half * nx1, py1 + deck_half * ny1, z1 + gh)
         r_out_bot1 = (px1 + deck_half * nx1, py1 + deck_half * ny1, z1)
 
-        # Right top face
-        geom.add_quad(r_in_top0, r_out_top0, r_out_top1, r_in_top1, (0.0, 0.0, 1.0))
-        # Right inner face (facing road, normal = -N)
-        geom.add_quad(r_in_top0, r_in_top1, r_in_bot1, r_in_bot0, (-nx0, -ny0, 0.0))
-        # Right outer face (facing outward, normal = +N)
-        geom.add_quad(r_out_top0, r_out_bot0, r_out_bot1, r_out_top1, (nx0, ny0, 0.0))
+        # +N guardrail top face (+Z)
+        geom.add_quad(
+            r_in_top0, r_in_top1, r_out_top1, r_out_top0,
+            _quad_face_normal(r_in_top0, r_in_top1, r_out_top1, (0.0, 0.0, 1.0)),
+        )
+        # +N guardrail inner face (facing road, normal = -N)
+        geom.add_quad(
+            r_in_bot0, r_in_bot1, r_in_top1, r_in_top0,
+            _quad_face_normal(r_in_bot0, r_in_bot1, r_in_top1, (-nx0, -ny0, 0.0)),
+        )
+        # +N guardrail outer face (facing outward, normal = +N)
+        geom.add_quad(
+            r_out_top0, r_out_top1, r_out_bot1, r_out_bot0,
+            _quad_face_normal(r_out_top0, r_out_top1, r_out_bot1, (nx0, ny0, 0.0)),
+        )
 
     # Guardrail end caps
     nx0, ny0 = float(normals[0, 0]), float(normals[0, 1])
     px0, py0, z0 = float(pts[0, 0]), float(pts[0, 1]), float(deck_z[0])
     t0 = seg_tangents[0]
-    # Start end caps
+    # Start end caps (-T)
     geom.add_quad(
         (px0 - deck_half * nx0, py0 - deck_half * ny0, z0 + gh),
-        (px0 - deck_half * nx0, py0 - deck_half * ny0, z0),
-        (px0 - (deck_half - gw) * nx0, py0 - (deck_half - gw) * ny0, z0),
         (px0 - (deck_half - gw) * nx0, py0 - (deck_half - gw) * ny0, z0 + gh),
+        (px0 - (deck_half - gw) * nx0, py0 - (deck_half - gw) * ny0, z0),
+        (px0 - deck_half * nx0, py0 - deck_half * ny0, z0),
         (-float(t0[0]), -float(t0[1]), 0.0),
     )
     geom.add_quad(
         (px0 + (deck_half - gw) * nx0, py0 + (deck_half - gw) * ny0, z0 + gh),
-        (px0 + (deck_half - gw) * nx0, py0 + (deck_half - gw) * ny0, z0),
-        (px0 + deck_half * nx0, py0 + deck_half * ny0, z0),
         (px0 + deck_half * nx0, py0 + deck_half * ny0, z0 + gh),
+        (px0 + deck_half * nx0, py0 + deck_half * ny0, z0),
+        (px0 + (deck_half - gw) * nx0, py0 + (deck_half - gw) * ny0, z0),
         (-float(t0[0]), -float(t0[1]), 0.0),
     )
 
     nx1, ny1 = float(normals[-1, 0]), float(normals[-1, 1])
     px1, py1, z1 = float(pts[-1, 0]), float(pts[-1, 1]), float(deck_z[-1])
     t_end = seg_tangents[-1]
-    # End end caps
+    # End end caps (+T)
     geom.add_quad(
         (px1 - deck_half * nx1, py1 - deck_half * ny1, z1 + gh),
-        (px1 - (deck_half - gw) * nx1, py1 - (deck_half - gw) * ny1, z1 + gh),
-        (px1 - (deck_half - gw) * nx1, py1 - (deck_half - gw) * ny1, z1),
         (px1 - deck_half * nx1, py1 - deck_half * ny1, z1),
+        (px1 - (deck_half - gw) * nx1, py1 - (deck_half - gw) * ny1, z1),
+        (px1 - (deck_half - gw) * nx1, py1 - (deck_half - gw) * ny1, z1 + gh),
         (float(t_end[0]), float(t_end[1]), 0.0),
     )
     geom.add_quad(
         (px1 + (deck_half - gw) * nx1, py1 + (deck_half - gw) * ny1, z1 + gh),
-        (px1 + deck_half * nx1, py1 + deck_half * ny1, z1 + gh),
-        (px1 + deck_half * nx1, py1 + deck_half * ny1, z1),
         (px1 + (deck_half - gw) * nx1, py1 + (deck_half - gw) * ny1, z1),
+        (px1 + deck_half * nx1, py1 + deck_half * ny1, z1),
+        (px1 + deck_half * nx1, py1 + deck_half * ny1, z1 + gh),
         (float(t_end[0]), float(t_end[1]), 0.0),
     )
 
@@ -397,19 +475,20 @@ def build_bridge_geometry(
         geom.add_box(c000, c100, c110, c010, c001, c101, c111, c011)
 
     add_abutment((float(pts[0, 0]), float(pts[0, 1])), float(deck_z[0]), seg_tangents[0], normals[0])
-    add_abutment((float(pts[-1, 0]), float(pts[-1, 1])), float(deck_z[-1]), -seg_tangents[-1], normals[-1])
+    # Negate both tangent and normal to preserve right-handedness (-T) x (-N) = +Z
+    add_abutment((float(pts[-1, 0]), float(pts[-1, 1])), float(deck_z[-1]), -seg_tangents[-1], -normals[-1])
 
     # 4. Concrete piers every 25m down to bed
-    cum_lens = np.concatenate(([0.0], np.cumsum(seg_lens)))
+    cum_lens = np.concatenate(([0.0], np.cumsum(raw_seg_lens)))
     total_len = float(cum_lens[-1])
     pier_dist = PIER_SPACING_M
 
     while pier_dist < total_len - 12.0:
         # Interpolate location at pier_dist
         idx = int(np.searchsorted(cum_lens, pier_dist, side="right") - 1)
-        idx = max(0, min(idx, len(seg_lens) - 1))
+        idx = max(0, min(idx, len(raw_seg_lens) - 1))
         d0 = float(cum_lens[idx])
-        slen = float(seg_lens[idx])
+        slen = float(raw_seg_lens[idx])
         t = 0.0 if slen <= 1e-6 else (pier_dist - d0) / slen
 
         px = float(pts[idx, 0] + t * (pts[idx + 1, 0] - pts[idx, 0]))
@@ -442,7 +521,34 @@ def build_bridge_geometry(
 
         pier_dist += PIER_SPACING_M
 
+    if localize and geom.positions:
+        ox, oy, oz = geom.center
+        geom.positions = [(px - ox, py - oy, pz - oz) for px, py, pz in geom.positions]
+        geom.origin = (ox, oy, oz)
+
     return geom
+
+
+def localize_bridge_geometry(
+    geom: BridgeGeometry,
+    origin: tuple[float, float, float] | None = None,
+) -> BridgeGeometry:
+    """Return a copy of ``geom`` with positions localized around ``origin``.
+
+    If ``origin`` is omitted, ``geom.center`` is used. Safe to call on an
+    already-localized ``BridgeGeometry`` (computes delta relative to ``geom.origin``).
+    """
+    target = geom.center if origin is None else (float(origin[0]), float(origin[1]), float(origin[2]))
+    dx = target[0] - geom.origin[0]
+    dy = target[1] - geom.origin[1]
+    dz = target[2] - geom.origin[2]
+    return BridgeGeometry(
+        positions=[(px - dx, py - dy, pz - dz) for px, py, pz in geom.positions],
+        normals=list(geom.normals),
+        uvs=list(geom.uvs),
+        triangles=list(geom.triangles),
+        origin=target,
+    )
 
 
 def _format_floats(values: Sequence[float]) -> str:
@@ -450,20 +556,39 @@ def _format_floats(values: Sequence[float]) -> str:
     return " ".join(f"{v:.4f}".rstrip("0").rstrip(".") or "0" for v in values)
 
 
-def export_bridge_dae(path: Path, geom: BridgeGeometry, bridge_name: str) -> int:
+def export_bridge_dae(
+    path: Path,
+    geom: BridgeGeometry,
+    bridge_name: str,
+    *,
+    origin: tuple[float, float, float] | None = None,
+) -> int:
     """Write bridge geometry to a BeamNG-compatible COLLADA 1.4.1 file.
 
     Args:
         path: Output file path.
         geom: Geometry container.
         bridge_name: Shape name (e.g. ``bridge_way12345``).
+        origin: Optional world-space origin ``(ox, oy, oz)`` to subtract from
+            ``geom.positions`` so the exported mesh stays near local ``(0, 0, 0)``.
+            Accounts for ``geom.origin`` so localized meshes are never shifted twice.
 
     Returns:
         Number of bytes written.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    pos_flat = [coord for p in geom.positions for coord in p]
+    if origin is None:
+        dx = dy = dz = 0.0
+    else:
+        dx = float(origin[0]) - geom.origin[0]
+        dy = float(origin[1]) - geom.origin[1]
+        dz = float(origin[2]) - geom.origin[2]
+
+    if dx == 0.0 and dy == 0.0 and dz == 0.0:
+        pos_flat = [coord for p in geom.positions for coord in p]
+    else:
+        pos_flat = [coord for p in geom.positions for coord in (p[0] - dx, p[1] - dy, p[2] - dz)]
     norm_flat = [coord for n in geom.normals for coord in n]
     uv_flat = [coord for uv in geom.uvs for coord in uv]
 
@@ -615,6 +740,7 @@ def build_bridge_scene_object(
     road: Road,
     level_id: str,
     *,
+    position: tuple[float, float, float] = (0.0, 0.0, 0.0),
     shape_path: str | None = None,
     parent: str = "bridges",
 ) -> dict[str, Any]:
@@ -632,7 +758,7 @@ def build_bridge_scene_object(
         "class": "TSStatic",
         "persistentId": stable_uuid(level_id, "TSStatic", key),
         "__parent": parent,
-        "position": [0.0, 0.0, 0.0],
+        "position": [float(position[0]), float(position[1]), float(position[2])],
         "shapeName": shape_path,
         "scale": [1.0, 1.0, 1.0],
         "collisionType": "Visible Mesh Final",
@@ -662,6 +788,11 @@ def create_bridgehead_ramps(
     corridors: list[RoadCorridor] = []
     half_w = road.half_width_m
     corridor_half = corridor_half_width_for(road, settings)
+    shoulder_material_key = (
+        "Grass"
+        if road.material_key in {"Asphalt", "Asphalt_worn", "Concrete"}
+        else ("Dirt" if road.material_key == "Dirt" else "Gravel")
+    )
 
     # 1. Start bridgehead ramp
     v_start = pts[0] - pts[1]
@@ -681,7 +812,7 @@ def create_bridgehead_ramps(
                 priority=road.priority + 2,
                 grade_terrain=True,
                 material_key=road.material_key,
-                shoulder_material_key="Gravel",
+                shoulder_material_key=shoulder_material_key,
                 key=f"ramp_start_way{road.osm_id}",
                 surface_z=ramp_z,
             )
@@ -705,7 +836,7 @@ def create_bridgehead_ramps(
                 priority=road.priority + 2,
                 grade_terrain=True,
                 material_key=road.material_key,
-                shoulder_material_key="Gravel",
+                shoulder_material_key=shoulder_material_key,
                 key=f"ramp_end_way{road.osm_id}",
                 surface_z=ramp_z,
             )

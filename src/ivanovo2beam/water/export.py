@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ivanovo2beam.beamng.level import stable_uuid
+from ivanovo2beam.beamng.level import ROOT_GROUP, stable_uuid
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ivanovo2beam.beamng.level import SceneTree
@@ -36,9 +36,8 @@ def build_river_object(
     parent: str = "water",
 ) -> dict[str, Any]:
     """Construct a BeamNG ``River`` scene object from a :class:`RiverChannel`."""
-    nodes = []
-    for (x, y), zw in zip(channel.points, channel.z_water, strict=True):
-        nodes.append([
+    nodes = [
+        [
             round(float(x), 5),
             round(float(y), 5),
             round(float(zw), 5),
@@ -47,7 +46,11 @@ def build_river_object(
             0.0,
             0.0,
             1.0,
-        ])
+        ]
+        for (x, y), zw in zip(channel.points, channel.z_water, strict=True)
+    ]
+    if len(nodes) < 2:
+        raise ValueError(f"River {channel.osm_id} requires at least 2 nodes, got {len(nodes)}")
 
     return {
         "name": f"river_{channel.osm_id}",
@@ -87,6 +90,15 @@ def build_river_object(
     }
 
 
+def compute_water_block_grid_element_size(size_x: float, size_y: float) -> float:
+    """Compute adaptive ``gridElementSize`` capped below BeamNG's default 100m scale limit."""
+    sx = float(size_x)
+    sy = float(size_y)
+    max_dim = max(sx, sy)
+    min_dim = min(sx, sy)
+    return round(min(max(8.0, max_dim / 64.0), 96.0, max(1.0, min_dim)), 3)
+
+
 def build_water_block_object(
     level_id: str,
     body: WaterBody,
@@ -100,27 +112,30 @@ def build_water_block_object(
     min_x, min_y, max_x, max_y = body.bounds
     size_x = max(2.0, max_x - min_x)
     size_y = max(2.0, max_y - min_y)
+    center_x = 0.5 * (min_x + max_x)
+    center_y = 0.5 * (min_y + max_y)
     depth_z = max(1.0, float(body.depth_m))
+    grid_element_size = compute_water_block_grid_element_size(size_x, size_y)
 
     return {
         "name": f"waterblock_{body.osm_id}",
         "class": "WaterBlock",
         "persistentId": stable_uuid(level_id, "WaterBlock", str(body.osm_id)),
         "__parent": parent,
-        "position": [round(min_x, 5), round(min_y, 5), round(body.z_water, 5)],
+        "position": [round(center_x, 5), round(center_y, 5), round(body.z_water, 5)],
         "scale": [round(size_x, 5), round(size_y, 5), round(depth_z, 5)],
         "rotationMatrix": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
         "baseColor": [189, 253, 255, 255],
         "depthGradientMax": 30.0,
         "depthGradientTex": depth_gradient_tex,
-        "foamAmbientLerp": 1.3,
+        "foamAmbientLerp": 1.0,
         "foamMaxDepth": 0.15,
         "foamRippleInfluence": 0.015,
         "foamTex": foam_tex,
         "fresnelBias": 0.2,
         "fresnelPower": 20.0,
         "fullReflect": False,
-        "gridElementSize": 1.0,
+        "gridElementSize": grid_element_size,
         "gridSize": 1,
         "overallRippleMagnitude": 0.2,
         "overallWaveMagnitude": 0.1,
@@ -134,7 +149,7 @@ def build_water_block_object(
         "Foam": [{}, {}],
         "Ripples (texture animation)": [
             {"rippleDir": [0, 1], "rippleMagnitude": 0.8, "rippleSpeed": 0.001, "rippleTexScale": [12, 12]},
-            {"rippleDir": [0, 1], "rippleMagnitude": None, "rippleSpeed": 0.02, "rippleTexScale": [6, 6]},
+            {"rippleDir": [0, 1], "rippleMagnitude": 0.5, "rippleSpeed": 0.02, "rippleTexScale": [6, 6]},
             {"rippleDir": [0.7, -0.7], "rippleMagnitude": 1.0, "rippleSpeed": 0.02, "rippleTexScale": [3, 3]},
         ],
         "Waves (vertex undulation)": [
@@ -171,15 +186,18 @@ def export_water_to_scene(
     """
     count = 0
     tree.add_group(group_path)
+    parent = group_path[-1] if group_path else ROOT_GROUP
 
     for river in water_network.rivers:
+        if len(river.points) < 2 or len(river.z_water) < 2:
+            continue
         obj = build_river_object(
             tree.level_id,
             river,
             depth_gradient_tex=depth_gradient_tex,
             foam_tex=foam_tex,
             ripple_tex=ripple_tex,
-            parent=group_path[-1],
+            parent=parent,
         )
         tree.add_object(group_path, obj)
         count += 1
@@ -191,7 +209,7 @@ def export_water_to_scene(
             depth_gradient_tex=depth_gradient_tex,
             foam_tex=foam_tex,
             ripple_tex=ripple_tex,
-            parent=group_path[-1],
+            parent=parent,
         )
         tree.add_object(group_path, obj)
         count += 1

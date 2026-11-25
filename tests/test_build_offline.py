@@ -178,6 +178,8 @@ class TestOfflineEndToEnd:
             "main/items.level.json",
             "main/MissionGroup/items.level.json",
             "art/terrains/main.materials.json",
+            "art/terrains/t_terrain_base_grass_b.png",
+            "art/terrains/t_terrain_base_nm.png",
             "theTerrain.ter",
             "theTerrain.terrain.json",
             "map.json",
@@ -309,3 +311,272 @@ class TestOfflineEndToEnd:
         second = run("b")
         for relative in ("theTerrain.ter", "info.json", "main/items.level.json"):
             assert (first / relative).read_bytes() == (second / relative).read_bytes(), relative
+
+
+class TestBuildRegressions:
+    def test_residential_landuse_stays_grass_not_asphalt(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        import ivanovo2beam.build as build_module
+
+        config = ProjectConfig.load("configs/test_sector.yaml")
+        assert config.level is not None
+        object.__setattr__(config, "cache_dir", tmp_path / "cache")
+        object.__setattr__(config, "build_dir", tmp_path / "build")
+        _, _, extent = build_module._level_geographic_bbox(config, margin_deg=0.0)
+
+        osm = synthetic_osm(config.projection, extent)
+        # Add a residential polygon covering the north-east quadrant
+        res_coords = [(100.0, 100.0), (400.0, 100.0), (400.0, 400.0), (100.0, 400.0), (100.0, 100.0)]
+        next_node = max(osm.nodes) + 1
+        refs = []
+        for x, y in res_coords[:-1]:
+            osm.nodes[next_node] = config.projection.world_to_geo(x, y)
+            refs.append(next_node)
+            next_node += 1
+        refs.append(refs[0])
+        osm.ways.append(OsmWay(id=9999, nodes=tuple(refs), tags={"landuse": "residential"}))
+
+        monkeypatch.setattr(
+            build_module,
+            "fetch_level_osm",
+            lambda cfg, box, **kw: (
+                osm,
+                {
+                    "tiles_requested": 1,
+                    "tiles_succeeded": 1,
+                    "tiles_failed": 0,
+                    "tiles_skipped": 0,
+                    "budget_exhausted": False,
+                    "merge_summary": "",
+                },
+            ),
+        )
+        monkeypatch.setattr(
+            "ivanovo2beam.terrain.dem.fetch_dem",
+            lambda requested_bbox, *a, **k: write_synthetic_dem(
+                tmp_path / "cache" / "dem" / "s.tif", requested_bbox.as_tuple()
+            ),
+        )
+        result = build_level(config, progress=None, make_zip=False)
+        hist = result.stats["terrain"]["layer_histogram"]
+        assert hist.get("Asphalt_worn", 0) == 0
+
+    def test_choose_spawn_prefers_in_bounds_road_vertices(self) -> None:
+        from types import SimpleNamespace
+
+        from ivanovo2beam.build import _choose_spawn
+
+        build = SimpleNamespace(
+            elevations=np.full((16, 16), 120.0),
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=10.0,
+        )
+        out_road = SimpleNamespace(
+            drivable=True,
+            bridge=False,
+            tunnel=False,
+            points=np.array([[-50.0, 50.0], [-50.0, 60.0]]),
+        )
+        in_road = SimpleNamespace(
+            drivable=True,
+            bridge=False,
+            tunnel=False,
+            points=np.array([[20.0, 50.0], [30.0, 50.0]]),
+        )
+        chosen = _choose_spawn([out_road, in_road], build, anchor=(-10.0, 50.0))
+        assert len(chosen) == 5
+        assert 0.0 <= chosen[0] <= 150.0
+        assert 0.0 <= chosen[1] <= 150.0
+
+    def test_sky_and_sun_caps_visible_distance_and_sets_fog_density(self, offline_build) -> None:
+        config, _ = offline_build
+        level_dir = config.build_dir / "levels" / config.level.id
+        sky_file = level_dir / "main" / "MissionGroup" / "level_objects" / "sky_and_sun" / "items.level.json"
+        level_infos = [
+            json.loads(line)
+            for line in sky_file.read_text(encoding="utf-8").splitlines()
+            if line.strip() and json.loads(line).get("class") == "LevelInfo"
+        ]
+        assert len(level_infos) == 1
+        assert level_infos[0]["visibleDistance"] <= 12000.0
+        assert level_infos[0]["fogDensity"] == pytest.approx(0.00018)
+
+    def test_cached_overlapping_osm_reads_request_bbox_sidecars(self, tmp_path: Path) -> None:
+        from ivanovo2beam.build import _cached_overlapping_osm_files
+        from ivanovo2beam.gis.projection import BBox
+        from ivanovo2beam.osm import read_cache_meta
+
+        cache_dir = tmp_path / "osm"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "tile_in.osm").write_text("<osm/>", encoding="utf-8")
+        (cache_dir / "tile_in.json").write_text(
+            json.dumps({"request": {"bbox": {"west": 40.9, "south": 56.8, "east": 41.4, "north": 57.05}}}),
+            encoding="utf-8",
+        )
+        (cache_dir / "tile_other.osm").write_text("<osm/>", encoding="utf-8")
+        (cache_dir / "tile_other.json").write_text(
+            json.dumps({"request": {"bbox": {"west": 10.0, "south": 10.0, "east": 11.0, "north": 11.0}}}),
+            encoding="utf-8",
+        )
+        files, lon_cov, lat_cov = _cached_overlapping_osm_files(
+            cache_dir, BBox(west=40.9, south=56.8, east=41.4, north=57.05), read_cache_meta
+        )
+        assert [p.name for p in files] == ["tile_in.osm"]
+        assert lon_cov == pytest.approx(1.0)
+        assert lat_cov == pytest.approx(1.0)
+
+    def test_fetch_level_osm_prefers_local_pbf(self, tmp_path: Path) -> None:
+        from ivanovo2beam.build import fetch_level_osm
+        from ivanovo2beam.osm.pbf import write_osm_pbf
+
+        config = ProjectConfig.load("configs/test_sector.yaml")
+        object.__setattr__(config, "cache_dir", tmp_path / "cache")
+        osm_dir = config.cache_path("osm")
+        osm_dir.mkdir(parents=True)
+        cx, cy = config.level_grid_center()
+        lon, lat = config.projection.world_to_geo(cx, cy)
+        lon2, lat2 = config.projection.world_to_geo(cx + 20.0, cy)
+        pbf_data = OsmData(
+            nodes={1: (lon, lat), 2: (lon2, lat2)},
+            node_tags={},
+            ways=[OsmWay(id=10, nodes=(1, 2), tags={"highway": "primary"})],
+            relations=[],
+            source="pbf-test",
+        )
+        pbf_path = osm_dir / "region.osm.pbf"
+        write_osm_pbf(pbf_path, pbf_data)
+
+        from ivanovo2beam.build import _level_geographic_bbox
+
+        bbox, _, _ = _level_geographic_bbox(config)
+        loaded, stats = fetch_level_osm(config, bbox)
+        assert stats["source"] == str(pbf_path)
+        assert "load_seconds" in stats
+        assert 10 in {w.id for w in loaded.ways}
+
+    def test_choose_spawn_prefers_major_highway_interior_node(self) -> None:
+        from types import SimpleNamespace
+
+        from ivanovo2beam.build import _choose_spawn
+
+        build = SimpleNamespace(
+            elevations=np.full((32, 32), 120.0),
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=10.0,
+        )
+        side_street = SimpleNamespace(
+            drivable=True,
+            bridge=False,
+            tunnel=False,
+            highway="service",
+            points=np.array([[100.0, 100.0], [110.0, 100.0]]),
+        )
+        highway = SimpleNamespace(
+            drivable=True,
+            bridge=False,
+            tunnel=False,
+            highway="primary",
+            points=np.array([[140.0, 100.0], [180.0, 100.0], [220.0, 100.0]]),
+        )
+        chosen = _choose_spawn([side_street, highway], build, anchor=(105.0, 100.0))
+        # Must pick interior vertex (180, 100) on primary highway, not dead-end (140, 100) or service street.
+        assert chosen[0] == pytest.approx(180.0)
+        assert chosen[1] == pytest.approx(100.0)
+        assert chosen[4] == pytest.approx(0.0)
+
+    def test_build_cleans_stale_artifacts_and_uses_512_base_tex(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import ivanovo2beam.build as build_module
+
+        config = ProjectConfig.load("configs/test_sector.yaml")
+        assert config.level is not None
+        object.__setattr__(config, "cache_dir", tmp_path / "cache")
+        object.__setattr__(config, "build_dir", tmp_path / "build")
+        _, _, extent = build_module._level_geographic_bbox(config, margin_deg=0.0)
+        level_dir = config.build_path("levels", config.level.id)
+        (level_dir / "forest").mkdir(parents=True, exist_ok=True)
+        (level_dir / "main.materials.json").write_text("stale", encoding="utf-8")
+        (level_dir / "forest" / "scots_pine.forest4.json").write_text("stale", encoding="utf-8")
+
+        monkeypatch.setattr(
+            build_module,
+            "fetch_level_osm",
+            lambda cfg, box, **kw: (
+                synthetic_osm(cfg.projection, extent),
+                {
+                    "tiles_requested": 1,
+                    "tiles_succeeded": 1,
+                    "tiles_failed": 0,
+                    "tiles_skipped": 0,
+                    "budget_exhausted": False,
+                    "merge_summary": "",
+                },
+            ),
+        )
+        monkeypatch.setattr(
+            "ivanovo2beam.terrain.dem.fetch_dem",
+            lambda requested_bbox, *a, **k: write_synthetic_dem(
+                tmp_path / "cache" / "dem" / "s.tif", requested_bbox.as_tuple()
+            ),
+        )
+        build_level(config, progress=None, make_zip=False)
+        assert not (level_dir / "main.materials.json").exists()
+        assert not (level_dir / "forest" / "scots_pine.forest4.json").exists()
+        mat_doc = json.loads((level_dir / "art" / "terrains" / "main.materials.json").read_text(encoding="utf-8"))
+        texset = mat_doc[f"{config.level.id}TerrainMaterialTextureSet"]
+        assert texset["baseTexSize"] == [512, 512]
+
+    def test_exported_bridge_scene_object_uses_localized_origin(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import ivanovo2beam.build as build_module
+
+        config = ProjectConfig.load("configs/test_sector.yaml")
+        assert config.level is not None
+        object.__setattr__(config, "cache_dir", tmp_path / "cache")
+        object.__setattr__(config, "build_dir", tmp_path / "build")
+        _, _, extent = build_module._level_geographic_bbox(config, margin_deg=0.0)
+        osm = synthetic_osm(config.projection, extent)
+        # Add a non-degenerate bridge away from (0, 0)
+        n0 = max(osm.nodes) + 1
+        osm.nodes[n0] = config.projection.world_to_geo(250.0, 300.0)
+        osm.nodes[n0 + 1] = config.projection.world_to_geo(310.0, 300.0)
+        osm.ways.append(OsmWay(id=8888, nodes=(n0, n0 + 1), tags={"highway": "primary", "bridge": "yes"}))
+
+        monkeypatch.setattr(
+            build_module,
+            "fetch_level_osm",
+            lambda cfg, box, **kw: (
+                osm,
+                {
+                    "tiles_requested": 1,
+                    "tiles_succeeded": 1,
+                    "tiles_failed": 0,
+                    "tiles_skipped": 0,
+                    "budget_exhausted": False,
+                    "merge_summary": "",
+                },
+            ),
+        )
+        monkeypatch.setattr(
+            "ivanovo2beam.terrain.dem.fetch_dem",
+            lambda requested_bbox, *a, **k: write_synthetic_dem(
+                tmp_path / "cache" / "dem" / "s.tif", requested_bbox.as_tuple()
+            ),
+        )
+        build_level(config, progress=None, make_zip=False)
+        bridges_file = (
+            config.build_dir / "levels" / config.level.id / "main" / "MissionGroup" / "level_objects" / "bridges" / "items.level.json"
+        )
+        bridges = [
+            json.loads(line)
+            for line in bridges_file.read_text(encoding="utf-8").splitlines()
+            if line.strip() and json.loads(line).get("class") == "TSStatic"
+        ]
+        target = [b for b in bridges if "bridge_way8888" in b.get("shapeName", "")]
+        assert len(target) == 1
+        assert target[0]["position"][0] == pytest.approx(280.0, abs=1.0)
+        assert target[0]["position"][1] == pytest.approx(300.0, abs=1.0)
+        assert target[0]["position"][2] > 100.0

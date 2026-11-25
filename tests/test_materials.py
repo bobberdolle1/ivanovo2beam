@@ -8,11 +8,13 @@ magenta or black terrain in game, so the path construction is pinned here.
 from __future__ import annotations
 
 import json
+import struct
 import uuid
 
 import pytest
 
 from ivanovo2beam.beamng.materials import (
+    DEFAULT_BASE_TEX_SIZE,
     DEFAULT_MATERIAL_ORDER,
     MATERIAL_LIBRARY,
     VALID_GROUNDMODELS,
@@ -23,6 +25,7 @@ from ivanovo2beam.beamng.materials import (
     referenced_asset_paths,
     resolve_materials,
     surface_to_material,
+    write_terrain_base_textures,
 )
 
 
@@ -167,26 +170,42 @@ class TestBuildMaterialsJson:
             "class",
             "persistentId",
             "baseColorBaseTex",
+            "baseColorBaseTexSize",
             "normalBaseTex",
+            "normalBaseTexSize",
             "roughnessBaseTex",
+            "roughnessBaseTexSize",
             "aoBaseTex",
+            "aoBaseTexSize",
             "heightBaseTex",
+            "heightBaseTexSize",
             "baseColorDetailTex",
+            "baseColorDetailTexSize",
             "baseColorDetailStrength",
             "normalDetailTex",
+            "normalDetailTexSize",
             "normalDetailStrength",
             "roughnessDetailTex",
+            "roughnessDetailTexSize",
             "roughnessDetailStrength",
             "aoDetailTex",
+            "aoDetailTexSize",
             "heightDetailTex",
+            "heightDetailTexSize",
+            "detailDistances",
             "baseColorMacroTex",
+            "baseColorMacroTexSize",
             "baseColorMacroStrength",
             "normalMacroTex",
+            "normalMacroTexSize",
             "normalMacroStrength",
             "roughnessMacroTex",
+            "roughnessMacroTexSize",
             "roughnessMacroStrength",
             "aoMacroTex",
+            "aoMacroTexSize",
             "heightMacroTex",
+            "heightMacroTexSize",
             "macroDistances",
             "groundmodelName",
         }
@@ -195,6 +214,7 @@ class TestBuildMaterialsJson:
                 continue
             missing = required - set(material)
             assert not missing, f"{key} is missing {sorted(missing)}"
+            assert material["baseColorDetailTexSize"] < material["baseColorMacroTexSize"] < material["baseColorBaseTexSize"]
 
     def test_all_texture_paths_are_absolute_asset_paths(self) -> None:
         doc = build_materials_json("test_level")
@@ -206,11 +226,56 @@ class TestBuildMaterialsJson:
                     assert value.startswith("/"), f"{key}.{field} = {value!r}"
 
     def test_no_reference_to_another_level(self) -> None:
-        """Referencing base-game *shared* assets is the intended workflow;
-        referencing another level's local art is fragile and must not happen."""
+        """Referencing base-game *shared* assets or the current level's own
+        base maps is valid; referencing another level's local art must not happen."""
         doc = build_materials_json("test_level")
-        blob = json.dumps(doc)
-        assert "/levels/" not in blob, "materials must not point at another level's assets"
+        for key, material in doc.items():
+            if material.get("class") != "TerrainMaterial":
+                continue
+            for field, value in material.items():
+                if field.endswith("Tex") and "/levels/" in value:
+                    assert value.startswith("/levels/test_level/"), f"{key}.{field} = {value!r}"
+                if field.endswith("DetailTex") or field.endswith("MacroTex"):
+                    assert value.startswith("/assets/materials/terrain/"), f"{key}.{field} = {value!r}"
+
+    def test_write_terrain_base_textures_creates_summer_meadow_maps(self, tmp_path) -> None:
+        from ivanovo2beam.beamng.materials import _tileable_color_patch
+
+        written = write_terrain_base_textures(tmp_path, size=64)
+        assert written
+        assert all(p.is_file() for p in written)
+        grass_png = (tmp_path / "art" / "terrains" / "t_terrain_base_grass_b.png").read_bytes()
+        assert grass_png.startswith(b"\x89PNG\r\n\x1a\n")
+        grass_img = _tileable_color_patch(MATERIAL_LIBRARY["Grass"].base_color, "Grass", size=64)
+        mean_rgb = grass_img.mean(axis=(0, 1))
+        assert mean_rgb[1] > mean_rgb[0] and mean_rgb[1] > mean_rgb[2], f"Grass must be green, got {mean_rgb}"
+        # Every generated /levels/ path in main.materials.json must exist on disk.
+        doc = build_materials_json("test_level")
+        for material in doc.values():
+            if not isinstance(material, dict) or material.get("class") != "TerrainMaterial":
+                continue
+            for field, value in material.items():
+                if field.endswith("Tex") and isinstance(value, str) and value.startswith("/levels/test_level/"):
+                    rel = value.removeprefix("/levels/test_level/")
+                    assert (tmp_path / rel).is_file(), value
+
+    def test_write_terrain_base_textures_pixel_size_equals_basetexsize(self, tmp_path) -> None:
+        """Every generated t_terrain_base_* PNG must have identical (size, size) dimensions
+        matching TerrainMaterialTextureSet.baseTexSize to avoid BeamNG TerrainCellMaterial errors."""
+        doc = build_materials_json("test_level")
+        texture_set = doc["test_levelTerrainMaterialTextureSet"]
+        assert texture_set["baseTexSize"] == [DEFAULT_BASE_TEX_SIZE, DEFAULT_BASE_TEX_SIZE]
+
+        written = write_terrain_base_textures(tmp_path)
+        assert written
+        for p in written:
+            assert p.is_file()
+            data = p.read_bytes()
+            assert data[:8] == b"\x89PNG\r\n\x1a\n"
+            w, h = struct.unpack(">II", data[16:24])
+            assert (w, h) == (DEFAULT_BASE_TEX_SIZE, DEFAULT_BASE_TEX_SIZE), (
+                f"{p.name} has dimensions ({w}, {h}), expected ({DEFAULT_BASE_TEX_SIZE}, {DEFAULT_BASE_TEX_SIZE})"
+            )
 
     def test_rejects_more_than_254_materials(self) -> None:
         with pytest.raises(ValueError, match="at most 254"):
