@@ -150,6 +150,61 @@ def _sample_z(x: float, y: float, build: object | None, fallback: float = 0.0) -
     return val if math.isfinite(val) else fallback
 
 
+def _is_prop_clear_of_all_roads(
+    x: float,
+    y: float,
+    carriageway_index: CarriagewayIndex,
+    *,
+    margin_m: float = 0.8,
+) -> bool:
+    """Return True when ``(x, y)`` clears EVERY drivable road carriageway (all layers/ids).
+
+    Unlike ``CarriagewayIndex.is_blocked(..., owner_id=..., layer=...)``, this never
+    skips self-segments (catching hairpins/loops) and never skips ``layer=0`` roads
+    when checking bridge approaches (which have ``layer=1``).
+    """
+    cell_size = carriageway_index.cell_size_m
+    gx0 = math.floor(x / cell_size)
+    gy0 = math.floor(y / cell_size)
+    span = 1 if margin_m > 3.5 else 0
+    for dx_cell in range(-span, span + 1):
+        for dy_cell in range(-span, span + 1):
+            for seg in (carriageway_index.segments[i] for i in carriageway_index.grid.get((gx0 + dx_cell, gy0 + dy_cell), ())):
+                dx = seg.bx - seg.ax
+                dy = seg.by - seg.ay
+                len2 = dx * dx + dy * dy
+                t = max(0.0, min(1.0, ((x - seg.ax) * dx + (y - seg.ay) * dy) / len2)) if len2 > 0.0 else 0.0
+                dist2 = (seg.ax + t * dx - x) ** 2 + (seg.ay + t * dy - y) ** 2
+                reach = seg.half_width + margin_m
+                if dist2 < reach * reach:
+                    return False
+    return True
+
+
+def _segment_clear_of_all_roads(
+    p0: tuple[float, float],
+    p1: tuple[float, float],
+    carriageway_index: CarriagewayIndex,
+    *,
+    margin_m: float = 0.25,
+) -> bool:
+    """Return True when endpoints and interior samples of segment ``p0 -> p1`` clear all roads."""
+    ax, ay = p0
+    bx, by = p1
+    seg_len = math.hypot(bx - ax, by - ay)
+    steps = max(2, math.ceil(seg_len / 2.0))
+    for k in range(steps + 1):
+        t = k / steps
+        if not _is_prop_clear_of_all_roads(
+            ax + t * (bx - ax),
+            ay + t * (by - ay),
+            carriageway_index,
+            margin_m=margin_m,
+        ):
+            return False
+    return True
+
+
 def _is_shoulder_clear(
     x: float,
     y: float,
@@ -159,15 +214,8 @@ def _is_shoulder_clear(
     *,
     margin_m: float = 1.0,
 ) -> bool:
-    return not carriageway_index.is_blocked(
-        x,
-        y,
-        margin_m=margin_m,
-        tangent=(0.0, 0.0),
-        owner_id=owner_id,
-        layer=layer,
-        cut_all_angles=True,
-    )
+    _ = owner_id, layer
+    return _is_prop_clear_of_all_roads(x, y, carriageway_index, margin_m=margin_m)
 
 
 def _polyline_cum_len(pts: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -195,6 +243,25 @@ def _sample_polyline_at(pts: np.ndarray, cum: np.ndarray, dist_m: float) -> tupl
     return (ax + t * dx, ay + t * dy, dx / seg_len, dy / seg_len)
 
 
+_COLLISION_MESH_SHAPES: frozenset[str] = frozenset(
+    {
+        POLE_WOOD_OLD,
+        POLE_LIGHT_SINGLE,
+        BUS_STOP_SHELTER,
+        SIGN_SHAPES["warn_zebra"],
+    }
+)
+
+
+def _collision_type_for_shape(shape_name: str) -> str:
+    """Use stock ``Colmesh`` proxies where present and ``Bounds`` for colmesh-less signs."""
+    if shape_name in _COLLISION_MESH_SHAPES:
+        return "Collision Mesh"
+    if shape_name == BUS_STOP_SIGN or shape_name.startswith(f"{_CLUTTER}/"):
+        return "Bounds"
+    return "Collision Mesh"
+
+
 def _make_tsstatic(
     level_id: str,
     *,
@@ -205,10 +272,13 @@ def _make_tsstatic(
     z: float,
     yaw_rad: float,
     parent: str,
-    collision_type: str = "Visible Mesh Final",
+    collision_type: str | None = None,
     decal_type: str = "None",
+    mesh_culling: bool = True,
+    use_instance_render_data: bool = True,
 ) -> dict[str, Any]:
-    return {
+    eff_col = collision_type if collision_type is not None else _collision_type_for_shape(shape_name)
+    obj: dict[str, Any] = {
         "name": key,
         "class": "TSStatic",
         "persistentId": stable_uuid(level_id, "TSStatic", key),
@@ -217,9 +287,13 @@ def _make_tsstatic(
         "rotationMatrix": yaw_to_rot_matrix(yaw_rad),
         "shapeName": shape_name,
         "scale": [1.0, 1.0, 1.0],
-        "collisionType": collision_type,
+        "collisionType": eff_col,
         "decalType": decal_type,
+        "meshCulling": mesh_culling,
     }
+    if use_instance_render_data:
+        obj["useInstanceRenderData"] = True
+    return obj
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +309,11 @@ class GuardrailMesh:
     normals: list[tuple[float, float, float]] = field(default_factory=list)
     uvs: list[tuple[float, float]] = field(default_factory=list)
     triangles: list[tuple[tuple[int, int, int], tuple[int, int, int], tuple[int, int, int]]] = field(
+        default_factory=list
+    )
+    col_positions: list[tuple[float, float, float]] = field(default_factory=list)
+    col_normals: list[tuple[float, float, float]] = field(default_factory=list)
+    col_triangles: list[tuple[tuple[int, int, int], tuple[int, int, int], tuple[int, int, int]]] = field(
         default_factory=list
     )
     origin: tuple[float, float, float] = (0.0, 0.0, 0.0)
@@ -263,6 +342,27 @@ class GuardrailMesh:
         self.uvs.extend([uv0, uv1, uv2, uv3])
         self.triangles.append(((base, base, base), (base + 1, base + 1, base + 1), (base + 2, base + 2, base + 2)))
         self.triangles.append(((base, base, base), (base + 2, base + 2, base + 2), (base + 3, base + 3, base + 3)))
+
+    def add_col_quad(
+        self,
+        v0: tuple[float, float, float],
+        v1: tuple[float, float, float],
+        v2: tuple[float, float, float],
+        v3: tuple[float, float, float],
+    ) -> None:
+        """Append a collision-only quad (smooth continuous barrier box)."""
+        ax, ay, az = v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]
+        bx, by, bz = v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]
+        nx = ay * bz - az * by
+        ny = az * bx - ax * bz
+        nz = ax * by - ay * bx
+        nlen = math.sqrt(nx * nx + ny * ny + nz * nz)
+        n = (nx / nlen, ny / nlen, nz / nlen) if nlen > 1e-9 else (0.0, 0.0, 1.0)
+        base = len(self.col_positions)
+        self.col_positions.extend([v0, v1, v2, v3])
+        self.col_normals.extend([n, n, n, n])
+        self.col_triangles.append(((base, base, 0), (base + 1, base + 1, 0), (base + 2, base + 2, 0)))
+        self.col_triangles.append(((base, base, 0), (base + 2, base + 2, 0), (base + 3, base + 3, 0)))
 
 
 def _add_wbeam_post(
@@ -396,6 +496,30 @@ def build_wbeam_guardrail_mesh(
         tx, ty = float(tans[pidx, 0]), float(tans[pidx, 1])
         _add_wbeam_post(mesh, px, py, pz, tx, ty, ix, iy)
 
+    # Smooth continuous collision proxy (Colmesh-1) along rail span so vehicles slide cleanly
+    for i in range(n - 1):
+        d0 = float(cum[i])
+        d1 = float(cum[i + 1])
+        f0 = (1.0 - d0 / 2.0) * 0.28 if (d0 < 2.0 and total_len >= 8.0) else ((1.0 - (total_len - d0) / 2.0) * 0.28 if (total_len - d0 < 2.0 and total_len >= 8.0) else 0.0)
+        f1 = (1.0 - d1 / 2.0) * 0.28 if (d1 < 2.0 and total_len >= 8.0) else ((1.0 - (total_len - d1) / 2.0) * 0.28 if (total_len - d1 < 2.0 and total_len >= 8.0) else 0.0)
+        zdrop0 = 0.14 * (f0 / 0.28) if f0 > 0 else 0.0
+        zdrop1 = 0.14 * (f1 / 0.28) if f1 > 0 else 0.0
+        ix0, iy0 = float(inward_n[i, 0]), float(inward_n[i, 1])
+        ix1, iy1 = float(inward_n[i + 1, 0]), float(inward_n[i + 1, 1])
+        p0x, p0y, p0z = float(pts[i, 0]), float(pts[i, 1]), float(pts[i, 2]) - zdrop0
+        p1x, p1y, p1z = float(pts[i + 1, 0]), float(pts[i + 1, 1]), float(pts[i + 1, 2]) - zdrop1
+        a_in_b = (p0x + (0.06 - f0) * ix0, p0y + (0.06 - f0) * iy0, p0z + 0.34)
+        a_in_t = (p0x + (0.06 - f0) * ix0, p0y + (0.06 - f0) * iy0, p0z + 0.78)
+        b_in_b = (p1x + (0.06 - f1) * ix1, p1y + (0.06 - f1) * iy1, p1z + 0.34)
+        b_in_t = (p1x + (0.06 - f1) * ix1, p1y + (0.06 - f1) * iy1, p1z + 0.78)
+        a_out_b = (p0x + (-0.08 - f0) * ix0, p0y + (-0.08 - f0) * iy0, p0z + 0.34)
+        a_out_t = (p0x + (-0.08 - f0) * ix0, p0y + (-0.08 - f0) * iy0, p0z + 0.78)
+        b_out_b = (p1x + (-0.08 - f1) * ix1, p1y + (-0.08 - f1) * iy1, p1z + 0.34)
+        b_out_t = (p1x + (-0.08 - f1) * ix1, p1y + (-0.08 - f1) * iy1, p1z + 0.78)
+        mesh.add_col_quad(a_in_b, b_in_b, b_in_t, a_in_t)
+        mesh.add_col_quad(b_out_b, a_out_b, a_out_t, b_out_t)
+        mesh.add_col_quad(a_in_t, b_in_t, b_out_t, a_out_t)
+
     if localize and mesh.positions:
         xs = [p[0] for p in mesh.positions]
         ys = [p[1] for p in mesh.positions]
@@ -404,6 +528,7 @@ def build_wbeam_guardrail_mesh(
         oy = round(0.5 * (min(ys) + max(ys)), 4)
         oz = round(min(zs), 4)
         mesh.positions = [(px - ox, py - oy, pz - oz) for px, py, pz in mesh.positions]
+        mesh.col_positions = [(px - ox, py - oy, pz - oz) for px, py, pz in mesh.col_positions]
         mesh.origin = (ox, oy, oz)
 
     return mesh
@@ -418,6 +543,47 @@ def export_guardrail_dae(path: Path, mesh: GuardrailMesh, name: str) -> int:
     p_str = " ".join(f"{vi} {ni} {uvi}" for tri in mesh.triangles for vi, ni, uvi in tri)
     safe_name = escape(name)
     mat_name = GUARDRAIL_MATERIAL
+
+    col_geom_xml = ""
+    col_node_xml = ""
+    if mesh.col_triangles and mesh.col_positions:
+        c_pos = " ".join(f"{v:.4f}".rstrip("0").rstrip(".") or "0" for p in mesh.col_positions for v in p)
+        c_norm = " ".join(f"{v:.4f}".rstrip("0").rstrip(".") or "0" for n in mesh.col_normals for v in n)
+        c_p = " ".join(f"{vi} {ni}" for tri in mesh.col_triangles for vi, ni, _ in tri)
+        col_geom_xml = f"""
+    <geometry id="{safe_name}-colmesh" name="{safe_name}-colmesh">
+      <mesh>
+        <source id="{safe_name}-colmesh-positions">
+          <float_array id="{safe_name}-colmesh-positions-array" count="{len(mesh.col_positions) * 3}">{c_pos}</float_array>
+          <technique_common>
+            <accessor source="#{safe_name}-colmesh-positions-array" count="{len(mesh.col_positions)}" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="{safe_name}-colmesh-normals">
+          <float_array id="{safe_name}-colmesh-normals-array" count="{len(mesh.col_normals) * 3}">{c_norm}</float_array>
+          <technique_common>
+            <accessor source="#{safe_name}-colmesh-normals-array" count="{len(mesh.col_normals)}" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="{safe_name}-colmesh-vertices">
+          <input semantic="POSITION" source="#{safe_name}-colmesh-positions"/>
+        </vertices>
+        <triangles count="{len(mesh.col_triangles)}">
+          <input semantic="VERTEX" source="#{safe_name}-colmesh-vertices" offset="0"/>
+          <input semantic="NORMAL" source="#{safe_name}-colmesh-normals" offset="1"/>
+          <p>{c_p}</p>
+        </triangles>
+      </mesh>
+    </geometry>"""
+        col_node_xml = f"""
+          <node id="Colmesh-1" name="Colmesh-1" type="NODE">
+            <matrix sid="transform">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+            <instance_geometry url="#{safe_name}-colmesh" name="Colmesh-1"/>
+          </node>"""
 
     xml = f"""<?xml version="1.0" encoding="utf-8"?>
 <COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
@@ -479,17 +645,26 @@ def export_guardrail_dae(path: Path, mesh: GuardrailMesh, name: str) -> int:
           <p>{p_str}</p>
         </triangles>
       </mesh>
-    </geometry>
+    </geometry>{col_geom_xml}
   </library_geometries>
   <library_visual_scenes>
     <visual_scene id="Scene" name="Scene">
-      <node id="{safe_name}" name="{safe_name}" type="NODE">
+      <node id="base00" name="base00" type="NODE">
         <matrix sid="transform">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
-        <instance_geometry url="#{safe_name}-mesh" name="{safe_name}">
-          <bind_material><technique_common>
-            <instance_material symbol="{mat_name}" target="#{mat_name}"/>
-          </technique_common></bind_material>
-        </instance_geometry>
+        <node id="start01" name="start01" type="NODE">
+          <matrix sid="transform">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+          <node id="{safe_name}_a20" name="{safe_name}_a20" type="NODE">
+            <matrix sid="transform">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+            <instance_geometry url="#{safe_name}-mesh" name="{safe_name}_a20">
+              <bind_material><technique_common>
+                <instance_material symbol="{mat_name}" target="#{mat_name}"/>
+              </technique_common></bind_material>
+            </instance_geometry>
+          </node>{col_node_xml}
+        </node>
+        <node id="nulldetail6" name="nulldetail6" type="NODE">
+          <matrix sid="transform">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        </node>
       </node>
     </visual_scene>
   </library_visual_scenes>
@@ -809,7 +984,33 @@ def add_roadside_props_to_scene(
         pts = road.points
         _, cum = _polyline_cum_len(pts)
         total_len = float(cum[-1])
-        spacing = 50.0 if is_lit else 65.0
+
+        if road.highway == "residential":
+            # Thin residential utility poles: skip unnamed courtyard/dacha loops & short stubs
+            if not road.name or road.width_m < 6.0 or total_len < 130.0:
+                continue
+            spacing = 135.0
+            dedupe_dist = 95.0
+            pole_cat = "pole_wood"
+        elif road.highway == "tertiary":
+            if total_len < 85.0:
+                continue
+            spacing = 100.0
+            dedupe_dist = 80.0
+            pole_cat = "pole_wood"
+        elif road.highway == "secondary":
+            if total_len < 100.0:
+                continue
+            spacing = 95.0
+            dedupe_dist = 65.0
+            pole_cat = "pole_lit"
+        else:
+            if "_link" in road.highway and total_len < 75.0:
+                continue
+            spacing = 70.0
+            dedupe_dist = 54.0
+            pole_cat = "pole_lit"
+
         if total_len < spacing:
             continue
         pole_shape = POLE_LIGHT_SINGLE if is_lit else POLE_WOOD_OLD
@@ -821,10 +1022,10 @@ def add_roadside_props_to_scene(
             # Right shoulder: inward normal toward road center is left normal (-ty, tx)
             sx = px + ty * pole_off
             sy = py - tx * pole_off
-            if _is_shoulder_clear(sx, sy, road.osm_id, road.layer, idx, margin_m=1.2):
+            if _is_prop_clear_of_all_roads(sx, sy, idx, margin_m=1.2):
                 gz = _sample_z(sx, sy, build) - z_embed
                 yaw = _inward_x_pos_yaw(-ty, tx)
-                if _emit_stock("pole", f"pole_{road.osm_id}", pole_shape, sx, sy, gz, yaw, 38.0, any_sep=5.0):
+                if _emit_stock(pole_cat, f"pole_{road.osm_id}", pole_shape, sx, sy, gz, yaw, dedupe_dist, any_sep=5.0):
                     counts["poles"] += 1
             d += spacing
 
@@ -838,69 +1039,122 @@ def add_roadside_props_to_scene(
             nonlocal mat_written, gr_seq
             if run_xy.shape[0] < 2:
                 return
-            pts_3d = np.column_stack(
-                (
-                    run_xy[:, 0],
-                    run_xy[:, 1],
-                    np.array([_sample_z(float(p[0]), float(p[1]), build) for p in run_xy], dtype=np.float64),
+            # Validate every segment and vertex span clears all drivable carriageways
+            valid_runs: list[list[tuple[float, float]]] = []
+            curr: list[tuple[float, float]] = []
+            for k_pt in range(run_xy.shape[0]):
+                pt = (float(run_xy[k_pt, 0]), float(run_xy[k_pt, 1]))
+                if not _is_prop_clear_of_all_roads(pt[0], pt[1], idx, margin_m=0.25):
+                    if len(curr) >= 3:
+                        valid_runs.append(curr)
+                    curr = []
+                    continue
+                if curr and not _segment_clear_of_all_roads(curr[-1], pt, idx, margin_m=0.20):
+                    if len(curr) >= 3:
+                        valid_runs.append(curr)
+                    curr = [pt]
+                else:
+                    curr.append(pt)
+            if len(curr) >= 3:
+                valid_runs.append(curr)
+
+            for vrun in valid_runs:
+                v_arr = np.asarray(vrun, dtype=np.float64)
+                pts_3d = np.column_stack(
+                    (
+                        v_arr[:, 0],
+                        v_arr[:, 1],
+                        np.array([_sample_z(float(p[0]), float(p[1]), build) for p in v_arr], dtype=np.float64),
+                    )
                 )
-            )
-            mesh = build_wbeam_guardrail_mesh(pts_3d, inward_side=inward_side, localize=True)
-            if not mesh.triangles:
-                return
-            if not mat_written:
-                emit_road_props_materials(level_dir, tree.level_id)
-                mat_written = True
-            gr_seq += 1
-            mesh_name = f"guardrail_{tag}_{gr_seq}"
-            dae_path = props_dir / f"{mesh_name}.dae"
-            export_guardrail_dae(dae_path, mesh, mesh_name)
-            obj = _make_tsstatic(
-                tree.level_id,
-                key=mesh_name,
-                shape_name=f"/levels/{tree.level_id}/art/shapes/road_props/{mesh_name}.dae",
-                x=mesh.origin[0],
-                y=mesh.origin[1],
-                z=mesh.origin[2],
-                yaw_rad=0.0,
-                parent=parent_name,
-            )
-            tree.add_object(group_path, obj)
-            counts["guardrails"] += 1
+                mesh = build_wbeam_guardrail_mesh(pts_3d, inward_side=inward_side, localize=True)
+                if not mesh.triangles:
+                    continue
+                if not mat_written:
+                    emit_road_props_materials(level_dir, tree.level_id)
+                    mat_written = True
+                gr_seq += 1
+                mesh_name = f"guardrail_{tag}_{gr_seq}"
+                dae_path = props_dir / f"{mesh_name}.dae"
+                export_guardrail_dae(dae_path, mesh, mesh_name)
+                obj = _make_tsstatic(
+                    tree.level_id,
+                    key=mesh_name,
+                    shape_name=f"/levels/{tree.level_id}/art/shapes/road_props/{mesh_name}.dae",
+                    x=mesh.origin[0],
+                    y=mesh.origin[1],
+                    z=mesh.origin[2],
+                    yaw_rad=0.0,
+                    parent=parent_name,
+                    collision_type="Collision Mesh",
+                    use_instance_render_data=False,
+                )
+                tree.add_object(group_path, obj)
+                counts["guardrails"] += 1
 
         # 4a) Bridgehead guardrails (~28m approach leading into both portals of every bridge)
         for road in drivable_roads:
             if not road.bridge:
                 continue
             pts = road.points
-            off = road.half_width_m + 0.35
             for at_end in (False, True):
                 p0 = pts[-1] if at_end else pts[0]
                 p_in = pts[-2] if at_end else pts[1]
-                vx, vy = float(p0[0] - p_in[0]), float(p0[1] - p_in[1])
-                vlen = math.hypot(vx, vy)
-                if vlen <= 1e-6:
-                    continue
-                ux, uy = vx / vlen, vy / vlen  # pointing away from bridge along approach
-                nx, ny = -uy, ux
-                for side_sign in (-1.0, 1.0):
-                    # Walk from 28m back toward portal (p0) so polyline order runs toward bridge
-                    samples: list[tuple[float, float]] = []
-                    for ds in np.linspace(28.0, 1.5, 10):
-                        cx = float(p0[0]) + ux * float(ds) + side_sign * off * nx
-                        cy = float(p0[1]) + uy * float(ds) + side_sign * off * ny
-                        if not _in_terrain_bounds(cx, cy, build):
-                            continue
-                        if carriageway_index_clear(cx, cy, road, idx):
-                            samples.append((cx, cy))
-                        elif len(samples) >= 3:
-                            break
-                        else:
-                            samples.clear()
-                    if len(samples) >= 3:
-                        # Polyline goes 28m -> 1.5m; tangent = (-ux,-uy), left_normal = (uy,-ux) = (-nx,-ny)
-                        # So inward direction toward road center (-side_sign * (nx,ny)) corresponds to side_sign * left_normal
-                        _emit_guardrail_run(np.asarray(samples, dtype=np.float64), road, inward_side=side_sign, tag=f"br{road.osm_id}")
+                jkey = (round(float(p0[0]) * 2.0), round(float(p0[1]) * 2.0))
+                app_arms = [(r, r_at_end) for r, r_at_end, _, _ in junc_arms.get(jkey, ()) if not r.bridge]
+
+                if len(app_arms) == 1:
+                    app_road, app_at_end = app_arms[0]
+                    app_pts = app_road.points
+                    _, app_cum = _polyline_cum_len(app_pts)
+                    app_len = float(app_cum[-1])
+                    if app_len < 8.0:
+                        continue
+                    max_back = min(28.0, app_len - 1.5)
+                    off = app_road.half_width_m + 0.45
+                    ds_vals = np.linspace(max_back, 1.5, max(3, int(round((max_back - 1.5) / 3.0)) + 1))
+                    for side_sign in (-1.0, 1.0):
+                        samples: list[tuple[float, float]] = []
+                        for ds in ds_vals:
+                            s_d = (app_len - float(ds)) if app_at_end else float(ds)
+                            cx, cy, tx, ty = _sample_polyline_at(app_pts, app_cum, s_d)
+                            # Travel direction toward bridge portal
+                            ttx, tty = (tx, ty) if app_at_end else (-tx, -ty)
+                            lnx, lny = -tty, ttx
+                            gx = cx + side_sign * off * lnx
+                            gy = cy + side_sign * off * lny
+                            if _in_terrain_bounds(gx, gy, build) and _is_prop_clear_of_all_roads(gx, gy, idx, margin_m=0.25):
+                                samples.append((gx, gy))
+                            elif len(samples) >= 3:
+                                break
+                            else:
+                                samples.clear()
+                        if len(samples) >= 3:
+                            _emit_guardrail_run(np.asarray(samples, dtype=np.float64), road, inward_side=-side_sign, tag=f"br{road.osm_id}")
+                elif len(app_arms) == 0:
+                    # Fallback for disconnected bridge portals
+                    off = road.half_width_m + 0.45
+                    vx, vy = float(p0[0] - p_in[0]), float(p0[1] - p_in[1])
+                    vlen = math.hypot(vx, vy)
+                    if vlen <= 1e-6:
+                        continue
+                    ux, uy = vx / vlen, vy / vlen
+                    nx, ny = -uy, ux
+                    for side_sign in (-1.0, 1.0):
+                        samples = []
+                        for ds in np.linspace(28.0, 1.5, 10):
+                            cx = float(p0[0]) + ux * float(ds) + side_sign * off * nx
+                            cy = float(p0[1]) + uy * float(ds) + side_sign * off * ny
+                            if not _in_terrain_bounds(cx, cy, build):
+                                continue
+                            if _is_prop_clear_of_all_roads(cx, cy, idx, margin_m=0.25):
+                                samples.append((cx, cy))
+                            elif len(samples) >= 3:
+                                break
+                            else:
+                                samples.clear()
+                        if len(samples) >= 3:
+                            _emit_guardrail_run(np.asarray(samples, dtype=np.float64), road, inward_side=side_sign, tag=f"br{road.osm_id}")
 
         # 4b) Outer curve & steep embankment guardrails along major highways
         for road in drivable_roads:
@@ -940,7 +1194,7 @@ def add_roadside_props_to_scene(
                         # Positive cross = left turn -> outer side is right (-1.0)
                         if (turn_cross > 0.08 and side_sign < 0.0) or (turn_cross < -0.08 and side_sign > 0.0):
                             sharp_outer = True
-                    if (steep_drop or sharp_outer) and carriageway_index_clear(gx, gy, road, idx):
+                    if (steep_drop or sharp_outer) and _is_prop_clear_of_all_roads(gx, gy, idx, margin_m=0.25):
                         run.append((gx, gy))
                     else:
                         if len(run) >= 5:
@@ -953,13 +1207,6 @@ def add_roadside_props_to_scene(
 
 
 def carriageway_index_clear(x: float, y: float, owner_road: Road, idx: CarriagewayIndex) -> bool:
-    """Return True when ``(x, y)`` is clear of all OTHER road carriageways and self-centerline."""
-    return not idx.is_blocked(
-        x,
-        y,
-        margin_m=0.8,
-        tangent=(0.0, 0.0),
-        owner_id=owner_road.osm_id,
-        layer=owner_road.layer,
-        cut_all_angles=True,
-    )
+    """Return True when ``(x, y)`` clears all drivable road carriageways."""
+    _ = owner_road
+    return _is_prop_clear_of_all_roads(x, y, idx, margin_m=0.8)
