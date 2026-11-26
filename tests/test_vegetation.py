@@ -27,12 +27,16 @@ from ivanovo2beam.vegetation.extract import (
     extract_vegetation,
 )
 from ivanovo2beam.vegetation.forest import (
+    LINKED_SPECIES_DATA,
     SPECIES_DATA,
+    STOCK_TREE_MATERIALS,
     build_forest_materials_json,
     build_keepout_mask,
     build_managed_item_data_json,
+    discover_beamng_dir,
     export_vegetation,
 )
+from ivanovo2beam.vegetation.worldcover import WC_CROPS, WC_TREES, worldcover_tile_name
 
 BBOX = BBox(west=39.0, south=56.1, east=43.2, north=57.8)
 
@@ -232,6 +236,26 @@ class TestVegetationExtraction:
         assert stats.scrub_areas == 1
         assert areas[0].kind == "scrub"
         assert areas[0].area_m2 >= 500.0
+
+    def test_extract_farmland_and_multipolygon_landuse_holes(self, projection) -> None:
+        outer_farm = rectangle(500.0, 400.0, 0.0, 0.0).tolist()
+        inner_copse = rectangle(100.0, 100.0, 200.0, 150.0).tolist()
+        osm = _make_osm(projection, [(outer_farm, {}), (inner_copse, {"landuse": "forest"})])
+        osm.relations.append(
+            OsmRelation(
+                id=88,
+                members=(("way", 1, "outer"), ("way", 2, "inner")),
+                tags={"type": "multipolygon", "landuse": "farmland"},
+            )
+        )
+        areas, stats = extract_vegetation(osm, projection)
+
+        assert stats.farmland_areas == 1
+        assert stats.forest_areas == 1
+        farm = next(a for a in areas if a.kind == "farmland")
+        assert len(farm.holes) == 1
+        poly = farm.to_polygon()
+        assert poly.area == pytest.approx(500.0 * 400.0 - 100.0 * 100.0, rel=1e-2)
 
 
 class TestKeepoutMask:
@@ -623,7 +647,12 @@ class TestForestExport:
             )
         ]
         export_vegetation(
-            areas, build, level_id="lvl", level_dir=tmp_path, target_density_trees_per_ha=200.0
+            areas,
+            build,
+            level_id="lvl",
+            level_dir=tmp_path,
+            target_density_trees_per_ha=200.0,
+            beamng_dir=False,
         )
         pts: list[tuple[float, float]] = []
         for json_file in (tmp_path / "forest").glob("*.forest4.json"):
@@ -640,7 +669,9 @@ class TestForestExport:
     def test_managed_item_data_json_structure_and_no_collisions(self, tmp_path: Path) -> None:
         build = _MockBuild(size=512)
         areas = self._vegetation_areas()
-        export_vegetation(areas, build, level_id="lvl", level_dir=tmp_path)
+        export_vegetation(
+            areas, build, level_id="lvl", level_dir=tmp_path, beamng_dir=False
+        )
 
         mid_path = tmp_path / "art" / "forest" / "managedItemData.json"
         assert mid_path.is_file()
@@ -648,7 +679,7 @@ class TestForestExport:
 
         mat_data = build_forest_materials_json()
         assert set(mid_data).isdisjoint(set(mat_data))
-        assert len(SPECIES_DATA) == 7
+        assert len(SPECIES_DATA) == 10
         assert set(build_managed_item_data_json()) == set(SPECIES_DATA)
 
         for key in SPECIES_DATA:
@@ -662,30 +693,55 @@ class TestForestExport:
             if item["class"] == "TSForestItemData":
                 assert item["radius"] > 0
                 assert item["mass"] > 0
+        assert not (tmp_path / "art" / "shapes" / "linked").exists()
 
     def test_forest_materials_json_structure(self, tmp_path: Path) -> None:
         build = _MockBuild(size=512)
         areas = self._vegetation_areas()
-        export_vegetation(areas, build, level_id="lvl", level_dir=tmp_path)
+        export_vegetation(
+            areas, build, level_id="lvl", level_dir=tmp_path, beamng_dir=False
+        )
 
         mat_path = tmp_path / "art" / "forest" / "main.materials.json"
         assert mat_path.is_file()
         mat_data = json.loads(mat_path.read_text(encoding="utf-8"))
 
-        # Verify all 10 materials (.dae and compiled .cdae names) for the 7 lean /assets/ meshes
         expected_mats = [
             "Birch_Bark_01",
             "Birch_Branch_01",
+            "Birch_Leaves_01",
+            "m_birch_leaves_distant",
             "m_ind_birch_leaves_01",
             "beech_trunk",
             "beech_branch_01",
             "beech_leaves",
             "beech_blocker",
+            "m_beech_leaves_distant",
             "m_ind_beech_leaves",
             "m_ind_beech_blocker",
+            "Oak_bark_01",
+            "Oak_branch_01",
+            "Oak_branch_02",
+            "Moss_01",
+            "m_oak_leaves_01",
+            "m_oak_leaves_02",
+            "oak_leaves_01",
+            "oak_leaves_02",
+            "m_oak_leaves_distant",
+            "fir_bark",
+            "fir_leaves",
+            "fir_leaves_02",
+            "fir_leaves_dead",
+            "m_fir_leaves_distant",
+            "m_fir_leaves_distant_02",
+            "scots_pine_trunk",
+            "scots_pine_branches",
+            "scots_pine",
+            "forest_vegetation",
             "leaves_strong",
+            "leaves_thin",
         ]
-        assert len(mat_data) == len(expected_mats)
+        assert len(mat_data) == len(STOCK_TREE_MATERIALS) == len(expected_mats)
         for mat_key in expected_mats:
             assert mat_key in mat_data
             m = mat_data[mat_key]
@@ -697,6 +753,19 @@ class TestForestExport:
         assert mat_data["m_ind_beech_leaves"]["Stages"] == mat_data["beech_leaves"]["Stages"]
         assert mat_data["m_ind_beech_blocker"]["Stages"] == mat_data["beech_blocker"]["Stages"]
 
+        # Birch leaves must use summer green t_birch_leaves (never autumn/industrial _ind!)
+        birch_leaves = mat_data["m_ind_birch_leaves_01"]
+        assert (
+            birch_leaves["Stages"][0]["baseColorMap"]
+            == "/assets/materials/tree/birch/t_birch_leaves/t_birch_leaves_b.color.dds"
+        )
+        assert birch_leaves["subSurface"] is True
+        assert birch_leaves["subSurfaceIntensity"] == pytest.approx(1.0)
+        assert birch_leaves["Stages"][0]["pixelSpecular"] is True
+        assert birch_leaves["Stages"][0]["baseColorFactor"] == pytest.approx(
+            [0.996078491, 0.996078491, 0.996078491, 1.0]
+        )
+
         # Every alphaTest material must define opacityMap and no cross-level /levels/ paths
         for m in mat_data.values():
             stage0 = m["Stages"][0]
@@ -705,10 +774,182 @@ class TestForestExport:
             for tex_val in stage0.values():
                 if isinstance(tex_val, str):
                     assert tex_val.startswith("/assets/"), f"Unexpected path {tex_val}"
+                    assert not tex_val.endswith(".link")
 
         branch = mat_data["Birch_Branch_01"]
         assert branch.get("alphaTest") is True
         assert branch.get("doubleSided") is True
+
+    def test_linked_conifers_and_ferns_emit_link_pointers(self, tmp_path: Path) -> None:
+        import zipfile
+
+        beamng_root = tmp_path / "BeamNG"
+        levels_dir = beamng_root / "content" / "levels"
+        levels_dir.mkdir(parents=True)
+
+        ecu_zip = levels_dir / "east_coast_usa.zip"
+        with zipfile.ZipFile(ecu_zip, "w") as zf:
+            for spec in LINKED_SPECIES_DATA.values():
+                src = spec["sourceShape"]
+                if not src.startswith("levels/east_coast_usa/"):
+                    continue
+                zf.writestr(src, "<dae/>")
+                zf.writestr(src[:-4] + ".cdae", "cdae")
+                zf.writestr(src + ".asset.json", "{}")
+                zf.writestr(src + ".imposter.dds", "dds")
+                zf.writestr(src + ".imposter_normals.dds", "dds")
+
+        italy_zip = levels_dir / "italy.zip"
+        with zipfile.ZipFile(italy_zip, "w") as zf:
+            src = LINKED_SPECIES_DATA["scots_pine_tree"]["sourceShape"]
+            zf.writestr(src, "<dae/>")
+            zf.writestr(src[:-4] + ".cdae", "cdae")
+            zf.writestr(src + ".asset.json", "{}")
+            zf.writestr(src + ".imposter.dds", "dds")
+            zf.writestr(src + ".imposter_normals.dds", "dds")
+
+        assert discover_beamng_dir(beamng_root) == beamng_root
+
+        level_dir = tmp_path / "built_lvl"
+        build = _MockBuild(size=512)
+        areas = [
+            VegetationArea(
+                osm_id=7001,
+                ring=rectangle(300.0, 300.0, 50.0, 50.0),
+                kind="forest",
+                area_m2=90000.0,
+            )
+        ]
+        _, stats = export_vegetation(
+            areas,
+            build,
+            level_id="built_lvl",
+            level_dir=level_dir,
+            beamng_dir=beamng_root,
+        )
+
+        assert stats.total_trees > 500
+        # Linked conifers and lush_ferns must be present in managedItemData and placed
+        mid_data = json.loads(
+            (level_dir / "art" / "forest" / "managedItemData.json").read_text(encoding="utf-8")
+        )
+        mat_data = json.loads(
+            (level_dir / "art" / "forest" / "main.materials.json").read_text(encoding="utf-8")
+        )
+        assert set(mid_data).isdisjoint(set(mat_data))
+        assert "scots_pine_tree" in mid_data
+        assert "scots_pine" in mat_data
+        assert "tree_douglasfir_large_a" in mid_data
+        assert "lush_ferns_01_a" in mid_data
+        # Birch/Beech/Oak shapes should also upgrade to east_coast_usa .link shapes + imposters
+        assert mid_data["tree_aspen_forest_a"]["shapeFile"].startswith(
+            "/levels/built_lvl/art/shapes/linked/east_coast_usa/"
+        )
+        aspen_imp_link = (
+            level_dir
+            / "art"
+            / "shapes"
+            / "linked"
+            / "east_coast_usa"
+            / "trees"
+            / "trees_aspen"
+            / "tree_aspen_forest_a.dae.imposter.dds.link"
+        )
+        assert aspen_imp_link.is_file()
+        assert (
+            level_dir
+            / "art"
+            / "shapes"
+            / "linked"
+            / "east_coast_usa"
+            / "trees"
+            / "trees_oak"
+            / "tree_oak_forest_a.dae.imposter.dds.link"
+        ).is_file()
+
+        # Verify .link files + companions were generated as pure JSON pointers
+        fir_link = (
+            level_dir
+            / "art"
+            / "shapes"
+            / "linked"
+            / "east_coast_usa"
+            / "trees"
+            / "trees_douglasfir"
+            / "tree_douglasfir_large_a.dae.link"
+        )
+        assert fir_link.is_file()
+        link_doc = json.loads(fir_link.read_text(encoding="utf-8"))
+        assert link_doc == {
+            "path": "/levels/east_coast_usa/art/shapes/trees/trees_douglasfir/tree_douglasfir_large_a.dae",
+            "type": "normal",
+        }
+        for comp in (
+            "tree_douglasfir_large_a.cdae.link",
+            "tree_douglasfir_large_a.dae.asset.json.link",
+            "tree_douglasfir_large_a.dae.imposter.dds.link",
+            "tree_douglasfir_large_a.dae.imposter_normals.dds.link",
+        ):
+            assert (fir_link.parent / comp).is_file()
+
+        assert any("douglasfir" in k or "scots_pine" in k for k in stats.by_species)
+        assert any("lush_ferns" in k for k in stats.by_species)
+
+    def test_spatial_budget_zoning_and_farmland_exclusion(self, tmp_path: Path) -> None:
+        import inspect
+
+        assert inspect.signature(export_vegetation).parameters["max_trees"].default == 45000
+
+        build = _MockBuild(size=1024)  # 2048m extent
+        road = self._MockRoad(points=[(0.0, 20.0), (500.0, 20.0)], width_m=8.0, highway="primary")
+        areas = [
+            VegetationArea(
+                osm_id=8001,
+                ring=rectangle(200.0, 200.0, 50.0, 30.0),  # roadside/near forest (4 ha)
+                kind="forest",
+                area_m2=40000.0,
+            ),
+            VegetationArea(
+                osm_id=8002,
+                ring=rectangle(400.0, 400.0, 1200.0, 1200.0),  # >400m far backdrop (16 ha)
+                kind="forest",
+                area_m2=160000.0,
+            ),
+            VegetationArea(
+                osm_id=8003,
+                ring=rectangle(200.0, 200.0, 500.0, 50.0),  # arable farmland (0 trees)
+                kind="farmland",
+                area_m2=40000.0,
+            ),
+        ]
+        export_vegetation(
+            areas,
+            build,
+            level_id="lvl",
+            level_dir=tmp_path,
+            roads=[road],
+            beamng_dir=False,
+        )
+
+        near_count = 0
+        far_count = 0
+        farm_count = 0
+        for json_file in (tmp_path / "forest").glob("*.forest4.json"):
+            for line in json_file.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                x, y, _ = json.loads(line)["pos"]
+                if 50.0 <= x <= 250.0 and 30.0 <= y <= 230.0:
+                    near_count += 1
+                elif 1200.0 <= x <= 1600.0 and 1200.0 <= y <= 1600.0:
+                    far_count += 1
+                elif 500.0 <= x <= 700.0 and 50.0 <= y <= 250.0:
+                    farm_count += 1
+
+        assert farm_count == 0
+        near_density_per_ha = near_count / 4.0
+        far_density_per_ha = far_count / 16.0
+        assert near_density_per_ha > far_density_per_ha * 1.8
 
     def test_scene_objects_emitted(self, tmp_path: Path) -> None:
         build = _MockBuild(size=512)
@@ -728,3 +969,65 @@ class TestForestExport:
         assert wind_obj["name"] == "windEmitter"
         assert wind_obj["__parent"] == "vegetation"
         assert wind_obj["strength"] > 0
+
+    def test_riparian_woodland_frames_water_banks(self, tmp_path: Path) -> None:
+        @dataclass
+        class _MockRiver:
+            points: list[tuple[float, float]]
+            width_m: float = 12.0
+
+        build = _MockBuild(size=512)
+        river = _MockRiver(points=[(50.0, 250.0), (450.0, 250.0)], width_m=12.0)
+        _, stats = export_vegetation(
+            [],
+            build,
+            level_id="lvl",
+            level_dir=tmp_path,
+            water=[river],
+            beamng_dir=False,
+        )
+        assert stats.total_trees > 20
+        for json_file in (tmp_path / "forest").glob("*.forest4.json"):
+            for line in json_file.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                x, y, _ = json.loads(line)["pos"]
+                # Outside river channel (+2m water keepout => >=8m from centreline) and within riparian band
+                assert abs(y - 250.0) >= 6.0
+                assert abs(y - 250.0) <= 28.0
+                assert 30.0 <= x <= 470.0
+
+    def test_worldcover_tile_naming_and_cached_extraction(
+        self, tmp_path: Path, projection
+    ) -> None:
+        assert worldcover_tile_name(56.915, 41.125) == "ESA_WorldCover_10m_2021_v200_N54E039_Map.tif"
+
+        # Create a small synthetic WorldCover .npz/.json cache over [0..400] x [0..400]
+        corners = [projection.world_to_geo(x, y) for x in (0.0, 400.0) for y in (0.0, 400.0)]
+        lon0 = min(c[0] for c in corners)
+        lat0 = min(c[1] for c in corners)
+        lon1 = max(c[0] for c in corners)
+        lat1 = max(c[1] for c in corners)
+        wc_grid = np.full((20, 20), WC_CROPS, dtype=np.uint8)
+        # Put a forest canopy block in rows 2..10, cols 10..18 (east half, north half)
+        wc_grid[2:10, 10:18] = WC_TREES
+        np.savez_compressed(tmp_path / "test_wc.npz", grid=wc_grid)
+        (tmp_path / "test_wc.json").write_text(
+            json.dumps({"bbox": [lon0, lat0, lon1, lat1], "shape": [20, 20]}),
+            encoding="utf-8",
+        )
+
+        # Put an explicit OSM farmland patch overlapping part of the west side only
+        farm = rectangle(150.0, 400.0, 0.0, 0.0).tolist()
+        osm = _make_osm(projection, [(farm, {"landuse": "farmland"})])
+        areas, stats = extract_vegetation(
+            osm,
+            projection,
+            clip_bounds=(0.0, 0.0, 400.0, 400.0),
+            worldcover_dir=tmp_path,
+        )
+        assert stats.farmland_areas == 1
+        assert stats.worldcover_areas >= 1
+        wc_areas = [a for a in areas if a.name == "WorldCover Canopy"]
+        assert wc_areas
+        assert all(a.kind == "forest" for a in wc_areas)

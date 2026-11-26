@@ -180,6 +180,35 @@ class WaterNetwork:
         return sum(b.area_m2 for b in self.water_bodies)
 
 
+def _sample_dem_world(
+    xs: NDArray[np.float64],
+    ys: NDArray[np.float64],
+    projection: RegionProjection,
+    dem: DemSampler,
+) -> NDArray[np.float64]:
+    """Sample DEM elevations at world XY arrays, using fast world sampler if available."""
+    if hasattr(dem, "sample_world_array"):
+        return np.asarray(dem.sample_world_array(xs, ys), dtype=np.float64)
+    lons, lats = projection.world_to_geo_array(xs, ys)
+    return np.asarray(dem.sample_array(lons, lats), dtype=np.float64)
+
+
+def _running_median(values: NDArray[np.float64], window: int = 5) -> NDArray[np.float64]:
+    """Compute a centred running median with edge-shrinking symmetric windows.
+
+    Adapted from MapNG (https://github.com/nikkiluzader/mapng), MIT License.
+    """
+    n = values.size
+    if n < 3 or window < 3:
+        return values.copy()
+    half = window // 2
+    out = np.empty_like(values)
+    for i in range(n):
+        h = min(half, i, n - 1 - i)
+        out[i] = float(np.median(values[i - h : i + h + 1]))
+    return out
+
+
 def compute_downstream_water_profile(
     points: NDArray[np.float64],
     projection: RegionProjection,
@@ -187,19 +216,27 @@ def compute_downstream_water_profile(
     *,
     smooth_window_m: float = 150.0,
     default_elevation_m: float = 120.0,
+    width_m: float = 12.0,
+    surface_offset_m: float = 0.25,
 ) -> NDArray[np.float64]:
     """Compute smooth, downstream monotonic water elevations along a waterway.
 
-    Smooths raw DEM elevations over `smooth_window_m` (default 150m) and then
-    enforces strictly non-increasing downstream profile:
-        z_water[i] = min(z_water[i-1], z_smooth[i])
+    Probes across the channel bed (``+-3 m`` and across ``width_m``), applies a
+    5-sample running median (``runningMedian(5)``), enforces strictly
+    non-increasing downstream flow (``med[i] = min(med[i-1], med[i])``), and
+    places the water surface ``surface_offset_m`` (+0.25 m) above channel min.
+
+    Channel probing and median filtering adapted from MapNG
+    (https://github.com/nikkiluzader/mapng), MIT License.
 
     Args:
         points: (N, 2) world coordinates.
         projection: Region coordinate projection.
         dem: DEM sampler.
-        smooth_window_m: Distance over which moving average smoothing is applied.
+        smooth_window_m: Optional longitudinal smoothing scale in metres.
         default_elevation_m: Fallback elevation when DEM is not available.
+        width_m: Channel width in metres for cross-channel probing.
+        surface_offset_m: Vertical offset above channel bed minimum (default 0.25 m).
 
     Returns:
         (N,) array of monotonic water surface elevations.
@@ -208,33 +245,81 @@ def compute_downstream_water_profile(
     if dem is None or n < 2:
         return np.full(n, default_elevation_m, dtype=np.float64)
 
-    lons, lats = projection.world_to_geo_array(points[:, 0], points[:, 1])
-    raw = np.asarray(dem.sample_array(lons, lats), dtype=np.float64)
+    # Compute unit left normals along the waterway
+    deltas = np.diff(points, axis=0)
+    seg_lens = np.hypot(deltas[:, 0], deltas[:, 1])
+    safe_lens = np.where(seg_lens < 1e-6, 1.0, seg_lens)
+    seg_tangents = deltas / safe_lens[:, None]
+    tangents = np.zeros((n, 2), dtype=np.float64)
+    tangents[0] = seg_tangents[0]
+    tangents[-1] = seg_tangents[-1]
+    if n > 2:
+        mid_t = seg_tangents[:-1] + seg_tangents[1:]
+        mid_l = np.hypot(mid_t[:, 0], mid_t[:, 1])
+        tangents[1:-1] = np.where(mid_l[:, None] > 1e-6, mid_t / np.maximum(mid_l[:, None], 1e-9), seg_tangents[:-1])
+    normals = np.column_stack((-tangents[:, 1], tangents[:, 0]))
 
-    # Handle NaNs
-    invalid = ~np.isfinite(raw)
+    # Cross-channel probe at +-3m (plus centerline)
+    probe_r = 3.0
+    cx, cy = points[:, 0], points[:, 1]
+    px_pos = cx + normals[:, 0] * probe_r
+    py_pos = cy + normals[:, 1] * probe_r
+    px_neg = cx - normals[:, 0] * probe_r
+    py_neg = cy - normals[:, 1] * probe_r
+
+    raw_c = _sample_dem_world(cx, cy, projection, dem)
+    raw_p = _sample_dem_world(px_pos, py_pos, projection, dem)
+    raw_n = _sample_dem_world(px_neg, py_neg, projection, dem)
+
+    # Handle NaNs on centerline first
+    invalid = ~np.isfinite(raw_c)
     if invalid.all():
-        raw = np.full(n, default_elevation_m, dtype=np.float64)
+        raw_c = np.full(n, default_elevation_m, dtype=np.float64)
     elif invalid.any():
         valid_indices = np.where(~invalid)[0]
-        raw[invalid] = np.interp(np.where(invalid)[0], valid_indices, raw[valid_indices])
+        raw_c[invalid] = np.interp(np.where(invalid)[0], valid_indices, raw_c[valid_indices])
 
-    # Calculate average spacing to determine window size in samples
-    deltas = np.diff(points, axis=0)
-    seg_lengths = np.hypot(deltas[:, 0], deltas[:, 1])
-    total_len = float(seg_lengths.sum())
-    avg_spacing = total_len / max(1, n - 1)
-    window = max(3, round(smooth_window_m / max(1.0, avg_spacing)))
+    raw_p = np.where(np.isfinite(raw_p), raw_p, raw_c)
+    raw_n = np.where(np.isfinite(raw_n), raw_n, raw_c)
+    ground = np.minimum(raw_c, np.minimum(raw_p, raw_n))
 
-    smoothed = smooth_profile(raw, window)
+    med = _running_median(ground, window=5)
 
-    # Downstream monotonicity: water only flows downhill or stays level
-    z_water = np.empty_like(smoothed)
-    z_water[0] = smoothed[0]
+    # Clamp against lowest ground across full channel width so water never floats on side slopes
+    half_w = max(probe_r, float(width_m) * 0.5)
+    across_min = ground.copy()
+    for frac in (-1.0, -0.5, 0.5, 1.0):
+        ax = cx + normals[:, 0] * (frac * half_w)
+        ay = cy + normals[:, 1] * (frac * half_w)
+        az = _sample_dem_world(ax, ay, projection, dem)
+        az = np.where(np.isfinite(az), az, across_min)
+        across_min = np.minimum(across_min, az)
+    med = np.minimum(med, across_min)
+
+    # Clamp segment midpoints so straight segments over curved bends do not float > 0.5m
+    mid_x = 0.5 * (cx[:-1] + cx[1:])
+    mid_y = 0.5 * (cy[:-1] + cy[1:])
+    mid_z = _sample_dem_world(mid_x, mid_y, projection, dem)
     for i in range(1, n):
-        z_water[i] = min(z_water[i - 1], smoothed[i])
+        if np.isfinite(mid_z[i - 1]):
+            cap = float(mid_z[i - 1]) + 0.5
+            if 0.5 * (med[i] + med[i - 1]) > cap:
+                med[i] = min(med[i], cap)
+                med[i - 1] = min(med[i - 1], cap)
 
-    return z_water
+    # Smooth gently if long spacing requested, while preserving channel minimum cap
+    total_len = float(seg_lens.sum())
+    avg_spacing = total_len / max(1, n - 1)
+    if smooth_window_m > 0.0 and n >= 5:
+        win = max(3, min(n, round(smooth_window_m / max(1.0, avg_spacing))))
+        if win >= 3:
+            med = np.minimum(med, smooth_profile(med, win))
+
+    # Downstream monotonicity: water never flows uphill
+    for i in range(1, n):
+        med[i] = min(med[i - 1], med[i])
+
+    return med + float(surface_offset_m)
 
 
 def compute_lake_water_elevation(
@@ -503,6 +588,7 @@ def extract_water(
                     projection,
                     dem,
                     smooth_window_m=smooth_window_m,
+                    width_m=width_m,
                 )
 
                 rivers.append(

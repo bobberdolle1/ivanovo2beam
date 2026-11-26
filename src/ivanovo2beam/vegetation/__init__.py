@@ -12,6 +12,7 @@ Pipeline:
 from __future__ import annotations
 
 from ivanovo2beam.vegetation.extract import (
+    FARMLAND_TAGS,
     FOREST_TAGS,
     MEADOW_TAGS,
     SCRUB_TAGS,
@@ -21,6 +22,7 @@ from ivanovo2beam.vegetation.extract import (
 )
 from ivanovo2beam.vegetation.forest import (
     FOREST_SPECIES_DISTRIBUTION,
+    LINKED_SPECIES_DATA,
     SCRUB_SPECIES_DISTRIBUTION,
     SPECIES_DATA,
     STOCK_TREE_MATERIALS,
@@ -28,23 +30,41 @@ from ivanovo2beam.vegetation.forest import (
     build_forest_materials_json,
     build_keepout_mask,
     build_managed_item_data_json,
+    discover_beamng_dir,
     export_vegetation,
+)
+from ivanovo2beam.vegetation.worldcover import (
+    WC_TREES,
+    WorldCoverGrid,
+    fetch_and_cache_worldcover,
+    load_worldcover_cache,
+    worldcover_tile_name,
+    worldcover_to_forest_polygons,
 )
 
 __all__ = [
+    "FARMLAND_TAGS",
     "FOREST_SPECIES_DISTRIBUTION",
     "FOREST_TAGS",
+    "LINKED_SPECIES_DATA",
     "MEADOW_TAGS",
     "SCRUB_SPECIES_DISTRIBUTION",
     "SCRUB_TAGS",
     "SPECIES_DATA",
     "STOCK_TREE_MATERIALS",
+    "WC_TREES",
     "VegetationArea",
     "VegetationExportStats",
     "VegetationStats",
+    "WorldCoverGrid",
     "build_forest_materials_json",
     "build_keepout_mask",
     "build_managed_item_data_json",
+    "discover_beamng_dir",
     "export_vegetation",
     "extract_vegetation",
+    "fetch_and_cache_worldcover",
+    "load_worldcover_cache",
+    "worldcover_tile_name",
+    "worldcover_to_forest_polygons",
 ]

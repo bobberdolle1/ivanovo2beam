@@ -105,6 +105,28 @@ class TestRiverProfile:
         z_water = compute_downstream_water_profile(points, projection, None, default_elevation_m=95.0)
         assert np.allclose(z_water, 95.0)
 
+    def test_running_median_and_cross_channel_offset(self, projection):
+        """Channel probe + runningMedian(5) ignores spike and sits +0.25m above channel min."""
+
+        class BankSpikeDem:
+            def sample_world_array(self, xs, ys):
+                xs_arr = np.asarray(xs, dtype=np.float64)
+                ys_arr = np.asarray(ys, dtype=np.float64)
+                # Gentle valley sloping southwards, with a high bank to the east and a spike at y=400
+                base = 100.0 + ys_arr * 0.002
+                bank = np.where(np.abs(xs_arr) >= 2.5, 0.0, 4.0)
+                spike = np.where((np.abs(ys_arr - 400.0) < 10.0) & (np.abs(xs_arr) < 1.0), 15.0, 0.0)
+                return base + bank + spike
+
+        pts = np.array([[0.0, float(y)] for y in range(800, -1, -100)], dtype=np.float64)
+        z_water = compute_downstream_water_profile(pts, projection, BankSpikeDem(), width_m=10.0)
+        assert z_water.shape == (len(pts),)
+        # Never spikes at y=400 and stays strictly non-increasing downstream
+        assert z_water.max() < 103.0
+        assert z_water[-1] == pytest.approx(100.25, abs=0.05)
+        for i in range(1, len(z_water)):
+            assert z_water[i] <= z_water[i - 1] + 1e-9
+
 
 class TestWaterBodyElevation:
     def test_lake_elevation_is_level(self, projection):
@@ -145,7 +167,7 @@ class TestWaterExtraction:
         assert river.width_m == 35.0
         assert river.depth_m == 2.5
         assert len(river.points) == 3
-        assert np.allclose(river.z_water, 125.0)
+        assert np.allclose(river.z_water, 125.25)
 
         canal = next(r for r in network.rivers if r.osm_id == 102)
         assert canal.waterway_type == "canal"
@@ -331,6 +353,13 @@ class TestBeamNGExport:
         assert obj["depthGradientTex"] == DEFAULT_DEPTH_GRADIENT_TEX
         assert obj["foamTex"] == DEFAULT_FOAM_TEX
         assert obj["rippleTex"] == DEFAULT_RIPPLE_TEX
+        assert obj["cubemap"] == "BNG_Sky_02_cubemap"
+        assert obj["useOcclusionQuery"] is False
+        assert obj["fresnelBias"] == 0.12
+        assert obj["fresnelPower"] == 6.0
+        assert obj["overallFoamOpacity"] == 0.0
+        assert obj["reflectivity"] == 0.55
+        assert obj["baseColor"] == [44, 74, 60, 255]
 
         # Verify nodes 8-tuples: [x, y, z, width, depth, 0, 0, 1]
         nodes = obj["nodes"]
@@ -359,6 +388,13 @@ class TestBeamNGExport:
         assert obj["scale"] == [90.0, 70.0, 3.5]
         assert obj["rotationMatrix"] == [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
         assert obj["gridElementSize"] == 8.0
+        assert obj["cubemap"] == "BNG_Sky_02_cubemap"
+        assert obj["useOcclusionQuery"] is False
+        assert obj["fresnelBias"] == 0.12
+        assert obj["fresnelPower"] == 6.0
+        assert obj["overallFoamOpacity"] == 0.0
+        assert obj["reflectivity"] == 0.55
+        assert obj["baseColor"] == [44, 74, 60, 255]
         assert 0.0 <= obj["foamAmbientLerp"] <= 1.0
         assert "Waves (vertex undulation)" in obj
         assert "Ripples (texture animation)" in obj

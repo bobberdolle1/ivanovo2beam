@@ -19,10 +19,15 @@ from ivanovo2beam.beamng.ter import HOLE, TerrainFile
 from ivanovo2beam.gis.projection import BBox, make_projection
 from ivanovo2beam.terrain.builder import (
     RoadCorridor,
+    build_road_keep_mask,
     build_terrain,
+    carve_water,
+    carve_water_under_decks,
     derive_road_profile,
     enforce_max_grade,
     grade_corridors,
+    level_under_decks,
+    pin_junction_profiles,
     resample_polyline,
     sample_dem_onto_grid,
     smooth_profile,
@@ -1021,3 +1026,317 @@ class TestLandcoverAndSatelliteSupport:
         )
         obj = placement.to_object("ivanovo_mvp")
         assert obj["baseColorBaseTex"] == sat_path
+
+
+class TestCoupledTerrainBridgeWater:
+    def test_pin_junction_profiles_through_road_and_side_arm(self) -> None:
+        main_a = RoadCorridor(
+            points=np.array([[0.0, 100.0], [50.0, 100.0], [100.0, 100.0]]),
+            half_width_m=5.0,
+            corridor_half_width_m=15.0,
+            priority=80,
+            surface_z=np.array([110.0, 110.0, 110.0]),
+            key="main_a",
+        )
+        main_b = RoadCorridor(
+            points=np.array([[100.0, 100.0], [150.0, 100.0], [200.0, 100.0]]),
+            half_width_m=5.0,
+            corridor_half_width_m=15.0,
+            priority=80,
+            surface_z=np.array([110.0, 110.0, 110.0]),
+            key="main_b",
+        )
+        side = RoadCorridor(
+            points=np.array([[100.0, 100.0], [100.0, 150.0], [100.0, 200.0]]),
+            half_width_m=3.5,
+            corridor_half_width_m=10.0,
+            priority=40,
+            surface_z=np.array([104.0, 104.0, 104.0]),
+            key="side",
+        )
+        pinned = pin_junction_profiles([main_a, main_b, side])
+        assert pinned >= 1
+        assert main_a.surface_z is not None and main_b.surface_z is not None and side.surface_z is not None
+        assert main_a.surface_z[-1] == pytest.approx(110.0)
+        assert main_b.surface_z[0] == pytest.approx(110.0)
+        assert side.surface_z[0] == pytest.approx(110.0)
+        assert side.surface_z[-1] == pytest.approx(104.0)
+
+    def test_grade_corridors_strict_asphalt_width_and_winner_takes_stronger(self) -> None:
+        size, cell = 64, 2.0
+        elevations = np.full((size, size), 100.0, dtype=np.float64)
+        layers = np.zeros((size, size), dtype=np.uint8)
+        highway = RoadCorridor(
+            points=np.array([[0.0, 64.0], [126.0, 64.0]]),
+            half_width_m=4.0,
+            corridor_half_width_m=14.0,
+            priority=80,
+            material_key="Asphalt",
+            shoulder_material_key="Grass",
+            surface_z=np.array([110.0, 110.0]),
+            key="hw",
+        )
+        side_street = RoadCorridor(
+            points=np.array([[64.0, 0.0], [64.0, 126.0]]),
+            half_width_m=3.0,
+            corridor_half_width_m=10.0,
+            priority=40,
+            material_key="Gravel",
+            shoulder_material_key="Grass",
+            surface_z=np.array([105.0, 105.0]),
+            key="side",
+        )
+        grade_corridors(
+            elevations,
+            layers,
+            {"Grass": 0, "Asphalt": 1, "Gravel": 2},
+            [side_street, highway],
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=cell,
+        )
+        # Highway centre at row 32, col 32 (x=64, y=64) must stay at 110.0, not averaged down
+        assert elevations[32, 32] == pytest.approx(110.0, abs=0.1)
+        # Asphalt (1) must stay strictly within half_width_m=4m (rows 30..34, never row 29 or 35)
+        assert (layers[29, 10:25] != 1).all()
+        assert (layers[35, 10:25] != 1).all()
+
+    def test_carve_water_keeps_road_clear_and_clears_bridge_dams(self) -> None:
+        from ivanovo2beam.beamng.materials import DEFAULT_MATERIAL_ORDER
+        from ivanovo2beam.water.extract import RiverChannel, WaterNetwork
+
+        mat_idx = {k: i for i, k in enumerate(DEFAULT_MATERIAL_ORDER)}
+        size, cell = 128, 2.0
+        elevations = np.full((size, size), 100.0, dtype=np.float64)
+        # Create a 4m DEM "bridge dam" hump across river at x=120..140, y=120..140
+        elevations[60:71, 60:71] = 104.0
+        layers = np.zeros((size, size), dtype=np.uint8)
+
+        ground_road = RoadCorridor(
+            points=np.array([[20.0, 20.0], [20.0, 220.0]]),
+            half_width_m=4.0,
+            corridor_half_width_m=12.0,
+            surface_z=np.array([100.0, 100.0]),
+            key="way1",
+        )
+        river = RiverChannel(
+            osm_id=10,
+            name="Uvod",
+            waterway_type="river",
+            points=np.array([[10.0, 128.0], [240.0, 128.0]]),
+            width_m=16.0,
+            depth_m=2.0,
+            z_water=np.array([100.0, 100.0]),
+        )
+        water_net = WaterNetwork(rivers=[river])
+        keep_mask = build_road_keep_mask([ground_road], origin_x=0.0, origin_y=0.0, grid_size=size, cell_size_m=cell)
+
+        carve_water(
+            elevations,
+            layers,
+            mat_idx,
+            water_net,
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=cell,
+            road_keep_mask=keep_mask,
+        )
+        # Ground road at col 10 (x=20, y=128) must NOT be carved by river
+        assert elevations[64, 10] == pytest.approx(100.0)
+
+        # Simulate a residual 4m DEM "bridge dam" ridge directly under the bridge span
+        # while the river outside the span (cols < 62 or > 68) remains at carved bed (98m)
+        elevations[60:70, 62:69] = 104.0
+        bridge_span = (np.array([[130.0, 100.0], [130.0, 160.0]]), 5.0)
+        carved = carve_water_under_decks(
+            elevations,
+            layers,
+            mat_idx,
+            water_net,
+            [bridge_span],
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=cell,
+            road_keep_mask=keep_mask,
+        )
+        leveled = level_under_decks(
+            elevations,
+            [bridge_span],
+            water_net,
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=cell,
+            road_keep_mask=keep_mask,
+        )
+        assert carved > 0 and leveled > 0
+        # Under bridge span over river (y=128, x=130 -> row 64, col 65), dam hump is cleared below water
+        assert elevations[64, 65] < 100.0
+
+    def test_build_terrain_coupled_bridge_and_water(self, projection) -> None:
+        from ivanovo2beam.config import RoadSettings
+        from ivanovo2beam.roads.network import Road
+        from ivanovo2beam.water.extract import RiverChannel, WaterNetwork
+
+        class ValleyDem:
+            def sample_array(self, lons, lats):
+                xs, _ = projection.geo_to_world_array(np.asarray(lons), np.asarray(lats))
+                # Gentle valley dipping to 100m near x=300m
+                return 102.0 - 2.0 * np.exp(-((xs - 300.0) / 30.0) ** 2)
+
+        approach = RoadCorridor(
+            points=np.array([[100.0, 300.0], [270.0, 300.0]]),
+            half_width_m=5.0,
+            corridor_half_width_m=15.0,
+            priority=80,
+            key="way1",
+        )
+        bridge = Road(
+            osm_id=777,
+            highway="primary",
+            points=np.array([[270.0, 300.0], [330.0, 300.0]]),
+            width_m=10.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=False,
+            bridge=True,
+            tunnel=False,
+            layer=1,
+            name="Bridge",
+            maxspeed_kph=60.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        river = RiverChannel(
+            osm_id=888,
+            name="River",
+            waterway_type="river",
+            points=np.array([[300.0, 100.0], [300.0, 500.0]]),
+            width_m=24.0,
+            depth_m=2.5,
+            z_water=np.array([100.0, 100.0]),
+        )
+        build = build_terrain(
+            ValleyDem(),
+            projection,
+            origin_x=0.0,
+            origin_y=0.0,
+            grid_size=256,
+            cell_size_m=2.5,
+            corridors=[approach],
+            water_network=WaterNetwork(rivers=[river]),
+            bridge_roads=[bridge],
+            road_settings=RoadSettings(),
+        )
+        assert 777 in build.bridge_profiles
+        b_pts, b_z = build.bridge_profiles[777]
+        assert b_pts.shape[0] >= 10
+        # Mid-span deck sits >= 3.5m above river surface (100m)
+        assert b_z[b_z.size // 2] >= 103.5
+        # Riverbed under bridge span (x=300, y=300 -> row 120, col 120) is carved below water (100m)
+        assert build.elevations[120, 120] < 99.0
+
+    def test_strip_canopy_and_paint_landcover_preserve_holes(self) -> None:
+        from ivanovo2beam.beamng.materials import DEFAULT_MATERIAL_ORDER
+        from ivanovo2beam.terrain.builder import paint_landcover, strip_forest_canopy
+        from ivanovo2beam.vegetation.extract import VegetationArea
+
+        mat_idx = {k: i for i, k in enumerate(DEFAULT_MATERIAL_ORDER)}
+        elevations = np.full((64, 64), 100.0, dtype=np.float64)
+        elevations[10:55, 10:55] = 112.0
+        elevations[25:40, 25:40] = 100.0  # inner clearing at ground level
+        layers = np.zeros((64, 64), dtype=np.uint8)
+
+        outer = np.array([[20.0, 20.0], [110.0, 20.0], [110.0, 110.0], [20.0, 110.0], [20.0, 20.0]])
+        hole = np.array([[50.0, 50.0], [80.0, 50.0], [80.0, 80.0], [50.0, 80.0], [50.0, 50.0]])
+        veg_area = VegetationArea(osm_id=1, ring=outer, kind="forest", holes=(hole,))
+
+        # 1. VegetationArea in strip_forest_canopy leaves inner clearing untouched
+        strip_forest_canopy(
+            elevations,
+            layers,
+            mat_idx,
+            [veg_area],
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=2.0,
+        )
+        assert layers[15, 15] == mat_idx["ForestFloor"]
+        assert layers[32, 32] == 0  # inner clearing at (64m, 64m) stays Grass!
+        assert elevations[32, 32] == pytest.approx(100.0)
+
+        # 2. (outer, holes) tuple in paint_landcover also preserves inner clearing
+        layers2 = np.zeros((64, 64), dtype=np.uint8)
+        paint_landcover(
+            layers2,
+            mat_idx,
+            {"Field": [(outer, (hole,))]},
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=2.0,
+        )
+        assert layers2[15, 15] == mat_idx["Field"]
+        assert layers2[32, 32] == 0
+
+    def test_wide_embankment_blend_prevents_steep_cliffs_and_thin_sand_bend(self) -> None:
+        from ivanovo2beam.beamng.materials import DEFAULT_MATERIAL_ORDER
+        from ivanovo2beam.water.extract import RiverChannel, WaterNetwork
+
+        mat_idx = {k: i for i, k in enumerate(DEFAULT_MATERIAL_ORDER)}
+        size, cell = 128, 1.0
+        elevations = np.full((size, size), 100.0, dtype=np.float64)
+        layers = np.zeros((size, size), dtype=np.uint8)
+
+        # Road raised +2.5m with narrow nominal corridor_half=7m, softened by min_blend_skirt_m=15m
+        road = RoadCorridor(
+            points=np.array([[10.0, 64.0], [118.0, 64.0]]),
+            half_width_m=3.5,
+            corridor_half_width_m=7.0,
+            surface_z=np.array([102.5, 102.5]),
+            key="embankment",
+        )
+        grade_corridors(
+            elevations,
+            layers,
+            mat_idx,
+            [road],
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=cell,
+            min_blend_skirt_m=15.0,
+        )
+        # Lateral slope between adjacent 1m cells outside carriageway must stay gentle (< 0.30)
+        cross_profile = elevations[64:85, 64]
+        assert float(np.max(np.abs(np.diff(cross_profile)))) < 0.30
+        # Shoulder material does not spill past corridor_half_width_m=7m (row 75 is 11m away -> Grass 0)
+        assert layers[75, 64] == 0
+
+        # Tight 90-degree river bend on 1m grid: smooth bank, Sand strictly <= 1.5m from water edge
+        elev_w = np.full((size, size), 100.0, dtype=np.float64)
+        layers_w = np.zeros((size, size), dtype=np.uint8)
+        river = RiverChannel(
+            osm_id=55,
+            name="Bend",
+            waterway_type="river",
+            points=np.array([[20.0, 64.0], [64.0, 64.0], [64.0, 20.0]]),
+            width_m=12.0,  # hw = 6m
+            depth_m=2.0,
+            z_water=np.array([100.0, 100.0, 100.0]),
+        )
+        carve_water(
+            elev_w,
+            layers_w,
+            mat_idx,
+            WaterNetwork(rivers=[river]),
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=1.0,
+            bank_transition_m=8.0,
+        )
+        # Inside bend at (55, 55): dist from water is ~3m -> RiverbankSoil, not double-dipped Sand
+        assert layers_w[55, 55] == mat_idx["RiverbankSoil"]
+        # 1m outside water edge (x=40, y=71 -> dist=7m, 1m from hw=6m) -> Sand
+        assert layers_w[71, 40] == mat_idx["Sand"]
+        # 2m outside water edge (x=40, y=72 -> dist=8m, 2m from hw=6m > 1.5m) -> RiverbankSoil
+        assert layers_w[72, 40] == mat_idx["RiverbankSoil"]

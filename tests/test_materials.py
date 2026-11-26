@@ -320,3 +320,22 @@ class TestAssetReferences:
     def test_all_paths_reference_the_shared_terrain_library(self) -> None:
         for path in referenced_asset_paths():
             assert path.startswith("/assets/materials/terrain/"), path
+            assert not path.endswith(".link"), path
+
+    def test_summer_ground_layers_are_visually_distinct(self) -> None:
+        grass = MATERIAL_LIBRARY["Grass"].base_color
+        field = MATERIAL_LIBRARY["Field"].base_color
+        forest = MATERIAL_LIBRARY["ForestFloor"].base_color
+        bank = MATERIAL_LIBRARY["RiverbankSoil"].base_color
+        sand = MATERIAL_LIBRARY["Sand"].base_color
+
+        # Grass: vibrant summer green
+        assert grass[1] > grass[0] and grass[1] > grass[2]
+        # Field: warm dry-grass / ochre (distinctly warmer than green Grass)
+        assert field[0] > field[1] > field[2]
+        # ForestFloor: darker earthy litter / humus (distinct from Grass & Field)
+        assert forest[0] > forest[1] > forest[2]
+        assert sum((a - b) ** 2 for a, b in zip(grass, forest, strict=True)) ** 0.5 > 45.0
+        assert sum((a - b) ** 2 for a, b in zip(grass, field, strict=True)) ** 0.5 > 65.0
+        # RiverbankSoil & Sand stay clearly separated
+        assert sum((a - b) ** 2 for a, b in zip(sand, bank, strict=True)) ** 0.5 > 120.0

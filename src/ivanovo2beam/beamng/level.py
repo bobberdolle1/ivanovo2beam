@@ -462,6 +462,7 @@ def build_sun_and_sky(
             "fogDensity": fog_density,
             "fogAtmosphereHeight": 1600,
             "globalEnviromentMap": "BNG_Sky_02_cubemap",
+            "decalBias": 0.0005,
         },
     )
 

@@ -247,13 +247,41 @@ def _check_terrain(report: ValidationReport) -> None:
         "descriptor matches the binary terrain" if not problems else "; ".join(problems),
     )
 
-    # Material indices must stay inside the declared list.
-    top = int(terrain.layers.max()) if terrain.layers.size else 0
-    report.add(
-        "terrain_layers",
-        top < len(terrain.materials) or top == HOLE,
-        f"highest layer index {top}, {len(terrain.materials)} materials declared",
-    )
+    # Material indices must stay inside the declared list (excluding HOLE=255).
+    non_hole = terrain.layers[terrain.layers != HOLE]
+    top_non_hole = int(non_hole.max()) if non_hole.size else 0
+    has_holes = bool((terrain.layers == HOLE).any()) if terrain.layers.size else False
+    valid_layers = non_hole.size == 0 or top_non_hole < len(terrain.materials)
+    detail = f"highest layer index {top_non_hole}, {len(terrain.materials)} materials declared"
+    if has_holes:
+        detail += f" (contains HOLE={HOLE})"
+    report.add("terrain_layers", valid_layers, detail)
+
+
+def _collect_texture_paths(obj: object, out: set[str]) -> None:
+    """Recursively collect BeamNG texture asset paths (``/...png`` or ``.dds``)."""
+    if isinstance(obj, str):
+        if obj.startswith("/") and obj.lower().endswith((".png", ".dds")):
+            out.add(obj)
+    elif isinstance(obj, dict):
+        for value in obj.values():
+            _collect_texture_paths(value, out)
+    elif isinstance(obj, list):
+        for item in obj:
+            _collect_texture_paths(item, out)
+
+
+def _discover_extra_material_files(level_dir: Path) -> list[Path]:
+    """Return existing road, forest, and shape material files in ``level_dir``."""
+    files: list[Path] = []
+    for rel in ("art/road/main.materials.json", "art/forest/main.materials.json"):
+        candidate = level_dir / rel
+        if candidate.is_file():
+            files.append(candidate)
+    shapes_dir = level_dir / "art" / "shapes"
+    if shapes_dir.is_dir():
+        files.extend(sorted(shapes_dir.rglob("main.materials.json")))
+    return files
 
 
 def _check_materials(report: ValidationReport, install: Path | None) -> None:
@@ -279,9 +307,44 @@ def _check_materials(report: ValidationReport, install: Path | None) -> None:
 
     paths: set[str] = set()
     for material in materials.values():
-        for value in material.values():
-            if isinstance(value, str) and value.startswith("/") and value.lower().endswith((".png", ".dds")):
-                paths.add(value)
+        _collect_texture_paths(material, paths)
+
+    extra_files = _discover_extra_material_files(report.level_dir)
+    if extra_files:
+        extra_problems: list[str] = []
+        extra_entries = 0
+        for extra_path in extra_files:
+            rel = extra_path.relative_to(report.level_dir).as_posix()
+            try:
+                extra_doc = json.loads(extra_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as exc:
+                extra_problems.append(f"{rel}: unreadable ({exc})")
+                continue
+            if not isinstance(extra_doc, dict) or not extra_doc:
+                extra_problems.append(f"{rel}: must be a non-empty JSON object")
+                continue
+            seen_pids: dict[str, str] = {}
+            for key, entry in extra_doc.items():
+                if not isinstance(entry, dict) or not entry.get("class"):
+                    extra_problems.append(f"{rel}:{key} missing 'class'")
+                    continue
+                extra_entries += 1
+                pid = entry.get("persistentId")
+                if isinstance(pid, str) and pid:
+                    if pid in seen_pids:
+                        extra_problems.append(
+                            f"{rel}:{key} duplicates persistentId {pid} of {seen_pids[pid]}"
+                        )
+                    else:
+                        seen_pids[pid] = key
+                _collect_texture_paths(entry, paths)
+        report.add(
+            "extra_materials_json",
+            not extra_problems,
+            f"{len(extra_files)} material files, {extra_entries} entries"
+            + (f": {'; '.join(extra_problems[:3])}" if extra_problems else ""),
+        )
+
     if install is None or not paths:
         return
 

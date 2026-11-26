@@ -202,7 +202,13 @@ class TestProjectConfig:
 
     @pytest.mark.parametrize(
         "name",
-        ["ivanovo_oblast.yaml", "ivanovo_mvp.yaml", "ivanovo_shuya.yaml", "test_sector.yaml"],
+        [
+            "ivanovo_oblast.yaml",
+            "ivanovo_mvp.yaml",
+            "ivanovo_shuya.yaml",
+            "golden_sector.yaml",
+            "test_sector.yaml",
+        ],
     )
     def test_every_shipped_config_loads(self, name: str) -> None:
         config = ProjectConfig.load(CONFIGS / name)
@@ -278,3 +284,20 @@ class TestProjectConfig:
         config = ProjectConfig.load(CONFIGS / "ivanovo_oblast.yaml")
         report = config.projection.measure_scale_error_over(config.bbox, samples=5)
         assert report.error_metres_per_100km < 15.0
+
+    def test_golden_sector_config_parameters(self) -> None:
+        config = ProjectConfig.load(CONFIGS / "golden_sector.yaml")
+        assert config.level is not None
+        assert config.level.id == "ivanovo_golden_sector"
+        assert config.level.grid.grid_size == 4096
+        assert config.level.grid.square_size_m == pytest.approx(1.0)
+        assert config.level.grid.extent_m == pytest.approx(4095.0)
+        assert config.level.center_lon == pytest.approx(41.12500)
+        assert config.level.center_lat == pytest.approx(56.91500)
+        assert config.level.spawn_lon == pytest.approx(41.10000)
+        assert config.level.spawn_lat == pytest.approx(56.92700)
+        assert config.buildings_enabled is False
+        assert config.vegetation_enabled is True
+        assert config.water_enabled is True
+        assert config.bridges_enabled is True
+        assert config.railways_enabled is True

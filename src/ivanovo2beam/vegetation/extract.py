@@ -8,12 +8,18 @@ ecosystems.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from shapely.geometry import LineString, MultiPolygon, Polygon, box
 from shapely.ops import linemerge, polygonize, unary_union
 from shapely.validation import make_valid
+
+from ivanovo2beam.vegetation.worldcover import (
+    load_worldcover_cache,
+    worldcover_to_forest_polygons,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from numpy.typing import NDArray
@@ -25,10 +31,15 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 FOREST_TAGS = frozenset({"wood", "forest"})
 
 #: Tag values for bushes / undergrowth
-SCRUB_TAGS = frozenset({"scrub", "tree_row"})
+SCRUB_TAGS = frozenset({"scrub", "tree_row", "heath"})
 
 #: Tag values for grassy meadows / clearings
-MEADOW_TAGS = frozenset({"meadow", "grass", "allotments", "orchard", "village_green"})
+MEADOW_TAGS = frozenset(
+    {"meadow", "grass", "allotments", "orchard", "village_green", "greenfield", "recreation_ground"}
+)
+
+#: Tag values for arable farmland / pastures
+FARMLAND_TAGS = frozenset({"farmland", "farmyard"})
 
 
 @dataclass(slots=True)
@@ -60,6 +71,10 @@ class VegetationArea:
         ys = self.ring[:, 1]
         return (float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max()))
 
+    def to_polygon(self) -> Polygon:
+        """Return a Shapely ``Polygon`` preserving exterior ring and inner holes."""
+        return Polygon(self.ring, self.holes)
+
 
 @dataclass(slots=True)
 class VegetationStats:
@@ -71,6 +86,8 @@ class VegetationStats:
     forest_areas: int = 0
     scrub_areas: int = 0
     meadow_areas: int = 0
+    farmland_areas: int = 0
+    worldcover_areas: int = 0
     skipped_area: int = 0
     skipped_invalid: int = 0
     total_area_m2: float = 0.0
@@ -83,6 +100,8 @@ class VegetationStats:
             "forest_areas": self.forest_areas,
             "scrub_areas": self.scrub_areas,
             "meadow_areas": self.meadow_areas,
+            "farmland_areas": self.farmland_areas,
+            "worldcover_areas": self.worldcover_areas,
             "relations": self.relations,
             "ways": self.ways,
             "total_area_km2": round(self.total_area_m2 / 1e6, 4),
@@ -91,7 +110,7 @@ class VegetationStats:
 
 
 def _classify_vegetation(tags: dict[str, str]) -> str | None:
-    """Classify OSM tags into 'forest', 'scrub', or 'meadow'."""
+    """Classify OSM tags into 'forest', 'scrub', 'meadow', or 'farmland'."""
     nat = tags.get("natural", "").strip().lower()
     lu = tags.get("landuse", "").strip().lower()
 
@@ -101,6 +120,8 @@ def _classify_vegetation(tags: dict[str, str]) -> str | None:
         return "scrub"
     if nat in MEADOW_TAGS or lu in MEADOW_TAGS:
         return "meadow"
+    if lu in FARMLAND_TAGS:
+        return "farmland"
     return None
 
 
@@ -380,11 +401,14 @@ def extract_vegetation(
     clip_bounds: tuple[float, float, float, float] | None = None,
     min_area_m2: float = 100.0,
     simplify_tolerance_m: float = 2.0,
+    worldcover_dir: str | Path | bool | None = None,
 ) -> tuple[list[VegetationArea], VegetationStats]:
-    """Extract vegetation areas (forests, scrub, meadows) from OSM data.
+    """Extract vegetation areas (forests, scrub, meadows, farmland) from OSM data.
 
     Supports closed ways, linear ``natural=tree_row`` ways (buffered to narrow
-    belts), and multipolygon relations with inner clearings.
+    belts), multipolygon relations with inner clearings, and optional cached
+    ESA WorldCover 10m canopy patches (when ``clip_bounds`` is given and
+    ``worldcover_dir`` is not ``False``).
     """
     stats = VegetationStats()
     areas: list[VegetationArea] = []
@@ -473,6 +497,52 @@ def extract_vegetation(
             is_relation=False,
         )
 
+    # 3. Supplement unmapped tree canopy from cached ESA WorldCover 10m raster (when available)
+    if clip_bounds is not None and worldcover_dir is not False:
+        corners = [
+            projection.world_to_geo(x, y)
+            for x in (clip_bounds[0], clip_bounds[2])
+            for y in (clip_bounds[1], clip_bounds[3])
+        ]
+        geo_bbox = (
+            min(c[0] for c in corners),
+            min(c[1] for c in corners),
+            max(c[0] for c in corners),
+            max(c[1] for c in corners),
+        )
+        wc_cache = Path(worldcover_dir) if isinstance(worldcover_dir, (str, Path)) else None
+        wc_grid = load_worldcover_cache(geo_bbox, cache_dir=wc_cache)
+        if wc_grid is not None:
+            exclude_geoms = [
+                a.to_polygon()
+                for a in areas
+                if a.kind in {"forest", "farmland", "meadow", "scrub"}
+            ]
+            wc_polys = worldcover_to_forest_polygons(
+                wc_grid,
+                projection,
+                clip_bounds=clip_bounds,
+                exclude_geoms=exclude_geoms,
+                min_area_m2=max(400.0, min_area_m2),
+            )
+            for idx, wp in enumerate(wc_polys, start=1):
+                rings = _polygon_to_rings(wp)
+                if rings is None:
+                    continue
+                ring, holes = rings
+                areas.append(
+                    VegetationArea(
+                        osm_id=-9_000_000_000 - idx,
+                        ring=ring,
+                        kind="forest",
+                        holes=holes,
+                        area_m2=float(wp.area),
+                        leaf_type="mixed",
+                        name="WorldCover Canopy",
+                    )
+                )
+                stats.worldcover_areas += 1
+
     for a in areas:
         stats.by_kind[a.kind] = stats.by_kind.get(a.kind, 0) + 1
         stats.total_area_m2 += a.area_m2
@@ -482,6 +552,8 @@ def extract_vegetation(
             stats.scrub_areas += 1
         elif a.kind == "meadow":
             stats.meadow_areas += 1
+        elif a.kind == "farmland":
+            stats.farmland_areas += 1
 
     stats.areas = len(areas)
     return areas, stats

@@ -17,11 +17,15 @@ from ivanovo2beam.roads.bridges import (
     BridgeGeometry,
     build_bridge_geometry,
     build_bridge_scene_object,
+    build_bridge_split_geometry,
     compute_bridge_deck_profile,
     create_bridgehead_ramps,
     emit_bridges_materials,
+    export_bridge_bundle,
     export_bridge_dae,
     localize_bridge_geometry,
+    solve_coupled_bridge_profile,
+    water_clear_m,
 )
 from ivanovo2beam.roads.network import Road
 from ivanovo2beam.roads.railways import (
@@ -291,6 +295,117 @@ class TestBridgeDeckAndGeometry:
         )
         assert len(ramps) == 2
         assert all(r.shoulder_material_key == expected_shoulder for r in ramps)
+
+    def test_solve_coupled_bridge_profile_2_node_clears_river_and_theil_sen(self) -> None:
+        from ivanovo2beam.water.extract import RiverChannel, WaterNetwork
+
+        # 2-node 60m bridge spanning a 25m-wide river at z_water=100m, with riverbank drop near portals
+        bridge = Road(
+            osm_id=274102985,
+            highway="primary",
+            points=np.array([[0.0, 0.0], [60.0, 0.0]]),
+            width_m=10.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=False,
+            bridge=True,
+            tunnel=False,
+            layer=1,
+            name="Uvod Bridge",
+            maxspeed_kph=60.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        river = RiverChannel(
+            osm_id=136383439,
+            name="Uvod",
+            waterway_type="river",
+            points=np.array([[30.0, -200.0], [30.0, 200.0]]),
+            width_m=25.0,
+            depth_m=2.5,
+            z_water=np.array([100.0, 100.0]),
+        )
+        water_net = WaterNetwork(rivers=[river])
+
+        # Approach terrain is 101m behind portals, dipping to 99m right at portal edges
+        def ground(x: float, _y: float) -> float:
+            if x < -4.0 or x > 64.0:
+                return 101.0
+            return 99.0
+
+        pts_r, deck_z = solve_coupled_bridge_profile(bridge, ground_sampler=ground, water_network=water_net)
+        assert pts_r.shape[0] >= 10
+        assert deck_z.shape[0] == pts_r.shape[0]
+        # Must clear water by at least water_clear_m(25m) = 3.75m -> >= 103.75m over mid-span
+        mid_idx = pts_r.shape[0] // 2
+        assert deck_z[mid_idx] >= 100.0 + water_clear_m(25.0) - 0.05
+        # No sag: deck never dips below chord between abutments
+        chord = np.linspace(deck_z[0], deck_z[-1], deck_z.size)
+        assert np.all(deck_z >= chord - 1e-4)
+
+    def test_export_bridge_bundle_split_deck_and_structure(self, tmp_path: Path) -> None:
+        from dataclasses import replace
+
+        pts = np.array([[7913.75, -8304.70], [7944.14, -8306.65], [7974.53, -8308.59]])
+        road = Road(
+            osm_id=274102985,
+            highway="primary",
+            points=pts,
+            width_m=10.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=False,
+            bridge=True,
+            tunnel=False,
+            layer=1,
+            name="Uvod",
+            maxspeed_kph=60.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        deck_z = np.array([104.0, 104.5, 104.0])
+        # Bed at 96.0m -> grounded piers should reach 96.0 - 1.5 = 94.5m
+        bed_sampler = lambda _x, _y: 96.0  # noqa: E731
+
+        deck_geom, struct_geom = build_bridge_split_geometry(road, deck_z, ground_sampler=bed_sampler, localize=True)
+        assert deck_geom.origin == struct_geom.origin
+        assert max(p[2] for p in deck_geom.positions) + deck_geom.origin[2] == pytest.approx(104.5, abs=0.01)
+        # 0.15m top skirt on _deck
+        assert min(p[2] for p in deck_geom.positions) + deck_geom.origin[2] == pytest.approx(104.0 - 0.15, abs=0.01)
+        # Grounded piers/abutments reach 1.5m below 96.0m riverbed -> 94.5m
+        assert min(p[2] for p in struct_geom.positions) + struct_geom.origin[2] == pytest.approx(94.5, abs=0.05)
+
+        objs = export_bridge_bundle(
+            replace(road),
+            deck_z,
+            "ivanovo_golden_sector",
+            tmp_path,
+            ground_sampler=bed_sampler,
+        )
+        assert len(objs) == 2
+        deck_obj, struct_obj = objs
+        assert deck_obj["decalType"] == "Visible Mesh"
+        assert struct_obj["decalType"] == "None"
+        assert deck_obj["position"] == struct_obj["position"]
+        assert deck_obj["shapeName"].endswith("_deck.dae")
+        assert (tmp_path / "bridge_way274102985_deck.dae").is_file()
+        assert (tmp_path / "bridge_way274102985.dae").is_file()
+
+        # Default adaptive bridgehead ramps span >= 70m and end lips sit >= 0.05m below deck
+        ramps = create_bridgehead_ramps(road, RoadSettings(), deck_z, ground_sampler=bed_sampler)
+        assert len(ramps) == 2
+        assert ramps[0].length_m >= 70.0
+        assert ramps[1].length_m >= 70.0
+        end_lip_pts = [
+            p[2] + struct_geom.origin[2]
+            for p in struct_geom.positions
+            if (p[0] + struct_geom.origin[0] < 7912.5 or p[0] + struct_geom.origin[0] > 7975.8)
+        ]
+        assert end_lip_pts and max(end_lip_pts) <= 104.0 - 0.049
 
 
 # ===========================================================================

@@ -155,6 +155,7 @@ class TerrainBuild:
     graded_cells: int = 0
     stats: dict[str, Any] = field(default_factory=dict)
     satellite_image: str | None = None
+    bridge_profiles: dict[int, tuple[NDArray[np.float64], NDArray[np.float64]]] = field(default_factory=dict)
 
     @property
     def grid_size(self) -> int:
@@ -386,6 +387,127 @@ def _smoothstep(edge0: float, edge1: float, value: NDArray[np.float64]) -> NDArr
     return t * t * (3.0 - 2.0 * t)
 
 
+def pin_junction_profiles(
+    corridors: Sequence[RoadCorridor],
+    *,
+    ramp_m: float = 40.0,
+    through_cos: float = -0.7,
+    fork_cos: float = 0.7,
+) -> int:
+    """Pin shared road intersection endpoints to a unified grade-consistent Z.
+
+    When two opposing arms form a through road (``dot <= through_cos``), the
+    through road retains its elevation and side arms bend smoothly into it over
+    ``ramp_m``. Otherwise meeting arms converge on a priority-weighted consensus
+    elevation. Bridgehead ramp abutment ends (``ramp_*``) stay locked.
+
+    Adapted from MapNG (https://github.com/nikkiluzader/mapng), MIT License.
+    """
+    active = [c for c in corridors if c.grade_terrain and c.surface_z is not None and c.points.shape[0] >= 2]
+    if len(active) < 2:
+        return 0
+
+    def _key(pt: NDArray[np.float64]) -> tuple[int, int]:
+        return (round(float(pt[0]) * 2.0), round(float(pt[1]) * 2.0))
+
+    def _cum_len(pts: NDArray[np.float64]) -> NDArray[np.float64]:
+        d = np.hypot(np.diff(pts[:, 0]), np.diff(pts[:, 1]))
+        return np.concatenate(([0.0], np.cumsum(d)))
+
+    def _outward_dir(pts: NDArray[np.float64], cum: NDArray[np.float64], at_end: bool) -> tuple[float, float]:
+        n_pts = pts.shape[0]
+        i0 = n_pts - 1 if at_end else 0
+        step = -1 if at_end else 1
+        i = i0
+        while 0 <= i + step < n_pts and abs(float(cum[i] - cum[i0])) < 10.0:
+            i += step
+        dx = float(pts[i, 0] - pts[i0, 0])
+        dy = float(pts[i, 1] - pts[i0, 1])
+        norm = math.hypot(dx, dy)
+        return (dx / norm, dy / norm) if norm > 1e-6 else (0.0, 0.0)
+
+    cums = [_cum_len(c.points) for c in active]
+    arms_by_key: dict[tuple[int, int], list[tuple[int, bool, float, float]]] = {}
+    for idx, c in enumerate(active):
+        k_start = _key(c.points[0])
+        k_end = _key(c.points[-1])
+        if k_start == k_end:
+            continue
+        dx0, dy0 = _outward_dir(c.points, cums[idx], False)
+        dx1, dy1 = _outward_dir(c.points, cums[idx], True)
+        arms_by_key.setdefault(k_start, []).append((idx, False, dx0, dy0))
+        arms_by_key.setdefault(k_end, []).append((idx, True, dx1, dy1))
+
+    pinned = 0
+    for arms in arms_by_key.values():
+        if len(arms) < 2:
+            continue
+
+        # Identify opposing through-road arms if 3+ arms meet
+        through_indices: set[int] = set()
+        if len(arms) >= 3:
+            for a in range(len(arms)):
+                for b in range(a + 1, len(arms)):
+                    dot = arms[a][2] * arms[b][2] + arms[a][3] * arms[b][3]
+                    if dot <= through_cos:
+                        through_indices.add(a)
+                        through_indices.add(b)
+
+        ref_pool = [arms[i] for i in through_indices] if through_indices and len(through_indices) < len(arms) else arms
+
+        w_sum = 0.0
+        z_sum = 0.0
+        for c_idx, at_end, _, _ in ref_pool:
+            c = active[c_idx]
+            assert c.surface_z is not None
+            w = 1.0 + max(0, c.priority) / 50.0
+            z_end = float(c.surface_z[-1] if at_end else c.surface_z[0])
+            w_sum += w
+            z_sum += w * z_end
+        if w_sum <= 0.0:
+            continue
+        consensus_z = z_sum / w_sum
+
+        for c_idx, at_end, _dx, _dy in arms:
+            c = active[c_idx]
+            assert c.surface_z is not None
+            # Keep bridge-facing portal end of bridgehead ramps pinned to deck_z
+            if c.key.startswith("ramp_start_") and at_end:
+                continue
+            if c.key.startswith("ramp_end_") and not at_end:
+                continue
+
+            cum = cums[c_idx]
+            total_len = float(cum[-1])
+            eff_ramp = min(ramp_m, total_len * 0.5)
+            if eff_ramp <= 1e-3:
+                continue
+
+            z_arr = c.surface_z
+            n_pts = z_arr.size
+            if at_end:
+                delta = consensus_z - float(z_arr[-1])
+                if abs(delta) < 1e-4:
+                    continue
+                for i in range(n_pts - 1, -1, -1):
+                    f = 1.0 - (total_len - float(cum[i])) / eff_ramp
+                    if f <= 0.0:
+                        break
+                    z_arr[i] += delta * f
+            else:
+                delta = consensus_z - float(z_arr[0])
+                if abs(delta) < 1e-4:
+                    continue
+                for i in range(n_pts):
+                    f = 1.0 - float(cum[i]) / eff_ramp
+                    if f <= 0.0:
+                        break
+                    z_arr[i] += delta * f
+            pinned += 1
+
+    return pinned
+
+
 def grade_corridors(
     elevations: NDArray[np.float64],
     layers: NDArray[np.uint8],
@@ -395,48 +517,34 @@ def grade_corridors(
     origin_x: float,
     origin_y: float,
     cell_size_m: float,
+    min_blend_skirt_m: float = 0.0,
 ) -> tuple[int, dict[str, Any]]:
     """Carve graded road corridors into an elevation grid, in place.
 
-    For every cell the algorithm accumulates, over the corridors that reach it,
-    a *surface* elevation (the road's own smoothed profile, priority-weighted
-    across overlapping roads) and an *influence* alpha that is 1 inside a
-    carriageway and falls smoothly to 0 at the corridor edge. The final
-    elevation is a blend of the two, so the road blends into the landscape
-    instead of cutting a trench into it.
+    Uses winner-takes-stronger priority claim resolution (with near-tie averaging
+    at equal-class intersections) plus a 2 m seam blur pass, while keeping
+    carriageway material painting strictly inside ``half_width_m``. When
+    ``min_blend_skirt_m > 0``, terrain height blends over at least
+    ``half_width_m + min_blend_skirt_m`` so roads never leave steep 2 m cliffs.
 
-    Args:
-        elevations: ``(n, n)`` elevation grid, modified in place.
-        layers: ``(n, n)`` material index grid, modified in place.
-        material_index: Mapping of material key to layer index.
-        corridors: Corridors to carve.
-        origin_x: World X of the grid's minimum corner.
-        origin_y: World Y of the grid's minimum corner.
-        cell_size_m: Ground spacing in metres.
-
-    Returns:
-        ``(graded_cell_count, statistics)``.
+    Winner-takes-stronger priority resolution and 2 m seam blur adapted from
+    MapNG (https://github.com/nikkiluzader/mapng), MIT License.
     """
     n = elevations.shape[0]
-    # The accumulator planes are float32 rather than float64. At 8192^2 that is
-    # the difference between 1.6 GB and 800 MB of scratch, which is what makes a
-    # region-scale grid fit in memory at all. The precision cost is immaterial
-    # for this use: influence is a 0..1 blend weight, and the weighted elevation
-    # sum is around 100-300 m, where float32 resolves about 1e-5 m -- five orders
-    # of magnitude below the 0.9 mm the .ter format itself can store.
     influence = np.zeros((n, n), dtype=np.float32)
-    weighted_z = np.zeros((n, n), dtype=np.float32)
-    weight_sum = np.zeros((n, n), dtype=np.float32)
-    # Material ownership, resolved by "which road has the most influence here".
-    # Painting cannot be done inside the segment loop: a cell lying on the
-    # centreline of one segment is beyond the endpoints of many others, and
-    # those neighbours would repaint the carriageway as shoulder.
+    best_claim = np.zeros((n, n), dtype=np.float32)
+    tie_z_sum = np.zeros((n, n), dtype=np.float32)
+    tie_w_sum = np.zeros((n, n), dtype=np.float32)
+    seam_mask = np.zeros((n, n), dtype=bool)
+    carriageway_mask = np.zeros((n, n), dtype=bool)
+    shoulder_mask = np.zeros((n, n), dtype=bool)
     owner_material = np.zeros((n, n), dtype=np.uint8)
     owner_shoulder = np.zeros((n, n), dtype=np.uint8)
     per_material: dict[str, int] = {}
     all_x = origin_x + np.arange(n, dtype=np.float64) * cell_size_m
     all_y = origin_y + np.arange(n, dtype=np.float64) * cell_size_m
 
+    tie_tol = np.float32(0.05)
     graded = 0
     for corridor in corridors:
         if not corridor.grade_terrain or corridor.surface_z is None:
@@ -445,7 +553,11 @@ def grade_corridors(
         z = corridor.surface_z
         half_width = corridor.half_width_m
         corridor_half = corridor.corridor_half_width_m
-        # Higher priority roads pull the shared surface more strongly.
+        blend_half = (
+            max(corridor_half, half_width + float(min_blend_skirt_m))
+            if (min_blend_skirt_m > 0.0 and corridor_half > half_width)
+            else corridor_half
+        )
         priority_weight = 1.0 + max(0, corridor.priority) / 100.0
 
         material_idx = material_index.get(corridor.material_key, 0)
@@ -461,18 +573,16 @@ def grade_corridors(
             if seg_len_sq <= 0:
                 continue
 
-            # Grid window covering the segment's corridor.
-            col_lo = max(0, math.floor((min(x0, x1) - corridor_half - origin_x) / cell_size_m))
-            col_hi = min(n - 1, math.ceil((max(x0, x1) + corridor_half - origin_x) / cell_size_m))
-            row_lo = max(0, math.floor((min(y0, y1) - corridor_half - origin_y) / cell_size_m))
-            row_hi = min(n - 1, math.ceil((max(y0, y1) + corridor_half - origin_y) / cell_size_m))
+            col_lo = max(0, math.floor((min(x0, x1) - blend_half - origin_x) / cell_size_m))
+            col_hi = min(n - 1, math.ceil((max(x0, x1) + blend_half - origin_x) / cell_size_m))
+            row_lo = max(0, math.floor((min(y0, y1) - blend_half - origin_y) / cell_size_m))
+            row_hi = min(n - 1, math.ceil((max(y0, y1) + blend_half - origin_y) / cell_size_m))
             if col_hi < col_lo or row_hi < row_lo:
                 continue
 
             grid_x = all_x[col_lo : col_hi + 1][None, :]
             grid_y = all_y[row_lo : row_hi + 1][:, None]
 
-            # Distance from each cell centre to the segment.
             rel_x = grid_x - x0
             rel_y = grid_y - y0
             t = np.clip((rel_x * dx + rel_y * dy) / seg_len_sq, 0.0, 1.0)
@@ -480,31 +590,62 @@ def grade_corridors(
             closest_y = y0 + t * dy
             dist = np.hypot(grid_x - closest_x, grid_y - closest_y)
 
-            inside = dist <= corridor_half
+            inside = dist <= blend_half
             if not inside.any():
                 continue
 
-            curvature = _smoothstep(half_width, corridor_half, dist)
-            # 1 exactly inside the carriageway, tapering to 0 at the corridor edge.
-            alpha = 1.0 - curvature
-            road_z = z0 + t * (z1 - z0)
+            if blend_half <= half_width:
+                alpha = np.where(dist <= half_width, 1.0, 0.0)
+            else:
+                frac = np.clip((dist - half_width) / (blend_half - half_width), 0.0, 1.0)
+                alpha = 0.5 * (1.0 + np.cos(math.pi * frac))
+            road_z = (z0 + t * (z1 - z0)).astype(np.float32)
 
-            window_influence = influence[row_lo : row_hi + 1, col_lo : col_hi + 1]
-            segment_alpha = np.where(inside, alpha, 0.0)
-            # Test for improvement *before* folding the segment in, otherwise
-            # the comparison runs against the already-updated maximum and is
-            # never true.
-            better = segment_alpha > window_influence
-            np.maximum(window_influence, segment_alpha, out=window_influence)
+            win_inf = influence[row_lo : row_hi + 1, col_lo : col_hi + 1]
+            win_claim = best_claim[row_lo : row_hi + 1, col_lo : col_hi + 1]
+            win_tz = tie_z_sum[row_lo : row_hi + 1, col_lo : col_hi + 1]
+            win_tw = tie_w_sum[row_lo : row_hi + 1, col_lo : col_hi + 1]
+            win_seam = seam_mask[row_lo : row_hi + 1, col_lo : col_hi + 1]
+            win_cw = carriageway_mask[row_lo : row_hi + 1, col_lo : col_hi + 1]
+            win_sh_mask = shoulder_mask[row_lo : row_hi + 1, col_lo : col_hi + 1]
+            win_mat = owner_material[row_lo : row_hi + 1, col_lo : col_hi + 1]
+            win_sh = owner_shoulder[row_lo : row_hi + 1, col_lo : col_hi + 1]
 
-            weight = np.where(inside, alpha * priority_weight, 0.0)
-            weighted_z[row_lo : row_hi + 1, col_lo : col_hi + 1] += weight * road_z
-            weight_sum[row_lo : row_hi + 1, col_lo : col_hi + 1] += weight
+            seg_alpha = np.where(inside, alpha, 0.0).astype(np.float32)
+            seg_claim = (seg_alpha * np.float32(priority_weight)).astype(np.float32)
 
-            # The road with the most influence here owns the surface's appearance.
-            if better.any():
-                owner_material[row_lo : row_hi + 1, col_lo : col_hi + 1][better] = material_idx
-                owner_shoulder[row_lo : row_hi + 1, col_lo : col_hi + 1][better] = shoulder_idx
+            # Flag seams where two strong road claims disagree vertically by > 2 cm
+            has_prev = win_tw > 0.0
+            prev_z = np.where(has_prev, win_tz / np.where(has_prev, win_tw, 1.0), road_z)
+            win_seam |= (win_claim >= 0.5) & (seg_claim >= 0.5) & (np.abs(road_z - prev_z) > 0.02)
+
+            np.maximum(win_inf, seg_alpha, out=win_inf)
+
+            wins = inside & (seg_claim > win_claim + tie_tol)
+            ties = inside & (~wins) & (seg_claim + tie_tol >= win_claim)
+
+            if wins.any():
+                win_claim[wins] = seg_claim[wins]
+                win_tz[wins] = seg_claim[wins] * road_z[wins]
+                win_tw[wins] = seg_claim[wins]
+                win_mat[wins] = material_idx
+                win_sh[wins] = shoulder_idx
+
+            if ties.any():
+                win_tz[ties] += seg_claim[ties] * road_z[ties]
+                win_tw[ties] += seg_claim[ties]
+                win_claim[ties] = np.maximum(win_claim[ties], seg_claim[ties])
+
+            in_sh = (dist > half_width) & (dist <= corridor_half)
+            if in_sh.any():
+                win_sh_mask[in_sh] = True
+
+            # Keep carriageway Asphalt strictly inside half_width_m
+            in_cw = dist <= half_width
+            if in_cw.any():
+                win_cw[in_cw] = True
+                cw_owner = in_cw & (seg_claim >= win_claim - np.float32(1e-5))
+                win_mat[cw_owner] = material_idx
 
             touched += int(inside.sum())
 
@@ -514,16 +655,34 @@ def grade_corridors(
     blended = influence > 0
     if blended.any():
         inf_b = influence[blended].astype(np.float64)
-        w_b = weight_sum[blended].astype(np.float64)
-        surface_z = weighted_z[blended].astype(np.float64) / np.where(w_b > 0.0, w_b, 1.0)
+        w_b = tie_w_sum[blended].astype(np.float64)
+        surface_z = tie_z_sum[blended].astype(np.float64) / np.where(w_b > 0.0, w_b, 1.0)
         elevations[blended] = elevations[blended] * (1.0 - inf_b) + surface_z * inf_b
 
-        # Paint materials from the accumulated influence. In the graded band
-        # ``alpha`` reaches 1 only inside a carriageway, so the same field that
-        # drives the blend also classifies the surface. Because ``influence``
-        # is float32 (ULP ~6e-8), the tolerance must exceed float32 rounding.
-        carriageway = influence >= np.float32(1.0 - 1e-6)
-        shoulder = blended & ~carriageway
+        # 2 m seam blur pass over junction transitions within 0.5 m height delta
+        if seam_mask.any():
+            blur_r = max(1, round(2.0 / cell_size_m))
+            blur_band = _morph_mask(seam_mask, blur_r, erode=False) & blended
+            if blur_band.any():
+                br, bc = np.where(blur_band)
+                z_base = elevations[br, bc]
+                acc = z_base.copy()
+                cnt = np.ones_like(z_base)
+                for dr in range(-blur_r, blur_r + 1):
+                    for dc in range(-blur_r, blur_r + 1):
+                        if dr == 0 and dc == 0:
+                            continue
+                        nr = np.clip(br + dr, 0, n - 1)
+                        nc = np.clip(bc + dc, 0, n - 1)
+                        nz = elevations[nr, nc]
+                        ok = blended[nr, nc] & (np.abs(nz - z_base) <= 0.5)
+                        acc = np.where(ok, acc + nz, acc)
+                        cnt = np.where(ok, cnt + 1.0, cnt)
+                elevations[br, bc] = acc / cnt
+
+        # Paint carriageway strictly inside half_width_m and shoulders inside corridor_half_width_m
+        carriageway = carriageway_mask & (influence >= np.float32(1.0 - 1e-6))
+        shoulder = shoulder_mask & blended & ~carriageway
         layers[carriageway] = owner_material[carriageway]
         layers[shoulder] = owner_shoulder[shoulder]
 
@@ -640,6 +799,52 @@ def _normalize_polygonal(geom: Any) -> Any | None:
     return None
 
 
+def build_road_keep_mask(
+    corridors: Sequence[RoadCorridor],
+    *,
+    origin_x: float,
+    origin_y: float,
+    grid_size: int,
+    cell_size_m: float,
+    road_clearance_m: float = 8.0,
+) -> NDArray[np.bool_]:
+    """Rasterize a keep-out mask protecting ground roads and bridgehead ramps.
+
+    Ground roads stay protected within ``half_width_m + road_clearance_m`` (8 m),
+    while bridgehead ramps (``ramp_*``) protect their carriageway + 1.5 m shoulder
+    so riverbank carving does not wash out bridge abutments.
+    """
+    keep = np.zeros((grid_size, grid_size), dtype=bool)
+    all_x = origin_x + np.arange(grid_size, dtype=np.float64) * cell_size_m
+    all_y = origin_y + np.arange(grid_size, dtype=np.float64) * cell_size_m
+
+    for corridor in corridors:
+        if not corridor.grade_terrain:
+            continue
+        is_ramp = corridor.key.startswith("ramp_")
+        pad = float(corridor.half_width_m) + (1.5 if is_ramp else float(road_clearance_m))
+        pts = corridor.points
+        for i in range(pts.shape[0] - 1):
+            x0, y0 = float(pts[i, 0]), float(pts[i, 1])
+            x1, y1 = float(pts[i + 1, 0]), float(pts[i + 1, 1])
+            dx, dy = x1 - x0, y1 - y0
+            seg_len_sq = dx * dx + dy * dy
+            if seg_len_sq <= 0.0:
+                continue
+            col_lo = max(0, math.floor((min(x0, x1) - pad - origin_x) / cell_size_m))
+            col_hi = min(grid_size - 1, math.ceil((max(x0, x1) + pad - origin_x) / cell_size_m))
+            row_lo = max(0, math.floor((min(y0, y1) - pad - origin_y) / cell_size_m))
+            row_hi = min(grid_size - 1, math.ceil((max(y0, y1) + pad - origin_y) / cell_size_m))
+            if col_hi < col_lo or row_hi < row_lo:
+                continue
+            gx = all_x[col_lo : col_hi + 1][None, :]
+            gy = all_y[row_lo : row_hi + 1][:, None]
+            t = np.clip(((gx - x0) * dx + (gy - y0) * dy) / seg_len_sq, 0.0, 1.0)
+            dist = np.hypot(gx - (x0 + t * dx), gy - (y0 + t * dy))
+            keep[row_lo : row_hi + 1, col_lo : col_hi + 1] |= dist <= pad
+    return keep
+
+
 def carve_water(
     elevations: NDArray[np.float64],
     layers: NDArray[np.uint8],
@@ -650,6 +855,7 @@ def carve_water(
     origin_y: float,
     cell_size_m: float,
     bank_transition_m: float = 8.0,
+    road_keep_mask: NDArray[np.bool_] | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Carve water channels, rivers, lakes, and basins into the terrain.
 
@@ -692,14 +898,31 @@ def carve_water(
     shore_pad_cells = math.ceil(bw / cell_size_m) + 1
     outer_pad_cells = math.ceil(0.75 * bw / cell_size_m) + 1
 
-    # 1. Carve linear river channels
+    # 1. Carve linear river channels (accumulate polyline distance per river to keep bends smooth)
     rivers = getattr(water_network, "rivers", ())
+    sand_width = min(bw * 0.45, max(1.5, cell_size_m * 1.05))
     for river in rivers:
         pts = river.points
         zw = river.z_water
         depth_m = float(river.depth_m)
         hw = float(river.width_m) / 2.0
         total_reach = hw + bw
+        if pts.shape[0] < 2:
+            continue
+
+        r_min_x, r_min_y = float(pts[:, 0].min()) - total_reach, float(pts[:, 1].min()) - total_reach
+        r_max_x, r_max_y = float(pts[:, 0].max()) + total_reach, float(pts[:, 1].max()) + total_reach
+        r_col_lo = max(0, math.floor((r_min_x - origin_x) / cell_size_m))
+        r_col_hi = min(n - 1, math.ceil((r_max_x - origin_x) / cell_size_m))
+        r_row_lo = max(0, math.floor((r_min_y - origin_y) / cell_size_m))
+        r_row_hi = min(n - 1, math.ceil((r_max_y - origin_y) / cell_size_m))
+        if r_col_hi < r_col_lo or r_row_hi < r_row_lo:
+            continue
+
+        r_ny = r_row_hi - r_row_lo + 1
+        r_nx = r_col_hi - r_col_lo + 1
+        best_dist = np.full((r_ny, r_nx), np.inf, dtype=np.float64)
+        best_zw = np.zeros((r_ny, r_nx), dtype=np.float64)
 
         for i in range(pts.shape[0] - 1):
             x0, y0 = pts[i]
@@ -710,10 +933,10 @@ def carve_water(
             if seg_len_sq <= 0:
                 continue
 
-            col_lo = max(0, math.floor((min(x0, x1) - total_reach - origin_x) / cell_size_m))
-            col_hi = min(n - 1, math.ceil((max(x0, x1) + total_reach - origin_x) / cell_size_m))
-            row_lo = max(0, math.floor((min(y0, y1) - total_reach - origin_y) / cell_size_m))
-            row_hi = min(n - 1, math.ceil((max(y0, y1) + total_reach - origin_y) / cell_size_m))
+            col_lo = max(r_col_lo, math.floor((min(x0, x1) - total_reach - origin_x) / cell_size_m))
+            col_hi = min(r_col_hi, math.ceil((max(x0, x1) + total_reach - origin_x) / cell_size_m))
+            row_lo = max(r_row_lo, math.floor((min(y0, y1) - total_reach - origin_y) / cell_size_m))
+            row_hi = min(r_row_hi, math.ceil((max(y0, y1) + total_reach - origin_y) / cell_size_m))
             if col_hi < col_lo or row_hi < row_lo:
                 continue
 
@@ -723,43 +946,59 @@ def carve_water(
             rel_x = grid_x - x0
             rel_y = grid_y - y0
             t = np.clip((rel_x * dx + rel_y * dy) / seg_len_sq, 0.0, 1.0)
-            closest_x = x0 + t * dx
-            closest_y = y0 + t * dy
-            dist = np.hypot(grid_x - closest_x, grid_y - closest_y)
+            dist = np.hypot(grid_x - (x0 + t * dx), grid_y - (y0 + t * dy))
             water_z = z0 + t * (z1 - z0)
 
-            inside_channel = dist <= hw
-            in_bank = (dist > hw) & (dist <= total_reach)
-            if not (inside_channel.any() or in_bank.any()):
-                continue
+            sy0, sy1 = row_lo - r_row_lo, row_hi - r_row_lo + 1
+            sx0, sx1 = col_lo - r_col_lo, col_hi - r_col_lo + 1
+            sub_best = best_dist[sy0:sy1, sx0:sx1]
+            better = (dist <= total_reach) & (dist < sub_best)
+            if better.any():
+                sub_best[better] = dist[better]
+                best_zw[sy0:sy1, sx0:sx1][better] = water_z[better]
 
-            # Channel bed: depress to water_z - depth_m
-            sub_elev = elevations[row_lo : row_hi + 1, col_lo : col_hi + 1]
-            sub_layers = layers[row_lo : row_hi + 1, col_lo : col_hi + 1]
-            sub_touched = touched_mask[row_lo : row_hi + 1, col_lo : col_hi + 1]
+        inside_channel = best_dist <= hw
+        in_bank = (best_dist > hw) & (best_dist <= total_reach)
+        if not (inside_channel.any() or in_bank.any()):
+            continue
 
-            if inside_channel.any():
-                bed_z = water_z - depth_m
-                sub_elev[inside_channel] = np.minimum(sub_elev[inside_channel], bed_z[inside_channel])
-                if idx_pebbles is not None:
-                    sub_layers[inside_channel] = idx_pebbles
-                sub_touched[inside_channel] = True
+        sub_keep = (
+            road_keep_mask[r_row_lo : r_row_hi + 1, r_col_lo : r_col_hi + 1]
+            if road_keep_mask is not None
+            else None
+        )
+        chan_mask = inside_channel & (~sub_keep) if sub_keep is not None else inside_channel
+        bank_mask = in_bank & (~sub_keep) if sub_keep is not None else in_bank
+        if not (chan_mask.any() or bank_mask.any()):
+            continue
 
-            if in_bank.any():
-                frac = (dist[in_bank] - hw) / bw
-                smooth = frac * frac * (3.0 - 2.0 * frac)
-                bed_z = water_z[in_bank] - depth_m
-                bank_z = bed_z + smooth * (sub_elev[in_bank] - bed_z)
-                sub_elev[in_bank] = np.minimum(sub_elev[in_bank], bank_z)
-                sub_touched[in_bank] = True
+        sub_elev = elevations[r_row_lo : r_row_hi + 1, r_col_lo : r_col_hi + 1]
+        sub_layers = layers[r_row_lo : r_row_hi + 1, r_col_lo : r_col_hi + 1]
+        sub_touched = touched_mask[r_row_lo : r_row_hi + 1, r_col_lo : r_col_hi + 1]
 
-                shallow_bank = frac <= 0.45
-                if idx_sand is not None and idx_riverbank_soil is not None:
-                    sub_layers[in_bank] = np.where(shallow_bank, idx_sand, idx_riverbank_soil)
-                elif idx_sand is not None:
-                    sub_layers[in_bank] = np.where(shallow_bank, idx_sand, sub_layers[in_bank])
-                elif idx_riverbank_soil is not None:
-                    sub_layers[in_bank] = np.where(~shallow_bank, idx_riverbank_soil, sub_layers[in_bank])
+        if chan_mask.any():
+            bed_z = best_zw[chan_mask] - depth_m
+            sub_elev[chan_mask] = np.minimum(sub_elev[chan_mask], bed_z)
+            if idx_pebbles is not None:
+                sub_layers[chan_mask] = idx_pebbles
+            sub_touched[chan_mask] = True
+
+        if bank_mask.any():
+            dist_from_water = best_dist[bank_mask] - hw
+            frac = dist_from_water / bw
+            smooth = 0.5 * (1.0 - np.cos(math.pi * frac))
+            bed_z = best_zw[bank_mask] - depth_m
+            bank_z = bed_z + smooth * (sub_elev[bank_mask] - bed_z)
+            sub_elev[bank_mask] = np.minimum(sub_elev[bank_mask], bank_z)
+            sub_touched[bank_mask] = True
+
+            shallow_bank = dist_from_water <= sand_width
+            if idx_sand is not None and idx_riverbank_soil is not None:
+                sub_layers[bank_mask] = np.where(shallow_bank, idx_sand, idx_riverbank_soil)
+            elif idx_sand is not None:
+                sub_layers[bank_mask] = np.where(shallow_bank, idx_sand, sub_layers[bank_mask])
+            elif idx_riverbank_soil is not None:
+                sub_layers[bank_mask] = np.where(~shallow_bank, idx_riverbank_soil, sub_layers[bank_mask])
 
     # 2. Carve standing water bodies (lakes, reservoirs, ponds)
     bodies = getattr(water_network, "water_bodies", ())
@@ -798,6 +1037,8 @@ def carve_water(
 
         # Vectorized containment: True for lake basin, False for islands (holes)
         inside = shapely.contains_xy(poly, grid_x.ravel(), grid_y.ravel()).reshape(ny, nx)
+        if road_keep_mask is not None:
+            inside &= ~road_keep_mask[row_lo : row_hi + 1, col_lo : col_hi + 1]
         if not inside.any():
             continue
 
@@ -848,6 +1089,8 @@ def carve_water(
 
         # Paint wet bank immediately outside shoreline (within 0.75 * bw)
         outside_band = (~inside) & _morph_mask(inside, outer_pad_cells, erode=False)
+        if road_keep_mask is not None:
+            outside_band &= ~road_keep_mask[row_lo : row_hi + 1, col_lo : col_hi + 1]
         if outside_band.any():
             pts_outside = shapely.points(grid_x[outside_band], grid_y[outside_band])
             dist_out = shapely.distance(boundary, pts_outside)
@@ -867,6 +1110,261 @@ def carve_water(
         "water_bodies_carved": len(bodies),
     }
     return touched_count, stats
+
+
+def _rasterize_bridge_under_mask(
+    bridge_spans: Sequence[tuple[NDArray[np.float64], float]],
+    *,
+    origin_x: float,
+    origin_y: float,
+    grid_size: int,
+    cell_size_m: float,
+    end_margin_m: float = 4.0,
+) -> NDArray[np.bool_]:
+    """Return boolean mask of cells beneath interior bridge spans (excluding abutments)."""
+    mask = np.zeros((grid_size, grid_size), dtype=bool)
+    all_x = origin_x + np.arange(grid_size, dtype=np.float64) * cell_size_m
+    all_y = origin_y + np.arange(grid_size, dtype=np.float64) * cell_size_m
+
+    for pts, half_w in bridge_spans:
+        if pts.shape[0] < 2:
+            continue
+        diffs = np.diff(pts, axis=0)
+        seg_lens = np.hypot(diffs[:, 0], diffs[:, 1])
+        cum = np.concatenate(([0.0], np.cumsum(seg_lens)))
+        total_len = float(cum[-1])
+        if total_len <= 2.0 * end_margin_m:
+            continue
+        pad = float(half_w) + 1.5
+        for i in range(pts.shape[0] - 1):
+            x0, y0 = float(pts[i, 0]), float(pts[i, 1])
+            x1, y1 = float(pts[i + 1, 0]), float(pts[i + 1, 1])
+            dx, dy = x1 - x0, y1 - y0
+            seg_len_sq = dx * dx + dy * dy
+            if seg_len_sq <= 0.0:
+                continue
+            col_lo = max(0, math.floor((min(x0, x1) - pad - origin_x) / cell_size_m))
+            col_hi = min(grid_size - 1, math.ceil((max(x0, x1) + pad - origin_x) / cell_size_m))
+            row_lo = max(0, math.floor((min(y0, y1) - pad - origin_y) / cell_size_m))
+            row_hi = min(grid_size - 1, math.ceil((max(y0, y1) + pad - origin_y) / cell_size_m))
+            if col_hi < col_lo or row_hi < row_lo:
+                continue
+            gx = all_x[col_lo : col_hi + 1][None, :]
+            gy = all_y[row_lo : row_hi + 1][:, None]
+            t = np.clip(((gx - x0) * dx + (gy - y0) * dy) / seg_len_sq, 0.0, 1.0)
+            dist = np.hypot(gx - (x0 + t * dx), gy - (y0 + t * dy))
+            arc_s = float(cum[i]) + t * float(seg_lens[i])
+            inside = (dist <= pad) & (arc_s >= end_margin_m) & (arc_s <= total_len - end_margin_m)
+            mask[row_lo : row_hi + 1, col_lo : col_hi + 1] |= inside
+    return mask
+
+
+def carve_water_under_decks(
+    elevations: NDArray[np.float64],
+    layers: NDArray[np.uint8],
+    material_index: dict[str, int],
+    water_network: Any,
+    bridge_spans: Sequence[tuple[NDArray[np.float64], float]],
+    *,
+    origin_x: float,
+    origin_y: float,
+    cell_size_m: float,
+    road_keep_mask: NDArray[np.bool_] | None = None,
+    hidden_bed_m: float = 1.5,
+    hidden_slope_m: float = 2.0,
+) -> int:
+    """Clear DEM bridge dams under bridge spans where rivers or lakes pass.
+
+    Adapted from MapNG ``carveWaterUnderDecks`` (MIT License).
+    """
+    if not bridge_spans or water_network is None:
+        return 0
+    n = elevations.shape[0]
+    under_mask = _rasterize_bridge_under_mask(
+        bridge_spans,
+        origin_x=origin_x,
+        origin_y=origin_y,
+        grid_size=n,
+        cell_size_m=cell_size_m,
+    )
+    if road_keep_mask is not None:
+        under_mask &= ~road_keep_mask
+    if not under_mask.any():
+        return 0
+
+    idx_pebbles = material_index.get("Pebbles")
+    all_x = origin_x + np.arange(n, dtype=np.float64) * cell_size_m
+    all_y = origin_y + np.arange(n, dtype=np.float64) * cell_size_m
+    carved = 0
+
+    for river in getattr(water_network, "rivers", ()):
+        pts = river.points
+        zw = river.z_water
+        hw = float(river.width_m) * 0.5
+        for i in range(pts.shape[0] - 1):
+            x0, y0 = float(pts[i, 0]), float(pts[i, 1])
+            x1, y1 = float(pts[i + 1, 0]), float(pts[i + 1, 1])
+            z0, z1 = float(zw[i]), float(zw[i + 1])
+            dx, dy = x1 - x0, y1 - y0
+            seg_len_sq = dx * dx + dy * dy
+            if seg_len_sq <= 0.0:
+                continue
+            col_lo = max(0, math.floor((min(x0, x1) - hw - origin_x) / cell_size_m))
+            col_hi = min(n - 1, math.ceil((max(x0, x1) + hw - origin_x) / cell_size_m))
+            row_lo = max(0, math.floor((min(y0, y1) - hw - origin_y) / cell_size_m))
+            row_hi = min(n - 1, math.ceil((max(y0, y1) + hw - origin_y) / cell_size_m))
+            if col_hi < col_lo or row_hi < row_lo:
+                continue
+            sub_under = under_mask[row_lo : row_hi + 1, col_lo : col_hi + 1]
+            if not sub_under.any():
+                continue
+            gx = all_x[col_lo : col_hi + 1][None, :]
+            gy = all_y[row_lo : row_hi + 1][:, None]
+            t = np.clip(((gx - x0) * dx + (gy - y0) * dy) / seg_len_sq, 0.0, 1.0)
+            dist = np.hypot(gx - (x0 + t * dx), gy - (y0 + t * dy))
+            hit = sub_under & (dist <= hw)
+            if not hit.any():
+                continue
+            surface = z0 + t * (z1 - z0)
+            target = surface - hidden_bed_m * np.minimum(1.0, (hw - dist) / max(0.5, hidden_slope_m) + 0.2)
+            sub_elev = elevations[row_lo : row_hi + 1, col_lo : col_hi + 1]
+            lower = hit & (sub_elev > target)
+            if lower.any():
+                sub_elev[lower] = target[lower]
+                if idx_pebbles is not None:
+                    layers[row_lo : row_hi + 1, col_lo : col_hi + 1][lower] = idx_pebbles
+                carved += int(lower.sum())
+
+    return carved
+
+
+def level_under_decks(
+    elevations: NDArray[np.float64],
+    bridge_spans: Sequence[tuple[NDArray[np.float64], float]],
+    water_network: Any | None = None,
+    *,
+    origin_x: float,
+    origin_y: float,
+    cell_size_m: float,
+    road_keep_mask: NDArray[np.bool_] | None = None,
+    end_margin_m: float = 6.0,
+) -> int:
+    """Lower residual DEM ridges under bridge spans between lower banks on both sides.
+
+    Adapted from MapNG ``levelUnderDecks`` (MIT License).
+    """
+    if not bridge_spans:
+        return 0
+    n = elevations.shape[0]
+    step_d = max(0.7, cell_size_m * 0.7)
+    lowered = 0
+
+    def _at(wx: float, wy: float) -> tuple[int, int, float] | None:
+        c = round((wx - origin_x) / cell_size_m)
+        r = round((wy - origin_y) / cell_size_m)
+        if 0 <= r < n and 0 <= c < n:
+            return (r, c, float(elevations[r, c]))
+        return None
+
+    # Pre-check if water is nearby when water_network is supplied
+    rivers = getattr(water_network, "rivers", ()) if water_network is not None else ()
+
+    def _near_water(wx: float, wy: float) -> bool:
+        if water_network is None:
+            return True
+        for rv in rivers:
+            rpts = rv.points
+            hw = float(rv.width_m) * 0.5 + 8.0
+            if (
+                wx < float(rpts[:, 0].min()) - hw
+                or wx > float(rpts[:, 0].max()) + hw
+                or wy < float(rpts[:, 1].min()) - hw
+                or wy > float(rpts[:, 1].max()) + hw
+            ):
+                continue
+            for j in range(rpts.shape[0] - 1):
+                ax, ay = float(rpts[j, 0]), float(rpts[j, 1])
+                bx, by = float(rpts[j + 1, 0]), float(rpts[j + 1, 1])
+                dx, dy = bx - ax, by - ay
+                l2 = dx * dx + dy * dy
+                t = 0.0 if l2 <= 1e-9 else max(0.0, min(1.0, ((wx - ax) * dx + (wy - ay) * dy) / l2))
+                if math.hypot(ax + dx * t - wx, ay + dy * t - wy) <= hw:
+                    return True
+        return False
+
+    for pts, half_w in bridge_spans:
+        if pts.shape[0] < 2:
+            continue
+        diffs = np.diff(pts, axis=0)
+        seg_lens = np.hypot(diffs[:, 0], diffs[:, 1])
+        cum = np.concatenate(([0.0], np.cumsum(seg_lens)))
+        total_len = float(cum[-1])
+        h = float(half_w) + 0.4
+        for i in range(pts.shape[0] - 1):
+            seg_len = float(seg_lens[i])
+            if seg_len < 1e-6:
+                continue
+            ax, ay = float(pts[i, 0]), float(pts[i, 1])
+            ux, uy = float(diffs[i, 0]) / seg_len, float(diffs[i, 1]) / seg_len
+            nx, ny = -uy, ux
+            d = 0.0
+            while d < seg_len:
+                sd = float(cum[i]) + d
+                if end_margin_m <= sd <= total_len - end_margin_m:
+                    cx, cy = ax + ux * d, ay + uy * d
+                    best_l: tuple[float, float] | None = None
+                    best_r: tuple[float, float] | None = None
+                    off = h + 1.0
+                    while off <= h + 5.0 + 1e-6:
+                        ql = _at(cx + nx * off, cy + ny * off)
+                        if ql is not None and (best_l is None or ql[2] < best_l[0]):
+                            best_l = (ql[2], off)
+                        qr = _at(cx - nx * off, cy - ny * off)
+                        if qr is not None and (best_r is None or qr[2] < best_r[0]):
+                            best_r = (qr[2], off)
+                        off += step_d
+                    if best_l is not None and best_r is not None:
+                        wet_l = _near_water(cx + nx * best_l[1], cy + ny * best_l[1])
+                        wet_r = _near_water(cx - nx * best_r[1], cy - ny * best_r[1])
+                        if wet_l or wet_r:
+                            o = -(h + 2.0)
+                            while o <= h + 2.0 + 1e-6:
+                                q = _at(cx + nx * o, cy + ny * o)
+                                if q is not None and (road_keep_mask is None or not road_keep_mask[q[0], q[1]]):
+                                    frac = max(0.0, min(1.0, (o + best_r[1]) / max(1e-6, best_l[1] + best_r[1])))
+                                    target = best_r[0] + (best_l[0] - best_r[0]) * frac
+                                    if target < elevations[q[0], q[1]] - 0.05:
+                                        elevations[q[0], q[1]] = target
+                                        lowered += 1
+                                o += step_d
+                d += step_d
+    return lowered
+
+
+def _to_shapely_polygon(shape: Any) -> Any | None:
+    """Convert a Shapely polygon, ``VegetationArea``, ``(outer, holes)`` tuple, or ring to a valid Shapely geometry."""
+    if isinstance(shape, Polygon) or getattr(shape, "geom_type", None) == "MultiPolygon":
+        poly: Any = shape
+    elif hasattr(shape, "to_polygon"):
+        poly = shape.to_polygon()
+    elif isinstance(shape, tuple) and len(shape) == 2:
+        outer, holes = shape
+        outer_arr = np.asarray(outer, dtype=np.float64)
+        if outer_arr.ndim != 2 or outer_arr.shape[0] < 3:
+            return None
+        hole_arrs = [np.asarray(h, dtype=np.float64) for h in (holes or ()) if len(h) >= 3]
+        poly = Polygon(outer_arr, holes=hole_arrs)
+    else:
+        pts = np.asarray(shape, dtype=np.float64)
+        if pts.ndim != 2 or pts.shape[0] < 3:
+            return None
+        poly = Polygon(pts)
+
+    if not poly.is_valid:
+        poly = make_valid(poly)
+        if poly.is_empty:
+            return None
+    return poly
 
 
 def strip_forest_canopy(
@@ -907,17 +1405,9 @@ def strip_forest_canopy(
     all_y = origin_y + np.arange(n, dtype=np.float64) * cell_size_m
 
     for shape in forest_polygons:
-        if isinstance(shape, Polygon):
-            poly = shape
-        else:
-            pts = np.asarray(shape, dtype=np.float64)
-            if pts.shape[0] < 3:
-                continue
-            poly = Polygon(pts)
-        if not poly.is_valid:
-            poly = make_valid(poly)
-            if poly.is_empty:
-                continue
+        poly = _to_shapely_polygon(shape)
+        if poly is None:
+            continue
 
         min_x, min_y, max_x, max_y = poly.bounds
         col_lo = max(0, math.floor((min_x - origin_x) / cell_size_m))
@@ -1006,17 +1496,9 @@ def paint_landcover(
         if mat_idx is None:
             continue
         for shape in poly_list:
-            if isinstance(shape, Polygon):
-                poly = shape
-            else:
-                pts = np.asarray(shape, dtype=np.float64)
-                if pts.shape[0] < 3:
-                    continue
-                poly = Polygon(pts)
-            if not poly.is_valid:
-                poly = make_valid(poly)
-                if poly.is_empty:
-                    continue
+            poly = _to_shapely_polygon(shape)
+            if poly is None:
+                continue
             min_x, min_y, max_x, max_y = poly.bounds
             col_lo = max(0, math.floor((min_x - origin_x) / cell_size_m))
             col_hi = min(n - 1, math.ceil((max_x - origin_x) / cell_size_m))
@@ -1123,6 +1605,8 @@ def build_terrain(
     canopy_height_m: float | None = None,
     carve_water_fn: Any | None = None,
     paint_landcover_fn: Any | None = None,
+    bridge_roads: Sequence[Any] | None = None,
+    road_settings: Any | None = None,
 ) -> TerrainBuild:
     """Build a complete terrain grid from a DEM plus optional road corridors.
 
@@ -1237,20 +1721,23 @@ def build_terrain(
                 cell_size_m=cell_size_m,
             )
 
-    # 3. Road corridor grading
+    # 3. Road corridor grading + coupled bridge deck & ramp profiles
     graded_cells = 0
+    prepared: list[RoadCorridor] = []
+    bridge_profiles: dict[int, tuple[NDArray[np.float64], NDArray[np.float64]]] = {}
+    bridge_spans: list[tuple[NDArray[np.float64], float]] = []
+
+    profile_dem: DemSampler = _GridOverlayDem(
+        elevations,
+        projection,
+        origin_x,
+        origin_y,
+        cell_size_m,
+        dem,
+    )
     if corridors:
         report(0.40, f"deriving profiles for {len(corridors)} road corridors")
-        profile_dem: DemSampler = _GridOverlayDem(
-            elevations,
-            projection,
-            origin_x,
-            origin_y,
-            cell_size_m,
-            dem,
-        )
         effective_sample_step = sample_step_m if sample_step_m is not None else max(8.0, cell_size_m)
-        prepared: list[RoadCorridor] = []
         for i, corridor in enumerate(corridors):
             if corridor.surface_z is None and corridor.grade_terrain:
                 points, profile = derive_road_profile(
@@ -1263,9 +1750,106 @@ def build_terrain(
                 )
                 corridor.points = points
                 corridor.surface_z = profile
+            elif not corridor.grade_terrain and corridor.key.startswith("way"):
+                bridge_spans.append((corridor.points, corridor.half_width_m))
             prepared.append(corridor)
             if i % 50 == 0:
                 report(0.40 + 0.25 * (i / max(1, len(corridors))), f"profiling road {i + 1}")
+
+        pinned_count = pin_junction_profiles(prepared)
+        stats["pinned_junctions"] = pinned_count
+
+    if bridge_roads:
+        from ivanovo2beam.config import RoadSettings
+        from ivanovo2beam.roads.bridges import create_bridgehead_ramps, solve_coupled_bridge_profile
+
+        r_settings = road_settings if road_settings is not None else RoadSettings()
+        # Index ground-road endpoint elevations so bridge portals match smoothed approach grades
+        ground_end_z: dict[tuple[int, int], tuple[float, int]] = {}
+        for c in prepared:
+            if not c.grade_terrain or c.surface_z is None:
+                continue
+            for pt_xy, z_val in ((c.points[0], float(c.surface_z[0])), (c.points[-1], float(c.surface_z[-1]))):
+                k = (round(float(pt_xy[0]) * 2.0), round(float(pt_xy[1]) * 2.0))
+                prev = ground_end_z.get(k)
+                if prev is None or c.priority > prev[1]:
+                    ground_end_z[k] = (z_val, c.priority)
+
+        def _dem_world(wx: float, wy: float) -> float:
+            return float(profile_dem.sample_world_array(np.array([wx]), np.array([wy]))[0])  # type: ignore[attr-defined]
+
+        def _blend_approach_end(pt_key: tuple[int, int], target_z: float, ramp_len_m: float = 70.0) -> float | None:
+            """Smoothly blend any ground road corridor ending at ``pt_key`` to ``target_z``."""
+            matched_far_z: float | None = None
+            for c in prepared:
+                if not c.grade_terrain or c.surface_z is None or c.points.shape[0] < 2:
+                    continue
+                k_s = (round(float(c.points[0, 0]) * 2.0), round(float(c.points[0, 1]) * 2.0))
+                k_e = (round(float(c.points[-1, 0]) * 2.0), round(float(c.points[-1, 1]) * 2.0))
+                if k_s != pt_key and k_e != pt_key:
+                    continue
+                diffs_c = np.diff(c.points, axis=0)
+                cum_c = np.concatenate(([0.0], np.cumsum(np.hypot(diffs_c[:, 0], diffs_c[:, 1]))))
+                tot_c = float(cum_c[-1])
+                eff_r = min(ramp_len_m, tot_c)
+                if eff_r <= 1e-3:
+                    continue
+                if k_s == pt_key:
+                    delta = target_z - float(c.surface_z[0])
+                    for idx_p in range(c.surface_z.size):
+                        d_p = float(cum_c[idx_p])
+                        if d_p >= eff_r:
+                            break
+                        w = 0.5 * (1.0 + math.cos(math.pi * d_p / eff_r))
+                        c.surface_z[idx_p] += delta * w
+                    if tot_c >= ramp_len_m:
+                        matched_far_z = float(np.interp(ramp_len_m, cum_c, c.surface_z))
+                if k_e == pt_key:
+                    delta = target_z - float(c.surface_z[-1])
+                    for idx_p in range(c.surface_z.size - 1, -1, -1):
+                        d_p = tot_c - float(cum_c[idx_p])
+                        if d_p >= eff_r:
+                            break
+                        w = 0.5 * (1.0 + math.cos(math.pi * d_p / eff_r))
+                        c.surface_z[idx_p] += delta * w
+                    if tot_c >= ramp_len_m:
+                        matched_far_z = float(np.interp(tot_c - ramp_len_m, cum_c, c.surface_z))
+            return matched_far_z
+
+        for br in bridge_roads:
+            if not getattr(br, "bridge", False) or br.points.shape[0] < 2:
+                continue
+            k0 = (round(float(br.points[0, 0]) * 2.0), round(float(br.points[0, 1]) * 2.0))
+            k1 = (round(float(br.points[-1, 0]) * 2.0), round(float(br.points[-1, 1]) * 2.0))
+            ez0 = ground_end_z[k0][0] if k0 in ground_end_z else None
+            ez1 = ground_end_z[k1][0] if k1 in ground_end_z else None
+            b_pts, b_z = solve_coupled_bridge_profile(
+                br,
+                ground_sampler=_dem_world,
+                water_network=water_network,
+                approach_end_z=(ez0, ez1),
+            )
+            bridge_profiles[br.osm_id] = (b_pts, b_z)
+            bridge_spans.append((b_pts, float(br.half_width_m) + 0.6))
+            far_z0 = _blend_approach_end(k0, float(b_z[0]))
+            far_z1 = _blend_approach_end(k1, float(b_z[-1]))
+            from dataclasses import replace as _dc_replace
+
+            br_solved = _dc_replace(br, points=b_pts)
+            prepared.extend(
+                create_bridgehead_ramps(
+                    br_solved,
+                    r_settings,
+                    b_z,
+                    ground_sampler=_dem_world,
+                    far_z_override=(far_z0, far_z1),
+                )
+            )
+
+        # Re-pin junctions so ground approach roads seamlessly meet lifted bridgeheads
+        pin_junction_profiles(prepared)
+
+    if prepared:
         report(0.65, "carving road corridors into the terrain")
         graded_cells, grade_stats = grade_corridors(
             elevations,
@@ -1275,11 +1859,12 @@ def build_terrain(
             origin_x=origin_x,
             origin_y=origin_y,
             cell_size_m=cell_size_m,
+            min_blend_skirt_m=15.0,
         )
         stats.update(grade_stats)
         stats["road_corridors"] = len(prepared)
 
-    # 4. Water channel and basin carving
+    # 4. Water channel and basin carving (8 m clear of ground roads; clear dams under bridges)
     if water_network is not None or carve_water_fn is not None:
         report(0.75, "carving water channels and basins")
         if carve_water_fn is not None:
@@ -1292,6 +1877,18 @@ def build_terrain(
                 cell_size_m=cell_size_m,
             )
         elif water_network is not None:
+            road_keep_mask = (
+                build_road_keep_mask(
+                    prepared,
+                    origin_x=origin_x,
+                    origin_y=origin_y,
+                    grid_size=grid_size,
+                    cell_size_m=cell_size_m,
+                    road_clearance_m=8.0,
+                )
+                if prepared
+                else None
+            )
             water_cells, water_stats = carve_water(
                 elevations,
                 layers,
@@ -1300,7 +1897,31 @@ def build_terrain(
                 origin_x=origin_x,
                 origin_y=origin_y,
                 cell_size_m=cell_size_m,
+                road_keep_mask=road_keep_mask,
             )
+            if bridge_spans:
+                deck_carved = carve_water_under_decks(
+                    elevations,
+                    layers,
+                    material_index,
+                    water_network,
+                    bridge_spans,
+                    origin_x=origin_x,
+                    origin_y=origin_y,
+                    cell_size_m=cell_size_m,
+                    road_keep_mask=road_keep_mask,
+                )
+                dam_lowered = level_under_decks(
+                    elevations,
+                    bridge_spans,
+                    water_network,
+                    origin_x=origin_x,
+                    origin_y=origin_y,
+                    cell_size_m=cell_size_m,
+                    road_keep_mask=road_keep_mask,
+                )
+                water_stats["under_deck_carved"] = deck_carved
+                water_stats["under_deck_leveled"] = dam_lowered
             stats["water_cells"] = water_cells
             stats.update(water_stats)
 
@@ -1332,4 +1953,5 @@ def build_terrain(
         graded_cells=graded_cells,
         stats=stats,
         satellite_image=satellite_tex,
+        bridge_profiles=bridge_profiles,
     )

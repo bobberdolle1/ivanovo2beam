@@ -271,7 +271,7 @@ class TestOfflineEndToEnd:
         with zipfile.ZipFile(result.mod_zip) as archive:
             suffixes = {Path(n).suffix.lower() for n in archive.namelist()}
         assert not any(s in {".dds", ".cdae"} for s in suffixes)
-        assert suffixes <= {".json", ".ter", ".txt", ".md", ".png", ".dae"}, suffixes
+        assert suffixes <= {".json", ".ter", ".txt", ".md", ".png", ".dae", ".link"}, suffixes
 
     def test_build_is_deterministic(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Same inputs must give byte-identical terrain and scene files."""
@@ -576,7 +576,73 @@ class TestBuildRegressions:
             if line.strip() and json.loads(line).get("class") == "TSStatic"
         ]
         target = [b for b in bridges if "bridge_way8888" in b.get("shapeName", "")]
-        assert len(target) == 1
-        assert target[0]["position"][0] == pytest.approx(280.0, abs=1.0)
-        assert target[0]["position"][1] == pytest.approx(300.0, abs=1.0)
-        assert target[0]["position"][2] > 100.0
+        assert len(target) == 2
+        by_decal = {b.get("decalType"): b for b in target}
+        assert "Visible Mesh" in by_decal and "None" in by_decal
+        for obj in target:
+            assert obj["position"][0] == pytest.approx(280.0, abs=1.0)
+            assert obj["position"][1] == pytest.approx(300.0, abs=1.0)
+            assert obj["position"][2] > 100.0
+
+    def test_custom_level_honors_level_spawn_instead_of_city_center(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import dataclasses
+
+        import ivanovo2beam.build as build_module
+
+        base = ProjectConfig.load("configs/test_sector.yaml")
+        assert base.level is not None
+        # Shift center and spawn ~10 km SE of Ivanovo city center.
+        spawn_lon, spawn_lat = base.projection.world_to_geo(10_000.0, -8_000.0)
+        custom_level = dataclasses.replace(
+            base.level,
+            id="custom_golden_test",
+            center_lon=spawn_lon,
+            center_lat=spawn_lat,
+            spawn_lon=spawn_lon,
+            spawn_lat=spawn_lat,
+        )
+        config = dataclasses.replace(
+            base,
+            level=custom_level,
+            cache_dir=tmp_path / "cache",
+            build_dir=tmp_path / "build",
+        )
+        _, _, extent = build_module._level_geographic_bbox(config, margin_deg=0.0)
+        osm = synthetic_osm(config.projection, extent)
+        # Re-center synthetic road nodes around (10000, -8000) so _choose_spawn stays local.
+        for nid, (lon, lat) in list(osm.nodes.items()):
+            wx, wy = config.projection.geo_to_world(lon, lat)
+            osm.nodes[nid] = config.projection.world_to_geo(wx + 10_000.0, wy - 8_000.0)
+
+        monkeypatch.setattr(
+            build_module,
+            "fetch_level_osm",
+            lambda cfg, box, **kw: (
+                osm,
+                {
+                    "tiles_requested": 1,
+                    "tiles_succeeded": 1,
+                    "tiles_failed": 0,
+                    "tiles_skipped": 0,
+                    "budget_exhausted": False,
+                    "merge_summary": "",
+                },
+            ),
+        )
+        monkeypatch.setattr(
+            "ivanovo2beam.terrain.dem.fetch_dem",
+            lambda requested_bbox, *a, **k: write_synthetic_dem(
+                tmp_path / "cache" / "dem" / "s.tif", requested_bbox.as_tuple()
+            ),
+        )
+        result = build_level(config, progress=None, make_zip=False)
+        assert result.stats["spawn"]["x"] == pytest.approx(10_000.0, abs=500.0)
+        assert result.stats["spawn"]["y"] == pytest.approx(-8_000.0, abs=500.0)
+        spawn_file = (
+            config.build_dir / "levels" / config.level.id / "main" / "MissionGroup" / "PlayerDropPoints" / "items.level.json"
+        )
+        spawns = [json.loads(line) for line in spawn_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+        assert len(spawns) == 1
+        assert spawns[0]["name"] == "spawn_default"

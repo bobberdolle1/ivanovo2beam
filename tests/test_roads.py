@@ -635,11 +635,11 @@ class TestAITrafficAndNavgraph:
         obj = road_to_decal_object(road, "test_level", ground_z=np.array([15.0, 15.0]))
         assert obj is not None
         assert obj["overObjects"] is True
-        assert obj["decalBias"] == 0.02
+        assert obj["decalBias"] == 0.002
         assert obj["autoJunction"] is False
-        # Node elevations must be lifted by +0.02
+        # Node elevations must be lifted by +0.002
         for node in obj["nodes"]:
-            assert node[2] == pytest.approx(15.02)
+            assert node[2] == pytest.approx(15.002)
 
 
 class TestRoadSplittingAndMarkings:
@@ -729,13 +729,16 @@ class TestRoadSplittingAndMarkings:
             is_end_junction=True,
             clip_distance_m=8.0,
         )
-        # 4 lanes -> 3 divider markings (1 center, 2 lane dividers)
-        assert len(markings) == 3
+        # 4 lanes on primary -> 3 interior dividers (center + 2 dashed) + 2 edge lines
+        assert len(markings) == 5
 
         materials = [m["material"] for m in markings]
-        # Two-way road: center divider is solid white, side dividers are dashed white
+        # Two-way road: solid white center/edge lines and dashed lane dividers
         assert "m_line_white" in materials
         assert "m_line_white_discontinue" in materials
+        assert {m["renderPriority"] for m in markings} == {1, 2}
+        assert all(m["textureLength"] == pytest.approx(6.4) for m in markings)
+        assert all(m["decalBias"] == pytest.approx(0.005) for m in markings)
 
         # Clipped 8m from both ends: length must be 100 - 16 = 84m
         for m in markings:
@@ -856,7 +859,7 @@ class TestDecalRoadSafetyAndMaterials:
             assert math.hypot(b[0] - a[0], b[1] - a[1]) >= 1e-3
 
         markings = generate_lane_markings(road, "test_level", np.asarray(nodes)[:, :3])
-        assert len(markings) == 3
+        assert len(markings) == 5
         for m in markings:
             for n in m["nodes"]:
                 assert all(math.isfinite(v) for v in n)
@@ -900,8 +903,9 @@ class TestDecalRoadSafetyAndMaterials:
         tree = SceneTree(level_id="test_level")
         add_network_to_scene(tree, [road], build, max_node_spacing_m=10.0)
         road_objs = tree.objects[("level_objects", "road_network")]
-        assert len(road_objs) == 1
-        zs = [n[2] for n in road_objs[0]["nodes"]]
+        base_objs = [o for o in road_objs if o["material"] == "road_asphalt_2lane"]
+        assert len(base_objs) == 1
+        zs = [n[2] for n in base_objs[0]["nodes"]]
         # Densified interior nodes must sample the 10m ridge rather than staying at 0m
         assert max(zs) >= 9.0
 
@@ -950,18 +954,20 @@ class TestDecalRoadSafetyAndMaterials:
     def test_tiered_decal_lod_settings_by_road_class(self) -> None:
         pts = np.array([[0.0, 0.0], [100.0, 0.0]])
         cases = [
-            ("trunk", [650.0, 150.0], 3.0, 0.3),
-            ("secondary", [450.0, 100.0], 3.5, 0.35),
-            ("residential", [250.0, 75.0], 4.0, 0.4),
-            ("service", [120.0, 40.0], 4.5, 0.5),
+            ("trunk", [650.0, 150.0], 1.5, 0.5, 13),
+            ("secondary", [450.0, 100.0], 2.0, 0.5, 14),
+            ("residential", [250.0, 75.0], 2.0, 0.5, 14),
+            ("service", [120.0, 40.0], 2.0, 0.5, 15),
         ]
-        for highway, exp_fade, exp_break, exp_detail in cases:
+        for highway, exp_fade, exp_break, exp_detail, exp_prio in cases:
             road = self._make_road(410, pts, highway=highway)
             obj = road_to_decal_object(road, "test_level")
             assert obj is not None
             assert obj["distanceFade"] == exp_fade
             assert obj["breakAngle"] == exp_break
             assert obj["detail"] == exp_detail
+            assert obj["renderPriority"] == exp_prio
+            assert obj["textureLength"] == pytest.approx(11.0)
 
     def test_z_aware_simplification_drops_flat_collinear_keeps_crest(self) -> None:
         from types import SimpleNamespace
@@ -998,7 +1004,7 @@ class TestDecalRoadSafetyAndMaterials:
         assert obj is not None
         assert obj["overObjects"] is True
         assert obj["breakAngle"] <= 1.5
-        assert obj["detail"] <= 0.25
+        assert obj["detail"] == pytest.approx(0.5)
         # Any kept interior node must lie strictly on the XY chord (y == 0.0)
         for n in obj["nodes"]:
             assert n[1] == pytest.approx(0.0, abs=1e-6)
@@ -1008,14 +1014,285 @@ class TestDecalRoadSafetyAndMaterials:
         pts_3d = np.array([[0.0, 0.0, 0.0], [100.0, 0.0, 0.0]])
         primary_wide = self._make_road(415, pts, highway="primary", lanes=2, width_m=8.5, oneway=False)
         marks = generate_lane_markings(primary_wide, "test_level", pts_3d, is_start_junction=False, is_end_junction=False)
-        assert len(marks) == 1
-        assert marks[0]["material"] == "m_line_white_discontinue"
-        assert all(n[1] == pytest.approx(0.0, abs=1e-6) and n[3] == pytest.approx(0.15) for n in marks[0]["nodes"])
+        # Dashed centerline (renderPriority=2) + 2 white edge lines (renderPriority=1)
+        assert len(marks) == 3
+        center = [m for m in marks if m["material"] == "m_line_white_discontinue"]
+        edges = [m for m in marks if m["material"] == "m_line_white"]
+        assert len(center) == 1
+        assert center[0]["renderPriority"] == 2
+        assert all(n[1] == pytest.approx(0.0, abs=1e-6) and n[3] == pytest.approx(0.15) for n in center[0]["nodes"])
+        assert len(edges) == 2
+        assert all(e["renderPriority"] == 1 for e in edges)
 
         # Narrow primary or secondary/residential 2-lane roads get no markings
         secondary_wide = self._make_road(416, pts, highway="secondary", lanes=2, width_m=9.0, oneway=False)
         primary_narrow = self._make_road(417, pts, highway="primary", lanes=2, width_m=7.0, oneway=False)
         assert generate_lane_markings(secondary_wide, "test_level", pts_3d) == []
         assert generate_lane_markings(primary_narrow, "test_level", pts_3d) == []
+
+
+class TestGoldenSectorRoadOverhaul:
+    def _road(self, osm_id: int, points: np.ndarray, **overrides) -> Road:
+        base = {
+            "osm_id": osm_id,
+            "highway": "primary",
+            "points": points,
+            "width_m": 10.0,
+            "lanes": 2,
+            "surface": "asphalt",
+            "oneway": False,
+            "bridge": False,
+            "tunnel": False,
+            "layer": 0,
+            "name": "Test Road",
+            "maxspeed_kph": 90.0,
+            "priority": 80,
+            "drivable": True,
+            "material_key": "Asphalt",
+            "decal_material": "road_asphalt_2lane",
+        }
+        base.update(overrides)
+        return Road(**base)
+
+    def test_corner_filleting_rounds_bend_and_pins_junctions(self) -> None:
+        from ivanovo2beam.roads.network import round_road_corners
+
+        bent = self._road(501, np.array([[0.0, 0.0], [100.0, 0.0], [100.0, 100.0]]))
+        rounded = round_road_corners([bent])[0]
+        assert rounded.points.shape[0] > 5
+        # Cut distance inside corner (100, 0) must not exceed MAX_CUT_M (3.0m)
+        dists = np.hypot(rounded.points[:, 0] - 100.0, rounded.points[:, 1] - 0.0)
+        assert dists.min() <= 3.0 + 1e-6
+
+        # Shared 3-way junction vertex must remain pinned exact while main road curves smoothly
+        main = self._road(502, np.array([[0.0, 0.0], [50.0, 0.0], [100.0, 50.0]]))
+        side = self._road(503, np.array([[50.0, 0.0], [50.0, -50.0]]), highway="residential", width_m=6.0)
+        out_main, _ = round_road_corners([main, side])
+        assert out_main.points.shape[0] > 3
+        pinned_dists = np.hypot(out_main.points[:, 0] - 50.0, out_main.points[:, 1] - 0.0)
+        assert pinned_dists.min() < 1e-6
+
+        # Bridge corners are never rounded away from structural centerline
+        bridge = self._road(504, np.array([[0.0, 0.0], [20.0, 0.0], [20.0, 20.0]]), bridge=True)
+        out_bridge = round_road_corners([bridge])[0]
+        np.testing.assert_allclose(out_bridge.points, bridge.points)
+
+    def test_sanitize_road_nodes_drops_spikes_and_short_segments(self) -> None:
+        from ivanovo2beam.roads.build import sanitize_road_nodes
+
+        pts = np.array(
+            [
+                [0.0, 0.0, 1.0],
+                [0.05, 0.0, 1.0],       # < 0.15m spacing -> dropped
+                [50.0, 0.0, 1.0],
+                [52.0, 0.0, 1.0],       # spike out
+                [50.1, 0.001, 1.0],     # reversal back -> spike dot <= -0.99 dropped
+                [100.0, 0.0, 1.0],
+                [100.05, 0.0, 1.0],     # terminus preserved instead of 100.0
+            ]
+        )
+        clean = sanitize_road_nodes(pts)
+        assert clean.shape[0] >= 2
+        assert clean[-1, 0] == pytest.approx(100.05)
+        for a, b in itertools.pairwise(clean):
+            assert math.hypot(b[0] - a[0], b[1] - a[1]) >= 0.15 - 1e-6
+
+    def test_inverted_render_priority_stack_grass_edges_and_unpaved_exclusion(self) -> None:
+        from types import SimpleNamespace
+
+        from ivanovo2beam.beamng.level import SceneTree
+        from ivanovo2beam.roads.build import add_network_to_scene
+        from ivanovo2beam.roads.materials import build_road_materials_json
+
+        mats = build_road_materials_json("test_level")
+        assert "m_road_asphalt_edge_grass" in mats
+        for tex in mats["m_road_asphalt_edge_grass"]["Stages"][0].values():
+            if isinstance(tex, str) and tex.startswith("/"):
+                assert tex.endswith(".dds")
+
+        elev = np.full((8, 8), 10.0, dtype=np.float64)
+        build = SimpleNamespace(elevations=elev, origin_x=-50.0, origin_y=-50.0, cell_size_m=50.0)
+        tree = SceneTree(level_id="test_level")
+
+        primary = self._road(601, np.array([[0.0, 0.0], [100.0, 0.0]]), highway="primary", lanes=2, width_m=10.0)
+        secondary = self._road(602, np.array([[50.0, 0.0], [50.0, 80.0]]), highway="secondary", lanes=2, width_m=7.0)
+        track = self._road(
+            603,
+            np.array([[0.0, 40.0], [100.0, 40.0]]),
+            highway="track",
+            lanes=1,
+            width_m=4.0,
+            surface="gravel",
+            material_key="Gravel",
+            decal_material="m_dirt_road_gravels",
+        )
+        bridge = self._road(604, np.array([[120.0, 0.0], [170.0, 0.0]]), highway="primary", lanes=2, width_m=10.0, bridge=True)
+
+        add_network_to_scene(tree, [primary, secondary, track, bridge], build)
+        objs = tree.objects[("level_objects", "road_network")]
+        by_name = {o["name"]: o for o in objs}
+
+        assert by_name["way601"]["renderPriority"] == 13
+        assert by_name["way602"]["renderPriority"] == 14
+        assert by_name["way603"]["renderPriority"] == 15
+        assert by_name["way603"]["textureLength"] == pytest.approx(88.0)
+        assert by_name["way601"]["textureLength"] == pytest.approx(11.0)
+        # Junction end on way602 (50,0) gets 0 fade, dead-end (50,80) gets 2m fade
+        assert by_name["way602"]["startEndFade"] == [0.0, 2.0]
+
+        # Ground asphalt roads get reversed left (-normal) + forward right (+normal) grass edge decals;
+        # way601_edge_right (north side) is split around crossing way602 into two pieces!
+        edge_right_pieces = [o for k, o in by_name.items() if k.startswith("way601_edge_right")]
+        assert len(edge_right_pieces) == 2
+        assert "way601_edge_left" in by_name
+        assert by_name["way601_edge_left"]["renderPriority"] == 9
+        assert by_name["way601_edge_left"]["nodes"][0][0] > by_name["way601_edge_left"]["nodes"][-1][0]
+        assert all(p["renderPriority"] == 9 for p in edge_right_pieces)
+        assert not any(k.startswith("way603_edge_") for k in by_name)
+        assert not any(k.startswith("way603_mark_") for k in by_name)
+        assert not any(k.startswith("way604_edge_") for k in by_name)
+
+        # Edge lines (1) < center line (2) < grass edge (9) < primary (13) < secondary (14) < track (15)
+        edge_line_pieces = [o for k, o in by_name.items() if k.startswith("way601_line_left")]
+        center_pieces = [o for k, o in by_name.items() if k.startswith("way601_mark_1")]
+        assert edge_line_pieces and all(o["renderPriority"] == 1 for o in edge_line_pieces)
+        assert center_pieces and all(o["renderPriority"] == 2 for o in center_pieces)
+
+    def test_crossing_cuts_trim_markings_2m_clear_of_cross_street(self) -> None:
+        from ivanovo2beam.roads.build import build_carriageway_index
+
+        main = self._road(701, np.array([[0.0, 0.0], [120.0, 0.0]]), highway="primary", lanes=2, width_m=10.0)
+        cross = self._road(702, np.array([[60.0, -40.0], [60.0, 40.0]]), highway="secondary", lanes=2, width_m=8.0)
+        idx = build_carriageway_index([main, cross])
+        pts_3d = np.array([[0.0, 0.0, 0.0], [120.0, 0.0, 0.0]])
+
+        marks = generate_lane_markings(
+            main,
+            "test_level",
+            pts_3d,
+            is_start_junction=False,
+            is_end_junction=False,
+            carriageway_index=idx,
+            crossing_margin_m=2.0,
+        )
+        # Cross road has half_width=4.0 + margin=2.0 -> markings cut in x=[54..66], leaving 2 pieces per line (6 total)
+        assert len(marks) == 6
+        for m in marks:
+            xs = [n[0] for n in m["nodes"]]
+            assert not any(54.5 < x < 65.5 for x in xs)
+
+    def test_sample_road_profile_and_pin_junction_elevations(self) -> None:
+        from types import SimpleNamespace
+
+        from ivanovo2beam.roads.build import pin_junction_elevations, sample_road_profile_points
+
+        pts = np.array([[0.0, 0.0], [100.0, 0.0]])
+        res_xy, prof_z = sample_road_profile_points(
+            pts,
+            lambda xy: 100.0 + 0.02 * xy[:, 0],
+            sample_step_m=5.0,
+            smooth_window_m=20.0,
+            max_grade=0.06,
+        )
+        assert res_xy.shape[0] == 21
+        assert prof_z.shape[0] == 21
+        assert np.all(np.isfinite(prof_z))
+
+        # Two through arms and a side arm with an elevation mismatch at (50, 0)
+        arm_w = SimpleNamespace(
+            points=np.array([[0.0, 0.0], [50.0, 0.0]]),
+            surface_z=np.full(2, 100.0),
+            priority=80,
+            half_width_m=5.0,
+            grade_terrain=True,
+        )
+        arm_e = SimpleNamespace(
+            points=np.array([[50.0, 0.0], [100.0, 0.0]]),
+            surface_z=np.full(2, 100.0),
+            priority=80,
+            half_width_m=5.0,
+            grade_terrain=True,
+        )
+        side = SimpleNamespace(
+            points=np.array([[50.0, 0.0], [50.0, 2.5], [50.0, 50.0]]),
+            surface_z=np.array([103.0, 103.0, 102.0]),
+            priority=40,
+            half_width_m=3.5,
+            grade_terrain=True,
+        )
+        res = pin_junction_elevations([arm_w, arm_e, side], ramp_m=30.0)
+        assert res["junctions_pinned"] >= 1
+        # All three arms now meet at exact consensus elevation at (50, 0)
+        assert arm_w.surface_z[-1] == pytest.approx(arm_e.surface_z[0], abs=1e-6)
+        assert side.surface_z[0] == pytest.approx(arm_w.surface_z[-1], abs=1e-6)
+
+    def test_acute_y_junction_cuts_edge_grass_and_bridge_portal_keeps_markings(self) -> None:
+        from types import SimpleNamespace
+
+        from ivanovo2beam.beamng.level import SceneTree
+        from ivanovo2beam.roads.build import add_network_to_scene
+
+        elev = np.full((8, 8), 10.0, dtype=np.float64)
+        build = SimpleNamespace(elevations=elev, origin_x=-50.0, origin_y=-50.0, cell_size_m=50.0)
+        tree = SceneTree(level_id="test_level")
+
+        # Acute Y-junction at (100, 0): primary through + 18-deg secondary fork
+        west_main = self._road(801, np.array([[0.0, 0.0], [100.0, 0.0]]), highway="primary", lanes=2, width_m=10.0)
+        east_main = self._road(802, np.array([[100.0, 0.0], [200.0, 0.0]]), highway="primary", lanes=2, width_m=10.0)
+        y_branch = self._road(803, np.array([[40.0, 20.0], [100.0, 0.0]]), highway="secondary", lanes=2, width_m=8.0)
+        stub = self._road(804, np.array([[10.0, 40.0], [50.0, 40.0]]), highway="service", lanes=1, width_m=5.0)
+        bridge = self._road(805, np.array([[200.0, 0.0], [260.0, 0.0]]), highway="primary", lanes=2, width_m=10.0, bridge=True, layer=1)
+
+        add_network_to_scene(tree, [west_main, east_main, y_branch, stub, bridge], build)
+        objs = tree.objects[("level_objects", "road_network")]
+        by_name = {o["name"]: o for o in objs}
+
+        # Service stub dead-end fades over 4.0m smoothly
+        assert by_name["way804"]["startEndFade"] == [4.0, 4.0]
+        assert by_name["way805"]["startEndFade"] == [0.0, 0.0]
+
+        # Bridge portal end (200, 0) of east_main is not clipped 2m back: centerline reaches x=200
+        east_marks = [o for k, o in by_name.items() if k.startswith("way802_mark_1")]
+        assert east_marks
+        assert max(n[0] for m in east_marks for n in m["nodes"]) == pytest.approx(200.0, abs=0.1)
+
+        # Acute Y edge_grass on west_main (+normal = north side toward y_branch) stops before overlapping y_branch
+        west_edge_right = [o for k, o in by_name.items() if k.startswith("way801_edge_right")]
+        assert west_edge_right
+        # Near x=85..100 where y_branch comes within ~5m of west_main, edge_right is cleanly trimmed away
+        assert max(n[0] for e in west_edge_right for n in e["nodes"]) < 88.0
+
+    def test_bridge_and_markings_keep_uniform_2m_nodes_and_tight_bias(self) -> None:
+        # Curved 60m bridge deck matching way274102985 geometry (~4m steps, parabolic crest)
+        xs = np.linspace(7974.53, 7913.75, 16)
+        ys = np.linspace(-8308.59, -8304.70, 16)
+        t = np.linspace(0.0, 1.0, 16)
+        deck_z = 106.94 + 0.26 * (1.0 - (2.0 * t - 1.0) ** 2) - 0.11 * t
+        bridge = self._road(274102985, np.column_stack((xs, ys)), highway="primary", lanes=2, width_m=10.0, bridge=True, layer=1)
+
+        b_objs = road_to_decal_objects(bridge, "test_level", ground_z=deck_z)
+        assert len(b_objs) == 1
+        b_nodes = b_objs[0]["nodes"]
+        assert len(b_nodes) >= 25
+        for a, b in itertools.pairwise(b_nodes):
+            step = math.hypot(b[0] - a[0], b[1] - a[1])
+            assert 0.5 <= step <= 2.05
+
+        marks = generate_lane_markings(
+            bridge,
+            "test_level",
+            np.asarray(b_nodes, dtype=np.float64)[:, :3],
+            is_start_junction=False,
+            is_end_junction=False,
+        )
+        assert len(marks) == 3
+        for m in marks:
+            assert m["overObjects"] is True
+            assert m["decalBias"] == pytest.approx(0.005)
+            assert len(m["nodes"]) >= 25
+            for a, b in itertools.pairwise(m["nodes"]):
+                step = math.hypot(b[0] - a[0], b[1] - a[1])
+                assert 0.5 <= step <= 2.05
+                assert all(math.isfinite(v) for v in a) and all(math.isfinite(v) for v in b)
 
 

@@ -254,8 +254,19 @@ def cmd_install(args: argparse.Namespace) -> int:
             "It is normally %LOCALAPPDATA%\\BeamNG\\BeamNG.drive\\current"
         )
     target = userdata / "levels" / config.level.id
-    if target.exists() and not args.force:
-        raise ConfigError(f"{target} already exists; pass --force to overwrite")
+    if target.exists() or target.is_symlink():
+        if not args.force:
+            raise ConfigError(f"{target} already exists; pass --force to overwrite")
+        if target.is_dir() and not target.is_symlink():
+            # Purge children in-place instead of rmtree(target) + makedirs(target),
+            # avoiding Windows NTFS pending-delete WinError 5 on immediate recreate.
+            for child in list(target.iterdir()):
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+        else:
+            target.unlink()
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, target, dirs_exist_ok=True)
     _emit(
