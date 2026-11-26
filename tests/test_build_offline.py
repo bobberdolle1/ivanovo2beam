@@ -646,3 +646,60 @@ class TestBuildRegressions:
         spawns = [json.loads(line) for line in spawn_file.read_text(encoding="utf-8").splitlines() if line.strip()]
         assert len(spawns) == 1
         assert spawns[0]["name"] == "spawn_default"
+
+    def test_clip_ground_decal_roads_to_bounds(self) -> None:
+        from ivanovo2beam.build import _clip_ground_decal_roads_to_bounds
+
+        objs = [
+            {
+                "class": "DecalRoad",
+                "name": "inside",
+                "overObjects": False,
+                "position": [10.0, 10.0, 100.0],
+                "nodes": [[10.0, 10.0, 100.0, 7.0], [50.0, 50.0, 101.0, 7.0]],
+            },
+            {
+                "class": "DecalRoad",
+                "name": "outside",
+                "overObjects": False,
+                "position": [-200.0, -200.0, 100.0],
+                "nodes": [[-200.0, -200.0, 100.0, 7.0], [-50.0, -50.0, 100.0, 7.0]],
+            },
+            {
+                "class": "DecalRoad",
+                "name": "straddle",
+                "overObjects": False,
+                "position": [-50.0, 20.0, 100.0],
+                "nodes": [[-50.0, 20.0, 100.0, 7.0], [50.0, 20.0, 102.0, 7.0]],
+            },
+            {
+                "class": "DecalRoad",
+                "name": "reenter",
+                "overObjects": False,
+                "position": [20.0, 80.0, 100.0],
+                "nodes": [
+                    [20.0, 80.0, 100.0, 7.0],
+                    [20.0, 120.0, 100.0, 7.0],
+                    [60.0, 120.0, 100.0, 7.0],
+                    [60.0, 80.0, 100.0, 7.0],
+                ],
+            },
+            {
+                "class": "DecalRoad",
+                "name": "bridge_over",
+                "overObjects": True,
+                "position": [-10.0, 20.0, 105.0],
+                "nodes": [[-10.0, 20.0, 105.0, 7.0], [110.0, 20.0, 105.0, 7.0]],
+            },
+        ]
+        kept, exported, node_total = _clip_ground_decal_roads_to_bounds(
+            objs, "lvl", (0.0, 0.0, 100.0, 100.0)
+        )
+        names = [o["name"] for o in kept]
+        assert names == ["inside", "straddle", "reenter_c0", "reenter_c1", "bridge_over"]
+        assert exported == 5
+        assert node_total == 10
+        straddle = next(o for o in kept if o["name"] == "straddle")
+        assert straddle["nodes"][0][0] == pytest.approx(0.0)
+        assert straddle["nodes"][0][2] == pytest.approx(101.0)
+        assert straddle["position"][0] == pytest.approx(0.0)

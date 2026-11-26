@@ -379,6 +379,8 @@ class ProjectConfig:
     level: LevelSpec | None
     cache_dir: Path
     build_dir: Path
+    buildings_max_buildings: int | None = None
+    vegetation_max_trees: int = 45000
 
     # ------------------------------------------------------------- derived paths
 
@@ -467,6 +469,15 @@ class ProjectConfig:
 
         cache_dir = Path(raw.get("cache", {}).get("dir", DEFAULT_CACHE_DIR))
         build_dir = Path(raw.get("build", {}).get("dir", DEFAULT_BUILD_DIR))
+        buildings_cfg = raw.get("buildings") or {}
+        vegetation_cfg = raw.get("vegetation") or {}
+        raw_max_buildings = buildings_cfg.get("max_buildings")
+        buildings_max = None if raw_max_buildings is None else int(raw_max_buildings)
+        vegetation_max = int(vegetation_cfg.get("max_trees", 45000))
+        if buildings_max is not None and buildings_max < 0:
+            raise ConfigError(f"{source}: buildings.max_buildings must be >= 0, got {buildings_max}")
+        if vegetation_max < 0:
+            raise ConfigError(f"{source}: vegetation.max_trees must be >= 0, got {vegetation_max}")
 
         return cls(
             root=base,
@@ -478,14 +489,16 @@ class ProjectConfig:
             terrain_resolution_m=float(terrain.get("resolution_m", 30.0)),
             sectors={"size_m": sector_size},
             roads=RoadSettings.from_config(raw.get("roads")),
-            buildings_enabled=bool((raw.get("buildings") or {}).get("enabled", True)),
-            vegetation_enabled=bool((raw.get("vegetation") or {}).get("enabled", False)),
+            buildings_enabled=bool(buildings_cfg.get("enabled", True)),
+            vegetation_enabled=bool(vegetation_cfg.get("enabled", False)),
             water_enabled=bool((raw.get("water") or {}).get("enabled", True)),
             railways_enabled=bool((raw.get("railways") or {}).get("enabled", True)),
             bridges_enabled=bool((raw.get("bridges") or {}).get("enabled", True)),
             level=level,
             cache_dir=(base / cache_dir) if not cache_dir.is_absolute() else cache_dir,
             build_dir=(base / build_dir) if not build_dir.is_absolute() else build_dir,
+            buildings_max_buildings=buildings_max,
+            vegetation_max_trees=vegetation_max,
         )
 
     # ------------------------------------------------------------------ helpers

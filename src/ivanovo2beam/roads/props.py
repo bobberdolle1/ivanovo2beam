@@ -728,6 +728,22 @@ def add_roadside_props_to_scene(
     # 2. OSM Crosswalk Signs & Bus Stops (placed before periodic poles so stops are never displaced)
     if osm_data is not None and projection is not None:
         paved_candidates = [r for r in drivable_roads if not r.bridge and r.highway in _SIGNED_HIGHWAYS]
+        cand_cell = 32.0
+        cand_grid: dict[tuple[int, int], list[tuple[Road, float, float, float, float]]] = {}
+        for r in paved_candidates:
+            pts = r.points
+            for i in range(pts.shape[0] - 1):
+                ax, ay = float(pts[i, 0]), float(pts[i, 1])
+                bx, by = float(pts[i + 1, 0]), float(pts[i + 1, 1])
+                seg = (r, ax, ay, bx, by)
+                gx0 = math.floor(min(ax, bx) / cand_cell)
+                gx1 = math.floor(max(ax, bx) / cand_cell)
+                gy0 = math.floor(min(ay, by) / cand_cell)
+                gy1 = math.floor(max(ay, by) / cand_cell)
+                for gx in range(gx0, gx1 + 1):
+                    for gy in range(gy0, gy1 + 1):
+                        cand_grid.setdefault((gx, gy), []).append(seg)
+
         for nid, tags in osm_data.node_tags.items():
             hw_tag = tags.get("highway", "")
             pt_tag = tags.get("public_transport", "")
@@ -739,20 +755,20 @@ def add_roadside_props_to_scene(
             if lon_lat is None:
                 continue
             wx, wy = projection.geo_to_world(lon_lat[0], lon_lat[1])
+            cx_cell = math.floor(wx / cand_cell)
+            cy_cell = math.floor(wy / cand_cell)
             best: tuple[float, Road, float, float, float, float] | None = None
-            for r in paved_candidates:
-                pts = r.points
-                for i in range(pts.shape[0] - 1):
-                    ax, ay = float(pts[i, 0]), float(pts[i, 1])
-                    bx, by = float(pts[i + 1, 0]), float(pts[i + 1, 1])
-                    dx, dy = bx - ax, by - ay
-                    len2 = dx * dx + dy * dy
-                    t = max(0.0, min(1.0, ((wx - ax) * dx + (wy - ay) * dy) / len2)) if len2 > 0.0 else 0.0
-                    cx, cy = ax + t * dx, ay + t * dy
-                    d = math.hypot(cx - wx, cy - wy)
-                    if d < 28.0 and (best is None or d < best[0]):
-                        slen = math.sqrt(len2) if len2 > 1e-9 else 1.0
-                        best = (d, r, cx, cy, dx / slen, dy / slen)
+            for gx in range(cx_cell - 1, cx_cell + 2):
+                for gy in range(cy_cell - 1, cy_cell + 2):
+                    for r, ax, ay, bx, by in cand_grid.get((gx, gy), ()):
+                        dx, dy = bx - ax, by - ay
+                        len2 = dx * dx + dy * dy
+                        t = max(0.0, min(1.0, ((wx - ax) * dx + (wy - ay) * dy) / len2)) if len2 > 0.0 else 0.0
+                        cx, cy = ax + t * dx, ay + t * dy
+                        d = math.hypot(cx - wx, cy - wy)
+                        if d < 28.0 and (best is None or d < best[0]):
+                            slen = math.sqrt(len2) if len2 > 1e-9 else 1.0
+                            best = (d, r, cx, cy, dx / slen, dy / slen)
             if best is None:
                 continue
             _, road, cx, cy, tx, ty = best

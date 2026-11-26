@@ -1,0 +1,90 @@
+# ivanovo2beam — P2 Production Corridor: Ivanovo -> Kokhma -> Shuya V2 (~33 km).
+#
+# Architecture selected from live BeamNG 0.40.6.0 D3D12 P0 vs P1 benchmarks:
+#   Single TerrainBlock (8192 x 8192 @ 4.0 m = 32.764 x 32.764 km, 192 MiB .ter)
+#
+# Why Single 8192x8192 @ 4.0 m wins over Hybrid & Multi-TerrainBlock:
+#   - 2x terrain grid resolution vs legacy ivanovo_shuya.yaml (4096 @ 8.0 m)
+#   - Preserves native 5-channel PBR TerrainMaterial blending & 8-layer 3D GroundCover
+#     right up to road shoulders (no P1 baked checkerboard squares or sawtooth seams)
+#   - P0 benchmarked +7.9% higher avg FPS, +14.0% higher 1% low, -40% lower collision
+#     memory, faster cold/warm load, and 0 damage at 98 km/h vs P1 Hybrid
+#   - Single TerrainBlock avoids Torque3D's hard multi-TerrainBlock raycast,
+#     GroundCover, and cross-seam DecalRoad bugs (see docs/p2_multiblock_experiment.md)
+#
+# Coordinate parity:
+#   Preserves Ivanovo Oblast 1:1 Transverse Mercator origin [40.97393, 56.99987]
+#   so every coordinate aligns 1:1 with configs/golden_sector.yaml.
+
+region:
+  id: ivanovo_oblast
+  title: Ivanovo Oblast
+  bbox:
+    west: 39.00
+    south: 56.10
+    east: 43.20
+    north: 57.80
+  projection:
+    central_meridian: 41.10
+    latitude_of_origin: 57.00
+    origin: [40.97393, 56.99987]
+
+terrain:
+  source: copernicus_glo30
+  resolution_m: 30
+
+sectors:
+  size_m: 1000
+
+roads:
+  simplify_tolerance_m: 0.5
+  junction_snap_m: 0.5
+  # 14.0 m graded corridor half-width ensures >=3.5 grid cells per side at 4.0 m spacing.
+  corridor_half_width_m: 14.0
+  max_grade: 0.08
+
+level:
+  id: ivanovo_shuya_v2
+  title: "Ivanovo 1:1 - Ivanovo-Kokhma-Shuya Corridor V2 (Р152)"
+  # Midpoint of Ivanovo (40.97393, 56.99987) and Shuya (41.36444, 56.84861).
+  center: [41.16958, 56.92439]
+  # Spawn on Ivanovo-Shuya Highway (Кохомское шоссе / выезд на Шую).
+  spawn: [41.0370, 56.9530]
+  terrain:
+    grid_size: 8192
+    square_size_m: 4.0
+  ground_margin_m: 8.0
+  time_of_day: 0.5
+  axis_tilt: 23.44
+
+# Golden Sector V2 feature parity with calibrated 32.764 km budgets
+buildings:
+  enabled: true
+  # Selective largest 12,000 footprints across Ivanovo, Kokhma, and Shuya
+  # (keeps all industrial, commercial, civic, apartment, and main residential
+  # blocks while capping .dae chunk count and static collision inside budget).
+  max_buildings: 12000
+
+vegetation:
+  enabled: true
+  # 2.67x Golden Sector's 45,000 zero-copy .link stems so Kokhma, Uvod, and
+  # P152 approaches stay densely wooded across 1,073.5 km2, plus 8 GroundCover layers.
+  max_trees: 120000
+
+water:
+  enabled: true
+
+railways:
+  enabled: true
+
+bridges:
+  enabled: true
+
+satellite:
+  enabled: false
+
+cache:
+  dir: .cache
+
+build:
+  dir: build

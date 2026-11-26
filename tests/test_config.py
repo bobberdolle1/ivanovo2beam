@@ -206,6 +206,7 @@ class TestProjectConfig:
             "ivanovo_oblast.yaml",
             "ivanovo_mvp.yaml",
             "ivanovo_shuya.yaml",
+            "ivanovo_shuya_v2.yaml",
             "golden_sector.yaml",
             "test_sector.yaml",
         ],
@@ -298,6 +299,21 @@ class TestProjectConfig:
         assert config.level.spawn_lat == pytest.approx(56.92700)
         assert config.buildings_enabled is True
         assert config.vegetation_enabled is True
+        assert config.water_enabled is True
+        assert config.bridges_enabled is True
+        assert config.railways_enabled is True
+
+    def test_ivanovo_shuya_v2_config_parameters(self) -> None:
+        config = ProjectConfig.load(CONFIGS / "ivanovo_shuya_v2.yaml")
+        assert config.level is not None
+        assert config.level.id == "ivanovo_shuya_v2"
+        assert config.level.grid.grid_size == 8192
+        assert config.level.grid.square_size_m == pytest.approx(4.0)
+        assert config.level.grid.extent_m == pytest.approx(32764.0)
+        assert config.buildings_enabled is True
+        assert config.buildings_max_buildings == 12000
+        assert config.vegetation_enabled is True
+        assert config.vegetation_max_trees == 120000
         assert config.water_enabled is True
         assert config.bridges_enabled is True
         assert config.railways_enabled is True

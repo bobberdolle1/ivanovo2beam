@@ -36,6 +36,7 @@ from ivanovo2beam.beamng.level import (
     add_spawn_point,
     build_info_json,
     build_sun_and_sky,
+    stable_uuid,
     write_level_files,
 )
 from ivanovo2beam.beamng.materials import (
@@ -178,6 +179,88 @@ class BuildResult:
 # ---------------------------------------------------------------------------
 # Small file writers
 # ---------------------------------------------------------------------------
+
+
+def _clip_ground_decal_roads_to_bounds(
+    objects: list[dict[str, Any]],
+    level_id: str,
+    bounds: tuple[float, float, float, float],
+) -> tuple[list[dict[str, Any]], int, int]:
+    """Clip ground-projected ``DecalRoad``s (``overObjects=False``) strictly inside terrain bounds.
+
+    Roads extracted with ``ROAD_RENDER_MARGIN_M`` remain available for grading
+    and crossing cuts, while clipping exported ground decals avoids BeamNG
+    ``SceneStaticDecalRoadManager`` 2048 m / ``inf`` packing errors off-terrain.
+    """
+    from shapely.geometry import LineString, box
+
+    min_x, min_y, max_x, max_y = bounds
+    clip_box = box(min_x, min_y, max_x, max_y)
+    kept: list[dict[str, Any]] = []
+    exported = 0
+    node_total = 0
+
+    for obj in objects:
+        if obj.get("class") != "DecalRoad" or bool(obj.get("overObjects")):
+            kept.append(obj)
+            if obj.get("class") == "DecalRoad":
+                exported += 1
+                node_total += len(obj.get("nodes") or [])
+            continue
+
+        raw_nodes = obj.get("nodes") or []
+        if len(raw_nodes) < 2:
+            continue
+        xs = [float(n[0]) for n in raw_nodes]
+        ys = [float(n[1]) for n in raw_nodes]
+        if min(xs) >= min_x and max(xs) <= max_x and min(ys) >= min_y and max(ys) <= max_y:
+            kept.append(obj)
+            exported += 1
+            node_total += len(raw_nodes)
+            continue
+        if max(xs) < min_x or min(xs) > max_x or max(ys) < min_y or min(ys) > max_y:
+            continue
+
+        width = float(raw_nodes[0][3])
+        line = LineString([(float(n[0]), float(n[1]), float(n[2])) for n in raw_nodes])
+        clipped = line.intersection(clip_box)
+        if clipped.is_empty:
+            continue
+        parts = [clipped] if isinstance(clipped, LineString) else [
+            g for g in getattr(clipped, "geoms", ()) if isinstance(g, LineString) and not g.is_empty
+        ]
+        base_name = str(obj.get("name") or obj.get("persistentId") or "road")
+        for idx, part in enumerate(parts):
+            coords = list(part.coords)
+            if len(coords) < 2 or part.length < 0.5:
+                continue
+            dedup: list[list[float]] = []
+            for c in coords:
+                cx, cy = round(float(c[0]), 5), round(float(c[1]), 5)
+                cz = round(float(c[2]) if len(c) >= 3 else float(raw_nodes[0][2]), 5)
+                if dedup and math.hypot(cx - dedup[-1][0], cy - dedup[-1][1]) < 0.15:
+                    continue
+                dedup.append([cx, cy, cz, width])
+            if len(dedup) < 2:
+                continue
+            seg_len = sum(
+                math.hypot(dedup[i + 1][0] - dedup[i][0], dedup[i + 1][1] - dedup[i][1])
+                for i in range(len(dedup) - 1)
+            )
+            if seg_len < 0.5:
+                continue
+            clone = dict(obj)
+            clone["nodes"] = dedup
+            clone["position"] = dedup[0][:3]
+            if len(parts) > 1:
+                seg_name = f"{base_name}_c{idx}"
+                clone["name"] = seg_name
+                clone["persistentId"] = stable_uuid(level_id, "DecalRoad", seg_name)
+            kept.append(clone)
+            exported += 1
+            node_total += len(dedup)
+
+    return kept, exported, node_total
 
 
 def build_terrain_json(
@@ -622,6 +705,7 @@ def build_level(
     durations["railways"] = time.perf_counter() - stage
 
     # -- building footprints -----------------------------------------------
+    eff_max_buildings = max_buildings if max_buildings is not None else config.buildings_max_buildings
     stage = time.perf_counter()
     buildings: list[Any] = []
     footprint_stats: dict[str, Any] = {}
@@ -632,7 +716,7 @@ def build_level(
             config.projection,
             clip_bounds=clip_bounds,
             simplify_tolerance_m=building_simplify_m,
-            max_buildings=max_buildings,
+            max_buildings=eff_max_buildings,
         )
         footprint_stats = footprints.as_dict()
         if footprints.skipped_relations:
@@ -876,7 +960,21 @@ def build_level(
                         export_stats["exported"] += 1
                         export_stats["nodes"] += len(mark_obj["nodes"])  # type: ignore[arg-type]
 
+    # Clip ground-projected DecalRoads strictly inside the TerrainBlock so
+    # margin roads used for grading/cuts never trigger BeamNG 2048m/inf errors.
+    road_objs = tree.objects.get(("level_objects", "road_network"))
+    if road_objs:
+        clipped_objs, clipped_count, clipped_nodes = _clip_ground_decal_roads_to_bounds(
+            road_objs,
+            level.id,
+            (origin_x + 0.5, origin_y + 0.5, origin_x + extent - 0.5, origin_y + extent - 0.5),
+        )
+        tree.objects[("level_objects", "road_network")] = clipped_objs
+        export_stats["exported"] = clipped_count
+        export_stats["nodes"] = clipped_nodes
+
     # -- roadside props (signs, poles, bus stops, guardrails) --------------
+    report(0.75, "placing roadside props and guardrails")
     road_prop_stats = add_roadside_props_to_scene(
         tree,
         roads,
@@ -976,7 +1074,7 @@ def build_level(
             build,
             level_id=level.id,
             level_dir=level_dir,
-            max_instances=max_buildings,
+            max_instances=eff_max_buildings,
             batch_chunks=True,
             terrain_bounds=bld_bounds,
         )
@@ -1017,6 +1115,7 @@ def build_level(
                 buildings=buildings,
                 water=water_items,
                 railways=railways,
+                max_trees=config.vegetation_max_trees,
             )
             for obj in veg_objects:
                 tree.add_object(("level_objects", "vegetation"), obj)
@@ -1026,9 +1125,10 @@ def build_level(
     durations["vegetation"] = time.perf_counter() - stage
 
     # -- spawn points ------------------------------------------------------
-    if level.id == "ivanovo_shuya":
+    if level.id in {"ivanovo_shuya", "ivanovo_shuya_v2"}:
         spawn_presets = [
             {"key": "player_spawn", "name": "spawn_default", "title": "Ivanovo-Shuya Highway (Кохомское шоссе / Выезд на Шую)", "geo": (41.0370, 56.9530)},
+            {"key": "spawn_kokhma_se", "name": "spawn_kokhma_se", "title": "Kokhma SE / Uvod River Crossing (Р152 / Мост через Уводь)", "geo": (41.10000, 56.92700)},
             {"key": "spawn_kitovo", "name": "spawn_kitovo", "title": "Kitovo Highway Straightaway (Скоростная прямая у Китово)", "geo": (41.3000, 56.8650)},
             {"key": "spawn_shuya", "name": "spawn_shuya", "title": "Entrance to Shuya (Въезд в г. Шуя, Р152)", "geo": (41.3500, 56.8500)},
             {"key": "spawn_forest", "name": "spawn_forest", "title": "Forest Highway Section (Лесной участок трассы)", "geo": (41.1700, 56.9150)},
