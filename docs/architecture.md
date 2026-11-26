@@ -69,10 +69,10 @@ Each stage is a separate module, cacheable on disk, and callable from the CLI.
 | `vegetation/` (`worldcover.py`, `extract.py`, `forest.py`, `groundcover.py`) | ESA WorldCover 2021 + OSM woods → keepout masks, organic tapered `.link`/`.forest4.json` trees, native 8-layer `GroundCover` | `numpy`, `shapely`, `Pillow` |
 | `buildings/` (`footprints.py`, `mesh.py`, `export.py`) | Optional OSM footprints, terrain-bounds clipping, 500 m chunked Collada blocks with slope skirts & PBR materials | `numpy`, `shapely` |
 | `beamng/` (`ter.py`, `level.py`, `materials.py`, `preview.py`) | `.ter` v9 codec, `SceneTree` writer, `LevelInfo` (`decalBias`), 14-surface terrain PBR library + isotropic FBM base maps | `numpy` |
-| `sectors/` (`grid.py`, `multiblock.py`) | World ↔ signed square sector grid mapping & P2 adjacent multi-`TerrainBlock` test harness | `numpy`, `shapely` |
+| `sectors/` (`grid.py`, `multiblock.py`, `hybrid.py`) | World ↔ signed square sector grid mapping, P2 multi-`TerrainBlock` experiment & P1 RTIN hybrid corridor prototype | `numpy`, `shapely` |
 | `validation/level.py` | Structural checks: scene tree, `.ter`/`.terrain.json` (`HOLE=255` safe), scale, base + extra materials | `numpy` |
 | `provenance.py` | SHA-256 input manifests and ODbL / Copernicus attribution notices | stdlib |
-| `build.py` & `cli.py` | End-to-end orchestration (`info`, `download`, `build`, `package`, `install`, `validate`) | all of the above |
+| `build.py` & `cli.py` | End-to-end orchestration (`info`, `download`, `build`, `package`, `install`, `validate`), `DecalRoad` bounds clipping, optional config caps | all of the above |
 
 Dependency arrows point one way (`beamng/` never imports `roads/` or
 `terrain/`; `build.py` wires stages together), keeping every subsystem testable
@@ -148,16 +148,24 @@ from BeamNG's `east_coast_usa` and `italy` levels are referenced via zero-copy
 `.link` pointers (`prepare_linked_species`) when a BeamNG installation is
 detected; no game asset bytes are duplicated into the repository or mod `.zip`.
 
-### Level configurations: `golden_sector` vs `ivanovo_shuya`
+### Level configurations: `golden_sector`, `ivanovo_shuya_v2`, and scaling targets
 
 - `configs/golden_sector.yaml` (`ivanovo_golden_sector`): `4096 × 4096` @ `1.0 m`
   (`4.095 km` per side) centered on the Kokhma SE / Р152 (`24К-260`) Uvod river
   crossing, sharing Ivanovo Oblast's Transverse Mercator origin so every
-  coordinate matches the corridor 1:1. Used for rapid high-resolution builds,
-  physics/bridge verification, and live D3D12 benchmarking.
-- `configs/ivanovo_shuya.yaml` (`ivanovo_shuya`): `4096 × 4096` @ `8.0 m`
-  (`32.760 km` per side) covering the full ~29 km intercity corridor between
-  Ivanovo and Shuya.
+  coordinate matches the corridor 1:1. Used as the high-resolution regression
+  baseline and live D3D12 benchmark.
+- `configs/ivanovo_shuya_v2.yaml` (`ivanovo_shuya_v2`): `8192 × 8192` @ `4.0 m`
+  (`32.764 km` per side, `1,073.5 km²`) covering the continuous ~33 km
+  Ivanovo–Kokhma–Shuya corridor with Golden Sector V2 fidelity (`120,000` `.link`
+  trees, `8` `GroundCover` layers, `12,000`-building selective cap, `82` 3D
+  bridges, `23,711` roadside props) selected from the P0/P1/P2 scaling study
+  ([`docs/p3_scaling_study.md`](p3_scaling_study.md)).
+- `configs/ivanovo_shuya.yaml` (`ivanovo_shuya`): legacy `4096 × 4096` @ `8.0 m`
+  (`32.760 km` per side) lightweight corridor configuration.
+- `configs/experiment_single_8192_2m.yaml` & `configs/experiment_hybrid_corridor.yaml`:
+  apples-to-apples `16.38 km` P0 single-block vs P1 hybrid (base `TerrainBlock` +
+  RTIN Collada corridor chunks) scaling benchmark configs.
 
 ## Determinism
 
@@ -180,7 +188,10 @@ material file (`art/terrains/main.materials.json`, `art/road/main.materials.json
 `art/forest/main.materials.json`, and `art/shapes/**/main.materials.json`)
 including duplicate `persistentId` detection and base-game asset resolution.
 
-Live engine verification uses `scripts/benchmark_level.py` against BeamNG.drive's
-HTTP MCP telemetry (`--run`) to measure cold/warm load times, VRAM, RAM, avg FPS,
-1% low (`$fps::p99`), vehicle `vel.z` suspension smoothness across bridges, and
-`beamng.log` error counts. See [performance.md](performance.md).
+Live engine verification uses [`scripts/benchmark_level.py`](../scripts/benchmark_level.py)
+and [`scripts/qa_scaling_experiment.py`](../scripts/qa_scaling_experiment.py)
+against BeamNG.drive's HTTP MCP telemetry (`--run`) to measure cold/warm load
+times, VRAM, RAM, avg FPS, 1% low (`$fps::p99`), vehicle `vel.z` suspension
+smoothness, `castRayStatic` collision accuracy, `navgraph` continuity, and
+`beamng.log` error counts. See [performance.md](performance.md) and
+[p3_scaling_study.md](p3_scaling_study.md).

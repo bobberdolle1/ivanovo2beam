@@ -1,8 +1,9 @@
-# Project Status — Golden Sector V2 Sign-Off
+# Project Status — Golden Sector V2 & 33 km Corridor (`ivanovo_shuya_v2`) Sign-Off
 
 **Date:** 2026-11-26  
-**Target:** `ivanovo_golden_sector` (`configs/golden_sector.yaml` — Kokhma SE / Р152 `24К-260` Uvod River Crossing)  
-**Experiment:** `ivanovo_dual_terrain_exp` (`configs/experiment_dual_terrain.yaml` — P2 adjacent dual-`TerrainBlock` scaling test)  
+**Baseline:** `ivanovo_golden_sector` (`configs/golden_sector.yaml` — Kokhma SE / Р152 `24К-260` Uvod River Crossing, `4096×4096 @ 1.0 m`)  
+**Corridor V2:** `ivanovo_shuya_v2` (`configs/ivanovo_shuya_v2.yaml` — Ivanovo–Kokhma–Shuya Р152, `8192×8192 @ 4.0 m = 32.764 × 32.764 km`)  
+**Scaling Experiments:** `ivanovo_dual_terrain_exp` (P2 Dual-Block), `ivanovo_single_8192_2m` (P0), `ivanovo_hybrid_corridor` (P1)  
 **Status:** **Verified on `1920×1080 Borderless, Overall: Ultra` (D3D12 + DLSS)** (`2560×1440`: **`NOT_TESTED`** due to `1920×1080` physical monitor cap)
 
 ---
@@ -11,59 +12,62 @@
 
 | Check | Result | Notes |
 |---|---|---|
-| Offline test suite (`pytest tests/ -m "not network"`) | **777 passed, 3 deselected** | Live-network Overpass/DEM tests excluded |
-| Level validator (`ivanovo2beam validate --beamng`) | **9 passed, 0 failed, 0 warnings** | `2,818` objects in `12` files / `11` groups, `45` local `.dae` meshes, `109` extra material entries, `350` referenced textures, `0` missing |
-| Live D3D12 `beamng.log` level scan | **0 level/material/forest/GroundCover errors** | `0` `GroundCover`, `ForestData`, `WaterBlock`, `buildings`, `road_props`, `bridge`, or `WarningMaterial` errors (`ActionMap`/CEF/`d3d12ma` exit noise is stock game; one off-terrain western stub `way274102983` AABB warning only) |
-| High-speed both-ways Р152 drive (`qa_v2_live.py`, `etk800`) | **Pass (`damageSum = 0`)** | Eastbound `max = 176.19 km/h` (`avg = 103.54`, `bridge = 173.04 km/h`); Westbound `max = 178.60 km/h` (`avg = 77.72`, `bridge = 151.48 km/h`); `damageSum = 0` both ways |
-| P2 Dual-`TerrainBlock` experiment (`ivanovo_dual_terrain_exp`) | **Empirically tested live** | `0.000 m` seam ΔZ & `0` layer mismatches offline; live BeamNG 0.40 engine proved single-`TerrainBlock` binding for `castRayStatic`, `core_terrain`, `GroundCover`, and `DecalRoad` across seams (see [`docs/p2_multiblock_experiment.md`](p2_multiblock_experiment.md)) |
+| Offline test suite (`pytest tests/ -m "not network"`) | **All passed (exit 0)** | Includes P0/P1/P2/corridor config, bounds-clipping, and offline build tests (3 live-network tests excluded) |
+| Golden Sector V2 (`ivanovo_golden_sector`) validate & live D3D12 | **9/9 passed (`0` warnings)** | `143.17 FPS` avg / `111.07 FPS` 1% low (`4,575 MiB` VRAM), `damageSum = 0` up to `178.63 km/h` |
+| P0 Single Terrain (`ivanovo_single_8192_2m`, `8192@2m`) | **9/9 passed, live verified** | `105.50 FPS` avg / `89.64 FPS` 1% low (`4,930 MiB` VRAM), `6.37 km` `etk800` drive with `damageSum = 0` |
+| P1 Hybrid (`ivanovo_hybrid_corridor`, `4096@4m + 1m DAE`) | **14/14 passed, live verified** | `97.82 FPS` avg / `78.66 FPS` 1% low (`5,021–5,162 MiB` VRAM); `overObjects=true` works on `Visible Mesh`, but loses `GroundCover` and shows baked checkerboard/sawtooth seams |
+| P2 Dual-`TerrainBlock` (`ivanovo_dual_terrain_exp`) | **Empirically engine-limited** | `0.000 m` seam ΔZ offline; live BeamNG 0.40 binds `castRayStatic`, `core_terrain`, `GroundCover`, and `DecalRoad`s to block 0 ([`p2_multiblock_experiment.md`](p2_multiblock_experiment.md)) |
+| **P2 33 km Corridor (`ivanovo_shuya_v2`, `8192@4m`)** | **9/9 passed, live verified** | `80.32 FPS` avg / `48.68 FPS` 1% low (`6,333 MiB` VRAM, `78.35 s` cold load); `25.229 km` unbroken Ivanovo→Shuya `navgraph` (`486` nodes, `0` `z=0`); `0` `GroundCover`/`ForestData`/`TerrainBlock`/`WarningMaterial`/`checkBins` errors |
 
 ---
 
-## Live Benchmark Comparison (V2 vs V1 vs MapNG Baseline)
+## Live Benchmark Comparison (V2, P0, P1, P2 Corridor V2 vs MapNG Baseline)
 
 Measured on **AMD Ryzen 5 7500F / NVIDIA GeForce RTX 3080 10 GB / 31.6 GB RAM**,
 **BeamNG.drive 0.40.6.0 D3D12**, `1920×1080 Borderless, Overall: Ultra`, DLSS:
 
-| Metric | Golden Sector V2 Cold (`v2_cold_benchmark.json`) | Golden Sector V2 Warm (`v2_warm_benchmark.json`) | Golden Sector V1 Warm (DLSS) | `mapng_golden_sector` (`a5ed648`) |
-|---|---|---|---|---|
-| Load time (`worldReadyState` / log) | `27.89 s` (`35.77 s` wall) | `21.82 s` (`35.79 s` wall) | `21.60 s` (`26.59 s` cold) | `37.7 s` warm / `75.6 s` cold |
-| Average FPS (`$fps::instantaneous`) | **`133.39 FPS`** | **`134.39 FPS`** | `133.09 FPS` | `47.27 FPS` |
-| 1% low FPS (`$fps::p99`) | **`106.03 FPS`** | **`108.70 FPS`** | `114.42 FPS` | `35.58 FPS` |
-| Min sampled FPS | `105.48 FPS` | `106.48 FPS` | — | — |
-| GPU VRAM peak (`nvidia-smi`) | **`4,729.0 MiB`** | **`4,666.0 MiB`** | `3,965.0 MiB` | `8,893 MiB` |
-| Process RAM (`WorkingSet` / `Private`) | `4,057.1 MiB` / `7,285.1 MiB` | `3,971.0 MiB` / `7,127.6 MiB` | `3,809.3 MiB` / `6,658.6 MiB` | — |
-| Static / Physics collision | `63.56 MB` / `53.32 MB` | `63.56 MB` / `53.32 MB` | `31.73 MB` / `26.38 MB` | — |
-| Visual content | 14 terrain PBR + 8 `GroundCover` (`322k` max) + 30 forest species (`45k`) + `1,426` buildings (`34` chunks) + `604` roadside props | same | Roads, 2 bridges, 26 forest species (no `GroundCover`, buildings, or roadside props) | Static baked meshes (`groundAsModels`) |
-| Mod ZIP size | **`32.66 MiB`** (`34,245,409 B`) | **`32.66 MiB`** | `30.86 MiB` | — |
-| `2560×1440` physical display | **`NOT_TESTED`** (monitor cap `1920×1080`) | **`NOT_TESTED`** | **`NOT_TESTED`** | — |
+| Metric | Golden Sector V2 Warm (`golden_sector_v2_regression.json`) | P0 Single `8192@2m` Warm (`p0_single_8192_2m.json`) | P1 Hybrid `4m+1m` Warm (`p1_hybrid_corridor.json`) | **P2 Corridor V2 `8192@4m` Cold (`p2_ivanovo_shuya_v2.json`)** | `mapng_golden_sector` (`a5ed648`) |
+|---|---|---|---|---|---|
+| World extent | `4.095 × 4.095 km` | `16.382 × 16.382 km` | `16.380 × 16.380 km` | **`32.764 × 32.764 km`** | `4.096 × 4.096 km` |
+| Load time (`world_ready_s`) | `24.30 s` (`27.89 s` cold) | `27.72 s` (`37.08 s` cold) | `33.05 s` (`52.98 s` cold) | **`78.35 s`** (`78.49 s` wall) | `37.7 s` warm / `75.6 s` cold |
+| Average FPS (`$fps::instantaneous`) | **`143.17 FPS`** | **`105.50 FPS`** | `97.82 FPS` | **`80.32 FPS`** | `47.27 FPS` |
+| 1% low FPS (`$fps::p99`) | **`111.07 FPS`** | **`89.64 FPS`** | `78.66 FPS` | **`48.68 FPS`** | `35.58 FPS` |
+| Min sampled FPS | `104.97 FPS` | `88.27 FPS` | `68.96 FPS` | `36.48 FPS` | — |
+| GPU VRAM peak (`nvidia-smi`) | **`4,575.0 MiB`** (`4,729` cold) | **`4,930.0 MiB`** | `5,021.0 MiB` (`5,162` cold) | **`6,333.0 MiB`** (`6,236.6` avg) | `8,893 MiB` |
+| Process RAM (`WorkingSet` / `Private`) | `3,957.4` / `7,076.6 MiB` | `5,562.6` / `9,209.4 MiB` | `4,888.7` / `8,409.5 MiB` | `8,093.3` / `12,737.7 MiB` | — |
+| Static / Physics collision | `63.56 MB` / `53.32 MB` | `160.54 MB` / `134.66 MB` | `224.53 MB` / `189.13 MB` | `735.64 MB` / `618.46 MB` | — |
+| Content summary | `1,733` decals, `45k` trees, `8` GC, `1,426` bld (`34` chunks), `604` props | `11,629` decals, `45k` trees, `8` GC, `8,601` bld, `4,158` props | `11,627` decals + `134` corridor DAEs, `45k` trees, `5,684` bld | **`69,000`** decals, **`120k`** trees (`32` spp), `8` GC, **`11,945`** bld, **`82`** bridges, **`23,711`** props | Static baked meshes (`groundAsModels`) |
+| Mod ZIP / `.ter` size | `32.66 MiB` / `48.00 MiB` | — / `192.00 MiB` | — / `48.00 MiB` (+`155.1` DAE) | **`159.52 MiB`** / `192.00 MiB` | — |
+| `2560×1440` physical display | **`NOT_TESTED`** | **`NOT_TESTED`** | **`NOT_TESTED`** | **`NOT_TESTED`** | — |
 
 ---
 
 ## Reproduction Commands
 
 ```powershell
-# 1. Build, validate, and package Golden Sector V2
+# 1. Build, validate, and package Golden Sector V2 (4 km regression baseline)
 .\.venv\Scripts\python.exe -m ivanovo2beam -c configs/golden_sector.yaml build
 .\.venv\Scripts\python.exe -m ivanovo2beam -c configs/golden_sector.yaml validate --beamng "F:\SteamLibrary\steamapps\common\BeamNG.drive"
 .\.venv\Scripts\python.exe -m ivanovo2beam -c configs/golden_sector.yaml package
 
-# 2. Optional Windows host bridge (when running from sandboxed shells / CI)
+# 2. Build, validate, and package P2 33 km Corridor V2 (ivanovo_shuya_v2)
+.\.venv\Scripts\python.exe -m ivanovo2beam -c configs/ivanovo_shuya_v2.yaml build
+.\.venv\Scripts\python.exe -m ivanovo2beam -c configs/ivanovo_shuya_v2.yaml validate --beamng "F:\SteamLibrary\steamapps\common\BeamNG.drive"
+
+# 3. Optional Windows host bridge (when running from sandboxed shells / CI)
 # Run once in desktop PowerShell (Medium IL):
 C:\Users\kiril\AppData\Local\Programs\Python\Python313\python.exe scripts/beamng_host_bridge.py serve
 
-# 3. Install & run repeatable static + live MCP benchmark via bridge (or directly at Medium IL)
-C:\Users\kiril\AppData\Local\Programs\Python\Python313\python.exe scripts/beamng_host_bridge.py install --level ivanovo_golden_sector
-C:\Users\kiril\AppData\Local\Programs\Python\Python313\python.exe scripts/benchmark_level.py --level ivanovo_golden_sector --run --vehicle etk800
-
-# 4. Build & validate isolated P2 multi-TerrainBlock experiment
-$env:PYTHONPATH = "$PWD\src"
-.\.venv\Scripts\python.exe scripts/experiment_dual_terrain.py
+# 4. Install & run repeatable scaling QA suite via bridge (or directly at Medium IL)
+C:\Users\kiril\AppData\Local\Programs\Python\Python313\python.exe scripts/beamng_host_bridge.py install --level ivanovo_shuya_v2
+C:\Users\kiril\AppData\Local\Programs\Python\Python313\python.exe scripts/qa_scaling_experiment.py --level ivanovo_shuya_v2 --mode p2 --out docs/benchmarks/p2_ivanovo_shuya_v2.json
 ```
 
 ---
 
 ## Next Phase
 
-1. **Corridor / Regional scaling without broken multi-`TerrainBlock` seams**: Use `8192×8192` single-`TerrainBlock` (`2–4 m`) or a **hybrid architecture** (single anchor `TerrainBlock` + streamed RTIN Collada ground chunks + `.forest4.json` undergrowth), per [`docs/p2_multiblock_experiment.md`](p2_multiblock_experiment.md).
-2. **Ivanovo → Shuya (`configs/ivanovo_shuya.yaml`) V2 uplift**: Propagate V2 materials, hydrology clamping, `GroundCover`, roadside props, and regional buildings to the full intercity corridor.
-3. **1440p verification**: Re-run `scripts/benchmark_level.py --level ivanovo_golden_sector --run` on a native `2560×1440` display to upgrade `2560×1440` from `NOT_TESTED`.
+1. **Internal `DecalRoad` `2048 m` batch packing cleanup**: Inspect the remaining `38` internal `SceneStaticDecalRoadManager` `2048 m` / `inf` overflow warnings in `ivanovo_shuya_v2` (and `2` in `golden_sector`).
+2. **Urban `4 m` narrow-street grass trim**: Widen or smooth `TerrainMaterial` / grading rolloff on narrow un-graded city side streets when `square_size_m >= 4.0`.
+3. **1440p verification**: Re-run `scripts/qa_scaling_experiment.py` on a native `2560×1440` display to upgrade `2560×1440` from `NOT_TESTED`.
+4. **M5/M6 Whole-Oblast sector network**: Chain independent `8192 × 8192` single-`TerrainBlock` levels across the `220 × 145 km` Oblast using the shared Transverse Mercator projection (per [`docs/p3_scaling_study.md`](p3_scaling_study.md)).

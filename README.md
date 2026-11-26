@@ -36,8 +36,8 @@ terrain grading, road markings, coupled 3D bridges, rivers/waterbodies,
 | Summer vegetation (`.link`, `.forest4.json` & `GroundCover`) | **Done** | 30 zero-copy `.link` species + organic edge tapering, 8 native `GroundCover` 3D grass/wildflower/scrub layers (`322k` max elements) |
 | Roadside infrastructure & buildings | **Done** | GOST speed/priority/bridge/zebra signs, streetlights, poles, OSM bus stops, W-beam guardrails, terrain-clipped 500 m chunked OSM buildings |
 | Structural validator & provenance | **Done** | Validates scene tree, `.ter` (`HOLE=255` safe), base + extra `main.materials.json` files, ODbL/Copernicus notices |
-| Live BeamNG.drive 0.40+ V2 verification | **Verified (1080p Ultra)** | `133.39–134.39 FPS` avg / `106.03–108.70 FPS` 1% low at `1920×1080`, `damageSum = 0` up to `178.6 km/h`; `2560×1440` `NOT_TESTED` |
-| Multi-`TerrainBlock` P2 experiment (`ivanovo_dual_terrain_exp`) | **Tested, engine-limited** | Adjacent blocks match to `0.000 m`, but BeamNG 0.40 binds physics raycasts/`GroundCover`/`DecalRoad`s to block 0 (see [`docs/p2_multiblock_experiment.md`](docs/p2_multiblock_experiment.md)) |
+| Live BeamNG.drive 0.40+ V2 verification | **Verified (1080p Ultra)** | Golden Sector V2: `143.17 FPS` avg / `111.07 FPS` 1% low (`4,575 MiB` VRAM); 33 km `ivanovo_shuya_v2`: `80.32 FPS` avg / `48.68 FPS` 1% low (`6,333 MiB` VRAM); `2560×1440` `NOT_TESTED` |
+| Scaling architecture study (P0/P1/P2) | **Verified (`Single 8192` wins)** | `Single 8192×8192 @ 4.0 m` (`ivanovo_shuya_v2`) beat Hybrid (`4m + 1m DAE`) and Dual-`TerrainBlock` (see [`docs/p3_scaling_study.md`](docs/p3_scaling_study.md)) |
 
 ---
 
@@ -45,21 +45,22 @@ terrain grading, road markings, coupled 3D bridges, rivers/waterbodies,
 
 | Config | Level ID | Grid & Extent | Focus |
 |---|---|---|---|
-| `configs/golden_sector.yaml` | `ivanovo_golden_sector` | `4096 × 4096 @ 1.0 m` (`4.095 × 4.095 km`) | Kokhma SE / Р152 Uvod crossing: primary highway, `way/274102985` bridge, hydrology, summer forest, D3D12 benchmark |
-| `configs/ivanovo_shuya.yaml` | `ivanovo_shuya` | `4096 × 4096 @ 8.0 m` (`32.760 × 32.760 km`) | Full Ivanovo → Shuya intercity corridor (~29 km straight line) |
+| `configs/golden_sector.yaml` | `ivanovo_golden_sector` | `4096 × 4096 @ 1.0 m` (`4.095 × 4.095 km`) | Kokhma SE / Р152 Uvod crossing: primary highway, `way/274102985` bridge, hydrology, summer forest, D3D12 baseline |
+| `configs/ivanovo_shuya_v2.yaml` | `ivanovo_shuya_v2` | `8192 × 8192 @ 4.0 m` (`32.764 × 32.764 km`) | **Production 33 km Ivanovo–Kokhma–Shuya corridor**: V2 materials, `GroundCover`, `120k` `.link` trees, `11,945` buildings, `82` bridges |
+| `configs/ivanovo_shuya.yaml` | `ivanovo_shuya` | `4096 × 4096 @ 8.0 m` (`32.760 × 32.760 km`) | Legacy lightweight Ivanovo → Shuya corridor |
 | `configs/ivanovo_mvp.yaml` | `ivanovo_mvp` | `4096 × 4096 @ 1.25 m` (`5.118 × 5.118 km`) | Central Ivanovo road-network stress test |
+| `configs/experiment_single_8192_2m.yaml` | `ivanovo_single_8192_2m` | `8192 × 8192 @ 2.0 m` (`16.382 × 16.382 km`) | P0 single-block scaling benchmark |
+| `configs/experiment_hybrid_corridor.yaml` | `ivanovo_hybrid_corridor` | `4096 @ 4.0 m` + `134` RTIN `.dae`s (`16.380 km`) | P1 hybrid base+RTIN corridor benchmark |
 
-### Live D3D12 benchmark summary (`ivanovo_golden_sector` V2)
+### Live D3D12 benchmark summary
 
 Measured on Ryzen 5 7500F / RTX 3080 10 GB / BeamNG 0.40.6.0 D3D12 at
 `1920×1080 Borderless, Overall: Ultra` (DLSS; `2560×1440`: **`NOT_TESTED`** — active
 monitor caps at `1920×1080 @ 144 Hz`):
 
-- **Load time (cold / warm)**: `27.89 s` cold (caches wiped) / `21.82 s` warm (`worldReadyState`)
-- **FPS (avg / 1% low)**: `133.39 / 106.03 FPS` (cold) · `134.39 / 108.70 FPS` (warm)
-- **VRAM / Process RAM**: `4,666–4,729 MiB` GPU VRAM peak (`nvidia-smi`) · `3,971–4,057 MiB` WorkingSet peak
-- **High-speed Р152 & bridge passability**: Both-ways `etk800` AI drive reached `176.19 km/h` East / `178.60 km/h` West (`151.48–173.04 km/h` across `way/274102985` bridge) with `damageSum = 0`
-- **Level errors**: `0` `GroundCover`, `ForestData`, `WaterBlock`, `buildings`, `road_props`, `bridge`, or `WarningMaterial` errors in `beamng.log` (see [Performance & budgets](docs/performance.md))
+- **Golden Sector V2 (`ivanovo_golden_sector`, 4.1 km)**: `143.17 / 111.07 FPS` (warm), `24.30 s` warm / `27.89 s` cold load, `4,575–4,729 MiB` VRAM, `damageSum = 0` up to `178.63 km/h`
+- **P0 Single `8192@2m` (`16.4 km`) vs P1 Hybrid (`16.4 km`)**: P0 `105.50 / 89.64 FPS`, `27.72 s` warm, `4,930 MiB` VRAM, `damageSum = 0` (`6.37 km`) vs P1 `97.82 / 78.66 FPS`, `33.05 s` warm, `5,021 MiB` VRAM, `-40%` collision in P0
+- **P2 Corridor V2 (`ivanovo_shuya_v2`, 32.8 km / 1,073.5 km²)**: `80.32 / 48.68 FPS` (cold), `78.35 s` cold load, `6,333 MiB` VRAM, unbroken `25.229 km` Ivanovo→Shuya `navgraph` (`486` nodes, `0` `z=0` nodes), `0` `GroundCover`/`ForestData`/`TerrainBlock`/`WarningMaterial`/`checkBins` errors (see [Performance & budgets](docs/performance.md) and [P3 scaling study](docs/p3_scaling_study.md))
 
 ## How it works
 
@@ -140,15 +141,15 @@ src/ivanovo2beam/
   vegetation/  ESA WorldCover 2021 + OSM woods → .link summer species, .forest4.json & GroundCover
   buildings/   optional OSM footprints & 500 m chunked Collada blocks with slope skirts
   beamng/      .ter v9 codec, scene tree writer, 14-surface terrain PBR library
-  sectors/     spatial grid & P2 multi-TerrainBlock harness
+  sectors/     spatial grid, P2 multi-TerrainBlock & P1 hybrid corridor harnesses
   validation/  structural & material validation of built levels
   provenance.py SHA-256 input manifests & ODbL/Copernicus attribution notices
   config.py    config loading and validation
   build.py     pipeline orchestration
   cli.py       command line interface
-configs/       golden_sector.yaml, experiment_dual_terrain.yaml, ivanovo_shuya.yaml, ivanovo_mvp.yaml
-docs/          architecture, performance, status, p2_multiblock_experiment, coordinates, data sources, research
-scripts/       live BeamNG MCP benchmark, host bridge & dual-TerrainBlock experiment helpers
+configs/       golden_sector.yaml, ivanovo_shuya_v2.yaml, ivanovo_shuya.yaml, ivanovo_mvp.yaml, experiment_*.yaml
+docs/          architecture, performance, status, p2_multiblock_experiment, p3_scaling_study, benchmarks/, research/
+scripts/       live BeamNG MCP benchmark, scaling QA, host bridge & experiment helpers
 tests/         780 tests total; 777 offline (`-m "not network"`), 3 live-network
 ```
 
@@ -199,7 +200,7 @@ be added: their terms prohibit building derived mapping datasets.
 | **M1 Data pipeline** | Coordinates, OSM PBF/Overpass, DEM, WorldCover cache | Done |
 | **M2 First drivable sector** | 5 × 5 km Ivanovo (`ivanovo_mvp`) | Done |
 | **M3 City & natural features** | Buildings, vegetation, water, rail, 3D bridges | Done |
-| **M4 Ivanovo–Shuya corridor** | ~29 km intercity route (`ivanovo_shuya`) + Golden Sector (`golden_sector`) | Done (Golden Sector live-verified at 1080p) |
+| **M4 Ivanovo–Shuya corridor** | ~33 km intercity route (`ivanovo_shuya_v2` `8192@4m`) + Golden Sector (`golden_sector`) | Done (1080p Ultra live-verified) |
 | **M5 Regional road network** | Whole-oblast roads, tiled terrain | Planned |
 | **M6 Full oblast** | Complete 220 × 145 km | Planned |
 | **M7 Optimization** | 512 px base maps, `.forest4.json` + `.link`, tiered DecalRoad LOD, MCP benchmark | Done (`1920×1080` verified; `2560×1440` `NOT_TESTED`) |
@@ -224,7 +225,9 @@ be added: their terms prohibit building derived mapping datasets.
 * [Coordinate system](docs/coordinate_system.md) — why this projection, and how accuracy is proven
 * [Architecture](docs/architecture.md) — pipeline stages, coupled subsystems, and module boundaries
 * [Performance & budgets](docs/performance.md) — runtime optimizations, MCP benchmark harness, and D3D12 metrics
-* [Project status](docs/STATUS.md) — Golden Sector sign-off, MapNG baseline comparison, and reproduction CLI
+* [Project status](docs/STATUS.md) — Golden Sector & 33 km Corridor V2 sign-off, benchmarks, and reproduction CLI
+* [P2 multi-TerrainBlock experiment](docs/p2_multiblock_experiment.md) — empirical dual-block BeamNG 0.40 engine findings
+* [P3 scaling study](docs/p3_scaling_study.md) — P0 single-block vs P1 hybrid vs P2 33 km corridor benchmark synthesis
 * [Data sources](docs/data_sources.md) — datasets, licences, attribution obligations
 * [BeamNG install](docs/beamng_install.md) — getting a generated level into the game
 * [Development](docs/development.md) — setup, testing, and the sandbox gotchas
