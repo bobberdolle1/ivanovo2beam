@@ -3,8 +3,9 @@
 ## The shape of the problem
 
 Turn open geodata into a BeamNG.drive level at 1:1 scale for a region roughly
-220 × 145 km, reproducibly, from a clean checkout, without hand-authoring
-anything.
+220 × 145 km (or high-resolution vertical slices such as the 4.095 × 4.095 km
+Golden Sector and the 32.76 × 32.76 km Ivanovo–Shuya corridor), reproducibly,
+from a clean checkout, without hand-authoring anything.
 
 Three constraints shape every decision below:
 
@@ -17,191 +18,169 @@ Three constraints shape every decision below:
    have to be *carved* into the heightmap, not draped over it.
 3. **The region is far too large for static authoring.** Naive scaling of shipped
    content implies tens of millions of roads and hundreds of millions of objects.
-   The region must be tiled and sectorised.
+   The region must be tiled, sectorised, and instanced using native zero-copy
+   formats.
 
 ## Pipeline
 
 Each stage is a separate module, cacheable on disk, and callable from the CLI.
 
 ```
-   OpenStreetMap (ODbL)                    Copernicus DEM GLO-30
-            │                                        │
-   osm/fetch.py   tiled Overpass,                     │
-            │     mirror failover, cache              │
-   osm/parse.py   streaming XML                       │
-            │                                        │
-   osm/merge.py   merge tiles by element id           │
-            │                                        │
-            ▼                                        ▼
-   roads/network.py                       terrain/dem.py
-     project to metres                      source chain:
-     parse width/lanes/surface/             Copernicus → AWS Terrain
-     maxspeed/oneway/bridge/tunnel           Tiles → SRTM GL1
-            │                                        │
-            │                                        │
-            ├──────────────┬─────────────────────────┘
-            ▼              ▼
-   roads/build.py    terrain/builder.py
-     → RoadCorridor    sample DEM onto the grid
-                         (row by row, memory-bounded)
-                       grade corridors: resample,
-                         smooth ~120 m, clamp to
-                         max grade, blend into the grid
-                       quantise → u16 heights + u8 layers
-            │              │
-            └──────┬───────┘
-                   ▼
-            beamng/level.py  ← beamng/materials.py
-              scene tree, info.json, TerrainBlock, SpawnSphere,
-              ScatterSky/TimeOfDay for the real latitude, DecalRoads
-                   │
-            beamng/ter.py   .ter v9 encoder
-                   │
-                   ▼
-            build/levels/<id>/…  →  build/<id>.zip
+   OpenStreetMap (ODbL)             Copernicus DEM GLO-30         ESA WorldCover 2021 (10 m)
+     (.osm.pbf or Overpass)                    │                             │
+            │                                  │                             │
+   osm/pbf.py & osm/fetch.py                   ▼                             ▼
+   osm/parse.py & osm/merge.py         terrain/dem.py             vegetation/worldcover.py
+            │                          (GLO-30 / AWS / SRTM)       (cached .npz + .json)
+            ├───────────────────┬──────────────┼──────────┬──────────────────┤
+            ▼                   ▼              │          ▼                  ▼
+   roads/network.py     water/extract.py       │   vegetation/extract.py  buildings/footprints.py
+   roads/railways.py            │              │          │                  │
+            │                   ├──────────────┘          │                  │
+            ▼                   ▼                         │                  │
+   roads/bridges.py ◄──► terrain/builder.py               │                  │
+   (coupled profiles,     (DEM grid, road grading,        │                  │
+    split .dae, ramps)     under-deck water carving,      │                  │
+            │              landcover painting, u16/u8)    │                  │
+            ▼                   │                         ▼                  ▼
+   roads/build.py               │                  vegetation/forest.py   buildings/export.py
+   (3D Z-aware decals,          │                  (.link stock assets +  (procedural .dae +
+    crossing cuts,              │                   .forest4.json)         material prototypes)
+    renderPriority, markings)   │                         │                  │
+            └───────────────────┴──────────────┬──────────┴──────────────────┘
+                                               ▼
+                                 beamng/level.py + beamng/ter.py + provenance.py
+                                 (SceneTree, .ter v9, info.json, LevelInfo/ScatterSky,
+                                  12 terrain + road/bridge/forest/rail materials)
+                                               │
+                                               ▼
+                              validation/level.py  →  build/levels/<id>/  →  build/<id>.zip
 ```
 
 ## Module boundaries
 
-| Module | Responsibility | Depends on |
+| Module | Responsibility | Key dependencies |
 |---|---|---|
-| `gis/projection.py` | WGS84 ↔ metric world plane, scale-error measurement | pyproj |
-| `osm/` | Acquire and parse OSM; merge tiles | stdlib only |
-| `terrain/dem.py` | Multi-source DEM acquisition, sampling, caching | rasterio |
-| `terrain/builder.py` | Grid construction, corridor grading | numpy, DEM protocol |
-| `roads/` | OSM ways → road network → corridors + DecalRoads | shapely-free; numpy |
-| `beamng/ter.py` | `.ter` v9 codec | numpy |
-| `beamng/level.py` | Scene tree and level file writing | stdlib |
-| `beamng/materials.py` | Terrain material library | stdlib |
-| `sectors/grid.py` | World ↔ sector mapping | stdlib |
-| `validation/` | Structural checks on built levels | stdlib |
-| `build.py` | Orchestration of the above | all of the above |
-| `cli.py` | Command line | `build.py` |
+| `gis/` (`projection.py`, `_wgs84.py`) | WGS84 ↔ metric Transverse Mercator (`k0 = 1 − W²/4`), geodesic scale error | `pyproj` |
+| `osm/` (`pbf.py`, `fetch.py`, `parse.py`, `merge.py`, `types.py`) | Streaming pure-Python `.osm.pbf` (plus optional `osmium` fast path) & tiled Overpass fetch/merge | stdlib (optional `osmium`) |
+| `terrain/` (`dem.py`, `_geotiff.py`, `builder.py`) | DEM acquisition, row-by-row sampling, road grading, coupled water carving, landcover painting | `numpy`, `shapely`, optional `rasterio`/`scipy` |
+| `roads/` (`network.py`, `build.py`, `materials.py`, `bridges.py`, `railways.py`) | Road extraction, Z-aware DecalRoad export, crossing cuts, `renderPriority`, split bridges, 1520 mm rail | `numpy`, `shapely` |
+| `water/` (`extract.py`, `export.py`) | Waterways & waterbodies → BeamNG `River` splines & adaptive-grid `WaterBlock`s | `numpy`, `shapely` |
+| `vegetation/` (`worldcover.py`, `extract.py`, `forest.py`) | ESA WorldCover 2021 + OSM woods → keepout masks, density zones, `.link` stock assets, `.forest4.json` | `numpy`, `shapely`, `Pillow` |
+| `buildings/` (`footprints.py`, `mesh.py`, `export.py`) | Optional OSM building footprints, procedural Collada blocks, materials (disabled in highway configs) | `numpy`, `shapely` |
+| `beamng/` (`ter.py`, `level.py`, `materials.py`, `preview.py`) | `.ter` v9 codec, `SceneTree` writer, `LevelInfo` (`decalBias`), 12-surface terrain PBR library | `numpy` |
+| `sectors/grid.py` | World ↔ signed square sector grid mapping | stdlib |
+| `validation/level.py` | Structural checks: scene tree, `.ter`/`.terrain.json` (`HOLE=255` safe), scale, base + extra materials | `numpy` |
+| `provenance.py` | SHA-256 input manifests and ODbL / Copernicus attribution notices | stdlib |
+| `build.py` & `cli.py` | End-to-end orchestration (`info`, `download`, `build`, `package`, `install`, `validate`) | all of the above |
 
-Dependency arrows point one way. `beamng/` never imports `roads/`; `roads/`
-never imports `terrain/`; both are wired together in `build.py`. That keeps each
-stage testable with synthetic input — `tests/test_build_offline.py` runs the
-entire pipeline with a hand-built DEM and OSM extract and no network.
+Dependency arrows point one way (`beamng/` never imports `roads/` or
+`terrain/`; `build.py` wires stages together), keeping every subsystem testable
+in isolation under `tests/test_build_offline.py`.
 
-## Why the terrain is the road
+## Key subsystems
 
-This is the decision the whole project turns on, so it is worth stating plainly.
+### Why the terrain is the road
 
-A BeamNG `DecalRoad` is a spline ribbon drawn over the terrain. It carries no
-collision. If you generate a road network of decals over unmodified ground, the
-player sees asphalt and physically drives on a ploughed field.
+A BeamNG `DecalRoad` is a spline ribbon drawn over the terrain with no
+collision. Because a 30 m DEM cannot resolve a 7 m carriageway, each road's
+centreline is sampled at ~5 m spacing, smoothed, clamped to the configured
+`max_grade` via forward/backward passes, pinned at shared junctions
+(`pin_junction_elevations`), and blended into the heightmap using an accumulated
+influence field (`alpha == 1` inside the carriageway, smoothstep rolloff across
+the shoulder). Bridges and tunnels set `grade_terrain=False` so they do not
+flatten underlying valleys or rivers.
 
-A 30 m DEM — the best freely available data for this region — cannot express a
-7 m road on its own: adjacent samples are further apart than the road is wide.
-So the ground under each road is re-profiled:
+### Road markings, crossing cuts, and `renderPriority`
 
-1. the centreline is sampled from the DEM at ~5 m spacing;
-2. the profile is smoothed over ~120 m, which is roughly a real vertical curve;
-3. it is then clamped to a maximum gradient by a forward and a backward pass —
-   the standard earthworks construction, and the reason the result is the
-   closest achievable profile rather than an arbitrary smoothed one;
-4. the profile is blended into the heightmap with an influence field that is 1
-   inside the carriageway and falls smoothly to 0 at the corridor edge, so the
-   road blends into the landscape instead of cutting a trench.
+`roads/build.py` simplifies geometry in 3D (`_simplify_3d_z_aware`), strips
+near-duplicate nodes (`MIN_ROAD_NODE_SPACING_M = 0.15`), removes hairline
+reversals (`SPIKE_REVERSAL_DOT = -0.99`), splits polylines so every segment's
+axis-aligned bounding box stays within `MAX_SEGMENT_BBOX_SPAN_M = 800.0` (well
+inside BeamNG's `SceneStaticDecalRoadManager` 2048 m local packing range), and
+sets `DecalRoad` `detail = 0.5`.
 
-The same influence field then classifies the surface for material painting:
-`alpha == 1` exactly inside a carriageway, intermediate on the shoulder. Two
-real bugs came out of getting this wrong, both now covered by tests — painting
-per segment (which let a neighbouring segment repaint a carriageway as shoulder)
-and comparing a running maximum against itself.
+Visual layering uses BeamNG 0.40's `renderPriority` convention (lower draws on
+top):
+- `EDGE_LINE_RENDER_PRIORITY = 1` (inset white/yellow edge lines)
+- `CENTER_LINE_RENDER_PRIORITY = 2` (dashed/solid/double dividers, cut cleanly at
+  major carriageway crossings via `build_carriageway_index` and
+  `cut_polyline_at_crossings`)
+- `EDGE_GRASS_RENDER_PRIORITY = 9` (feathered shoulder transition strips)
+- `SURFACE_RENDER_PRIORITY`: `13` (motorway/trunk/primary), `14` (secondary..unclassified),
+  `15` (service/track/path)
+- `AI_INVISIBLE_RENDER_PRIORITY = 20` (`road_invisible` AI graph helpers)
 
-Bridges and tunnels set `grade_terrain=False`: their ground must not be
-flattened. They are still exported as decals until real geometry exists
-(issue #9).
+`LevelInfo` sets `"decalBias": 0.0005` in `beamng/level.py` to prevent z-fighting
+between decals and graded terrain/bridge decks.
+
+### Coupled hydrology, split 3D bridges, and bridgehead ramps
+
+For crossed waterways, hydrology runs **before** terrain grading so water-surface
+and riverbed elevations feed directly into both `carve_water` /
+`carve_water_under_decks` / `level_under_decks` and `solve_coupled_bridge_profile`
+in `roads/bridges.py`.
+
+Each OSM `bridge=*` way emits:
+- Two localized Collada 1.4.1 `.dae` meshes (`build_bridge_split_geometry`):
+  `_deck` (slab, curbs/parapets, `ivanovo_bridge_deck` UV material) and
+  `_structure` (girder, abutments, piers down to riverbed), referenced by
+  separate `TSStatic` objects so deck collision and substructure LODs stay clean.
+- Coupled bridgehead approach ramps (`create_bridgehead_ramps`) with eased
+  vertical curves pinned to deck endpoints for a flush 0 cm step lip and
+  emitted embankments (`15 m` skirts).
+- Elevated bridge `DecalRoad` surfaces and lane markings aligned to the solved
+  deck profile with zeroed `startEndFade` at bridge portals.
+
+### Summer vegetation: ESA WorldCover 2021 + `.link` + `.forest4.json`
+
+`vegetation/worldcover.py` merges 10 m ESA WorldCover 2021 v200 tree-cover
+polygons (`WC_TREES = 10`, cached as pure-NumPy `.npz` + `.json` under
+`.cache/landcover/`) with OSM forest, scrub, meadow, and riparian zones.
+`vegetation/forest.py` rasterizes corridor, water, bridge, railway, and building
+keepouts (`build_keepout_mask`), allocates trees across roadside (`60 m`), core,
+and distant backdrop (`> 400 m`) density zones, and emits native
+`forest/<species>.forest4.json` instance files plus `managedItemData.json` and
+`art/forest/main.materials.json`.
+
+Stock Central Russian summer species (birch, pine, spruce, aspen, oak, shrubs)
+from BeamNG's `east_coast_usa` and `italy` levels are referenced via zero-copy
+`.link` pointers (`prepare_linked_species`) when a BeamNG installation is
+detected; no game asset bytes are duplicated into the repository or mod `.zip`.
+
+### Level configurations: `golden_sector` vs `ivanovo_shuya`
+
+- `configs/golden_sector.yaml` (`ivanovo_golden_sector`): `4096 × 4096` @ `1.0 m`
+  (`4.095 km` per side) centered on the Kokhma SE / Р152 (`24К-260`) Uvod river
+  crossing, sharing Ivanovo Oblast's Transverse Mercator origin so every
+  coordinate matches the corridor 1:1. Used for rapid high-resolution builds,
+  physics/bridge verification, and live D3D12 benchmarking.
+- `configs/ivanovo_shuya.yaml` (`ivanovo_shuya`): `4096 × 4096` @ `8.0 m`
+  (`32.760 km` per side) covering the full ~29 km intercity corridor between
+  Ivanovo and Shuya.
 
 ## Determinism
 
-Regenerating an unchanged level produces byte-identical output. This is a
-licensing requirement as much as an engineering one: ODbL section 4.6 can be
-satisfied by publishing the *method* of deriving a produced work, and the method
-has to actually reproduce the result.
-
-* Every scene object `persistentId` is a UUIDv5 of stable keys
+Regenerating an unchanged level produces byte-identical output:
+- Scene object and material `persistentId`s are UUIDv5 of stable keys
   (`stable_uuid(level_id, class, key)`).
-* Material `persistentId`s are UUIDv5 of the material key.
-* No unseeded randomness anywhere. Procedural variation, when it arrives, derives
-  from the OSM element id.
-* Mod zip entries are written in sorted order with a fixed timestamp.
-* Caches are content-addressed, so a cache hit and a fresh download produce the
-  same input.
+- Vegetation placement and material noise patches use deterministic seeds.
+- `.dae` meshes stamp a fixed ISO timestamp (`_FIXED_TIMESTAMP`) and mod `.zip`
+  entries use sorted paths with a fixed ZIP timestamp.
+- Caches under `.cache/` (`dem/`, `osm/`, `landcover/`, plus local `.osm.pbf`
+  extracts) are keyed by SHA-256 over canonical parameters and carry provenance
+  `.json` sidecars (`provenance.py`).
 
-Asserted by `tests/test_build_offline.py::test_build_is_deterministic`.
+## Validation & live BeamNG verification
 
-## Caching
+`validation/level.py` (`ivanovo2beam validate`) verifies required level files,
+`SceneTree` parent resolution, `.ter`/`.terrain.json` agreement (excluding
+`HOLE=255` terrain cells from layer-index bounds), world bounds/scale, and every
+material file (`art/terrains/main.materials.json`, `art/road/main.materials.json`,
+`art/forest/main.materials.json`, and `art/shapes/**/main.materials.json`)
+including duplicate `persistentId` detection and base-game asset resolution.
 
-```
-.cache/
-  dem/<sha256>.tif          + .json sidecar (source, URLs, checksum, licence)
-  osm/<sha256>.osm          + .json sidecar (endpoint, osm_base, checksum)
-```
-
-Keys are SHA-256 over a canonical description of the request — a bounding box
-rounded to 1e-6 degrees plus source and resolution — not over an arbitrary float
-representation. Sidecars record which source *actually* delivered the data, so
-the DEM fallback chain stays honest about attribution.
-
-A failed build is resumable: cached tiles are reused, so a re-run after a network
-failure fetches only what is missing.
-
-## Sectors
-
-`sectors/grid.py` maps world coordinates to fixed-size square sectors and back.
-Sectors are the unit of caching, of validation and, eventually, of runtime
-streaming. Identifiers encode signed grid indices (`sector_x0042_y0108`), because
-a world origin inside the region necessarily produces negative indices in every
-direction.
-
-The default sector size is 2 km: a 220 × 145 km region is 111 × 73 sectors, large
-enough that per-sector overhead is negligible and small enough to be a
-comfortable unit of work.
-
-Sectors are currently used for organisation only. Whether they can drive runtime
-streaming is an open question — issue #12 — and depends on engine behaviour that
-has not been measured yet.
-
-## Why nothing from the game is copied
-
-Generated levels reference BeamNG's own shared assets by path: 40 base-game
-terrain textures across 12 materials, and decal-road materials by name from
-`art/shapes/common/decalroads`. This is the intended modding workflow, and it
-keeps the repository free of game content. The produced archive contains only
-JSON and one `.ter` — asserted by a test.
-
-Reading the game's files to learn formats is a different activity from shipping
-them, and the distinction is maintained deliberately: the `roadArchitect`
-profiles that ship with the game were read on a local installation to learn the
-schema, and are neither committed nor shipped.
-
-## Error handling philosophy
-
-* **A partial result beats no result, provided it is labelled.** Failed OSM tiles
-  do not abort a build; they produce a warning naming how many are missing. A
-  degraded network is still worth driving.
-* **External services must not be able to hang a build.** Overpass mirror
-  failover uses exponential backoff up to 60 s per attempt, which once stalled a
-  run for twenty minutes. Acquisition now takes a wall-clock budget and proceeds
-  with what it has.
-* **Validation reports everything, then exits non-zero.** `validate_level`
-  returns a report rather than raising on the first problem, because when a level
-  will not load you want the whole list, not the first item.
-
-## Testing strategy
-
-| Layer | Approach |
-|---|---|
-| Projection | compared against independent `pyproj.Geod` geodesics, never against itself |
-| `.ter` codec | byte-exact round trip of six terrains shipped inside the real game |
-| OSM | offline fixtures plus one live, `network`-marked test |
-| DEM | synthetic rasters; the provider chain driven by fake providers |
-| Corridor grading | numerical invariants: carriageway flat, grade respected, distant terrain untouched |
-| Whole pipeline | `test_build_offline.py`, synthetic data, no network |
-| Built level | structural validator mirroring what BeamNG checks |
-
-CI runs everything except the `network` and `beamng` marked tests, on Python 3.12
-and 3.13. Network and engine tests are run deliberately, by hand, because a red
-build caused by someone else's outage teaches nothing.
+Live engine verification uses `scripts/benchmark_level.py` against BeamNG.drive's
+HTTP MCP telemetry (`--run`) to measure cold/warm load times, VRAM, RAM, avg FPS,
+1% low (`$fps::p99`), vehicle `vel.z` suspension smoothness across bridges, and
+`beamng.log` error counts. See [performance.md](performance.md).

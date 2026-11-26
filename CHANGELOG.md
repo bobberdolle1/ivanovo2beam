@@ -12,9 +12,55 @@ release at all.
 ## [Unreleased]
 
 ### Added
-- Buildings, vegetation, water and rail generation (milestone M3).
-- Ivanovo → Shuya intercity corridor (milestone M4).
-- Sectors used at runtime for streaming, once engine behaviour is measured.
+- **Golden Sector benchmark target**: `configs/golden_sector.yaml`
+  (`ivanovo_golden_sector`, `4096 × 4096 @ 1.0 m` over Kokhma SE / Р152 Uvod
+  river crossing) preserving the Ivanovo Oblast Transverse Mercator origin.
+- **Ivanovo → Shuya corridor**: `configs/ivanovo_shuya.yaml` (`4096 × 4096 @ 8.0 m`,
+  `32.760 km` square) plus primary-highway `_choose_spawn` preference and
+  `level.spawn` / `level.center` fallback for custom levels.
+- **OSM PBF streaming (`osm/pbf.py`)**: Two-pass pure-Python `.osm.pbf` bbox
+  reader (with optional `osmium` fast path and round-trip encoder) for regional
+  Geofabrik extracts in `< 250 MB` RAM.
+- **ESA WorldCover 2021 + Summer Vegetation (`vegetation/worldcover.py`, `vegetation/forest.py`)**:
+  Cached `.npz`/`.json` 10 m tree-canopy lookup merged with OSM woods, keepout
+  rasterization, roadside/core/backdrop density zoning, zero-copy `.link`
+  pointers to stock summer species (`east_coast_usa`/`italy`), and native
+  `.forest4.json` instancing.
+- **Coupled hydrology & split 3D bridges (`water/`, `roads/bridges.py`, `terrain/builder.py`)**:
+  Water extraction ahead of terrain grading, `carve_water` / `carve_water_under_decks`
+  / `level_under_decks`, coupled vertical bridge solver (`solve_coupled_bridge_profile`),
+  split `_deck`/`_structure` Collada meshes, and eased bridgehead approach ramps.
+- **Railways & optional buildings (`roads/railways.py`, `buildings/`)**:
+  1520 mm gauge tracks with road-crossing awareness and optional Collada building
+  archetypes.
+- **Road markings, crossing cuts & LOD (`roads/build.py`, `roads/materials.py`)**:
+  `EDGE_LINE_RENDER_PRIORITY = 1`, `CENTER_LINE_RENDER_PRIORITY = 2`,
+  `EDGE_GRASS_RENDER_PRIORITY = 9`, `SURFACE_RENDER_PRIORITY` `13..15`,
+  `build_carriageway_index` / `cut_polyline_at_crossings`, 3D Z-aware
+  simplification, hairline reversal removal, and 800 m AABB segment splitting.
+- **Provenance & runtime benchmarking (`provenance.py`, `scripts/benchmark_level.py`, `docs/performance.md`)**:
+  SHA-256 input manifests, ODbL/Copernicus notices in `info.json`, and automated
+  BeamNG HTTP MCP telemetry collection (`$fps::instantaneous`, `$fps::p99`, VRAM,
+  `beamng.log` scan).
+- **Test & live verification status**: `741 passed, 3 deselected` (`pytest tests/ -m "not network"`), `uvx ruff check src tests` clean, and `ivanovo2beam validate` `9 passed, 0 failed, 0 warnings`. Live D3D12 verification on `ivanovo_golden_sector` (`1920×1080 Borderless, Overall: Ultra`) measured `133.09 FPS` avg / `114.42 FPS` 1% low (DLSS) and `139.25 FPS` avg / `118.44 FPS` 1% low (`render_scale=1.0`), `3,965–3,999 MiB` VRAM peak, `26.59 s` cold / `21.50–21.60 s` warm load, `damage_max = 0` both-ways bridge crossing, and `0` `SceneStaticDecalRoadManager` / level errors (`2560×1440`: `NOT_TESTED` due to `1920×1080` display cap).
+
+### Changed
+- Reduced default terrain base texture resolution (`DEFAULT_BASE_TEX_SIZE = 512`)
+  for 4× lower base-map VRAM usage, and expanded the terrain material library to
+  12 surfaces across 100 base-game texture paths.
+- Added `"decalBias": 0.0005` on `LevelInfo` in `beamng/level.py` to prevent
+  decal z-fighting.
+- Hardened `ivanovo2beam install --force` (`cli.py`) to purge stale target
+  subdirectories in-place before mirroring.
+- Extended `validation/level.py` to ignore `HOLE=255` terrain cells in layer-index
+  bounds checks and validate `art/road`, `art/forest`, and `art/shapes/**`
+  `main.materials.json` files + duplicate `persistentId`s.
+
+### Fixed
+- Terrain landcover painting preserves interior polygon holes via
+  `v.to_polygon()` in `Grass -> Field -> ForestFloor -> Concrete` order.
+- Eliminated bridge portal fade artifacts by zeroing `startEndFade` on bridge
+  surface and marking `DecalRoad`s.
 
 ## [0.1.0] — 2026-10-07
 

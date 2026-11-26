@@ -13,131 +13,91 @@ cd ivanovo2beam
 python -m venv .venv && .venv\Scripts\activate
 pip install -e ".[all]"
 
-ivanovo2beam download --config configs/ivanovo_mvp.yaml
-ivanovo2beam build    --config configs/ivanovo_mvp.yaml
-ivanovo2beam install  --config configs/ivanovo_mvp.yaml
+ivanovo2beam download --config configs/golden_sector.yaml
+ivanovo2beam build    --config configs/golden_sector.yaml
+ivanovo2beam install  --config configs/golden_sector.yaml --beamng "<BeamNG_userdata_dir>"
 ```
 
 ---
 
-## Current status — read this first
+## Current status
 
-**This is an early, working pipeline. It is not yet a finished map of the
-oblast.** The table below is the honest state of each piece.
+The end-to-end pipeline generates drivable, 1:1-scale BeamNG.drive levels with
+terrain grading, road markings, coupled 3D bridges, rivers/waterbodies,
+1520 mm railways, ESA WorldCover summer forests, and structural validation.
 
-| Stage | State | Evidence |
+| Stage | State | Notes |
 |---|---|---|
-| Coordinate system (1:1 metric plane) | **Done, verified** | 37 tests; 29.138 km projected vs 29.141 km geodesic (Ivanovo→Shuya) |
-| BeamNG `.ter` terrain format v9 | **Done, verified byte-exactly** | 6 shipped terrains round-trip byte-identically |
-| Terrain from Copernicus DEM GLO-30 | **Done, working** | 4096×4096 grid @ 1.25 m, real elevations 105.0–153.4 m |
-| OSM acquisition (tiled Overpass) | **Working** | 5,688 ways fetched and merged |
-| Road network extraction and projection | **Working** | 5,688 roads / 638 km, 19 bridges, 37 tunnels |
-| Road corridor grading into terrain | **Working** | roads are flattened and grade-limited into the heightmap |
-| BeamNG `DecalRoad` export | **Working** | 5,688 DecalRoads, 34,599 nodes |
-| Level scene, `info.json`, spawn point, sun | **Working** | validator 6/6 pass |
-| Mod packaging | **Working** | `build/ivanovo_mvp.zip`, 13 entries, 31 MB |
-| **Loading the level in BeamNG** | **NOT TESTED** | See the blocker below |
-| Buildings, vegetation, water, rail, props | **Not implemented** | milestone M3+ |
-| Whole-oblast build | **Not implemented** | milestone M6 |
-
-### The in-game test is blocked, and here is exactly why
-
-The project has not yet been proven to load inside BeamNG.drive on this
-machine. Two independent environmental conditions prevented it:
-
-1. **The development sandbox cannot write outside the working directory.** The
-   level must be placed in BeamNG's user data folder
-   (`%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\levels\`), and that write is
-   denied. The bundled `ivanovo2beam install` command does exactly this and will
-   work on an ordinary machine.
-2. **Steam was not running.** BeamNG.drive 0.39 is a Steam title; launched
-   directly from `BeamNG.drive.exe` it exits immediately with code 0.
-
-So the correct status is **`BEAMNG_TEST=NOT_TESTED`**, not "works". Everything
-that can be verified without launching the game *has* been verified, including
-byte-level comparison against six terrains shipped inside the game itself and a
-structural validator that mirrors the checks BeamNG performs.
-
-**To complete the test yourself** (about two minutes):
-
-```bash
-# 1. Start Steam first — BeamNG will not run without it.
-# 2. Copy the built level in:
-ivanovo2beam install --config configs/ivanovo_mvp.yaml
-#    or simply drop build/ivanovo_mvp.zip into
-#    %LOCALAPPDATA%\BeamNG\BeamNG.drive\current\mods\
-# 3. Launch BeamNG, pick "Ivanovo 1:1 - City Centre (MVP)" and spawn.
-```
-
-If it loads, please open an issue saying so — that single data point is the most
-valuable thing anyone can contribute right now.
+| Coordinate system (1:1 metric plane) | **Done, verified** | Custom Transverse Mercator (`k0 = 1 − W²/4`); Ivanovo→Shuya 29.138 km vs 29.141 km WGS84 geodesic |
+| BeamNG `.ter` terrain format v9 | **Done, verified byte-exactly** | Shipped game terrains round-trip byte-identically |
+| Geodata acquisition (DEM + OSM PBF/Overpass + WorldCover) | **Done, cached** | Copernicus GLO-30 / AWS / SRTM DEM, pure-Python `.osm.pbf` streaming + Overpass, ESA WorldCover 2021 10 m `.npz` cache |
+| Road network, markings & `renderPriority` | **Done** | Z-aware 3D smoothing, junction elevation pinning, crossing-cut centerlines, tiered LOD, 800 m AABB split |
+| Coupled hydrology, split bridges & ramps | **Done** | Under-deck river carving, localized split `_deck`/`_structure` `.dae` meshes, eased bridgehead approach ramps |
+| Summer vegetation (`.link` + `.forest4.json`) | **Done** | WorldCover + OSM woods, corridor/water keepouts, zero-copy `.link` stock summer trees, zoned density |
+| Railways & optional buildings | **Done** | 1520 mm gauge procedural `.dae` tracks; optional OSM building archetypes |
+| Structural validator & provenance | **Done** | Validates scene tree, `.ter` (`HOLE=255` safe), base + extra `main.materials.json` files, ODbL/Copernicus notices |
+| Live BeamNG.drive 0.40+ verification | **Verified (1080p Ultra)** | 133.1–139.3 FPS avg / 114.4–118.4 FPS 1% low at `1920×1080`; `2560×1440` `NOT_TESTED` (monitor cap `1920×1080`) |
+| Whole-oblast tiled terrain (220 × 145 km) | **Planned** | Requires tiled multi-TerrainBlock streaming (milestone M5/M6) |
 
 ---
 
-## What is actually generated
+## Level targets
 
-The MVP level `ivanovo_mvp` is a **5.12 × 5.12 km** slice of central Ivanovo:
+| Config | Level ID | Grid & Extent | Focus |
+|---|---|---|---|
+| `configs/golden_sector.yaml` | `ivanovo_golden_sector` | `4096 × 4096 @ 1.0 m` (`4.095 × 4.095 km`) | Kokhma SE / Р152 Uvod crossing: primary highway, `way/274102985` bridge, hydrology, summer forest, D3D12 benchmark |
+| `configs/ivanovo_shuya.yaml` | `ivanovo_shuya` | `4096 × 4096 @ 8.0 m` (`32.760 × 32.760 km`) | Full Ivanovo → Shuya intercity corridor (~29 km straight line) |
+| `configs/ivanovo_mvp.yaml` | `ivanovo_mvp` | `4096 × 4096 @ 1.25 m` (`5.118 × 5.118 km`) | Central Ivanovo road-network stress test |
 
-| Property | Value |
-|---|---|
-| Terrain | 4096 × 4096 vertices at 1.25 m spacing |
-| Real-world extent | 5.118 km per side |
-| Elevation range | 105.0 – 153.4 m (real Copernicus DEM) |
-| Vertical quantisation | 0.89 mm |
-| Materials | 12 surfaces: asphalt, worn asphalt, concrete, gravel, dirt, grass, field, forest floor, riverbank soil, rock, sand, pebbles |
-| Roads | 5,688 ways, 638 km total, 19 bridges, 37 tunnels |
-| Road decals | 5,688 DecalRoads, 34,599 nodes |
-| Download size | 31 MB |
-| Build time | ~4.5 min (2 s of which is terrain; most of it is polite OSM fetching) |
+### Live D3D12 benchmark summary (`ivanovo_golden_sector`)
+
+Measured on Ryzen 5 7500F / RTX 3080 10 GB / BeamNG 0.40.6.0 D3D12 at
+`1920×1080 Borderless, Overall: Ultra` (`2560×1440`: **`NOT_TESTED`** — active
+monitor caps at `1920×1080 @ 143 Hz`):
+
+- **Load time (cold / warm)**: `26.59 s` cold (`worldReadyState=1`, caches wiped) / `21.50–21.60 s` warm
+- **FPS (avg / 1% low)**: `133.09 / 114.42 FPS` (DLSS) · `139.25 / 118.44 FPS` (`render_scale=1.0`)
+- **VRAM / Process RAM**: `3,965–3,999 MiB` GPU VRAM peak (`nvidia-smi`) · `3,809–3,825 MiB` WorkingSet peak
+- **Drive & bridge smoothness**: Both-ways AI crossing over `way/274102985` (`damage_max = 0`, `bridge_vz_abs_max = 0.65 m/s`)
+- **Level errors**: `0` `SceneStaticDecalRoadManager`, `MaterialList`, `TerrainCellMaterial`, `ForestData`, `WaterBlock`, or collision errors in `beamng.log` (see [Performance & budgets](docs/performance.md))
 
 ## How it works
 
 ```
-                    ┌─────────────────────────────────────────────┐
-  OpenStreetMap ────►  tiled Overpass fetch (1.2 km tiles, cached)│
-  (ODbL)            │  parse → merge → project to metres          │
-                    └──────────────────┬──────────────────────────┘
-                                       │ roads in world metres
-                                       ▼
-                    ┌─────────────────────────────────────────────┐
-  Copernicus DEM ───►  sample onto the terrain grid                │
-  GLO-30 (30 m)     │  grade a smooth, grade-limited road corridor │
-                    │  quantify: u16 heights + u8 material layers  │
-                    └──────────────────┬──────────────────────────┘
-                                       │ .ter + level scene
-                                       ▼
-                    ┌─────────────────────────────────────────────┐
-                    │  levels/<id>/info.json                      │
-                    │  levels/<id>/main/**/items.level.json       │
-                    │  levels/<id>/theTerrain.ter                 │
-                    │  levels/<id>/art/terrains/materials.json    │
-                    └──────────────────┬──────────────────────────┘
-                                       ▼
-                              build/<id>.zip  → BeamNG mod
+  OpenStreetMap (.osm.pbf / Overpass)     Copernicus DEM GLO-30      ESA WorldCover 2021
+                  │                                │                         │
+                  ▼                                ▼                         ▼
+     roads / water / rail / buildings  ◄──►  terrain/builder.py  ◄──  vegetation/forest.py
+     (coupled bridges, ramps, cuts)          (grading, water carve,   (.link + .forest4.json)
+                  │                           landcover, u16 + u8)           │
+                  └────────────────────────────────┼─────────────────────────┘
+                                                   ▼
+                                     levels/<id>/ (SceneTree + .ter v9 + PBR materials)
+                                                   │
+                                                   ▼
+                                      ivanovo2beam validate → build/<id>.zip
 ```
 
-Three design decisions matter more than the rest:
+Four design decisions matter most:
 
-**The terrain is the road.** In BeamNG a `DecalRoad` is only a decal — it has no
-collision. The drivable surface *is* the terrain underneath. So the pipeline does
-not merely drape a road over the landscape: it **carves**. Each road's centreline
-is sampled from the DEM, smoothed over ~120 m, clamped to a maximum 12 % grade,
-and then blended into the heightmap so the carriageway ends up flat and the
-ground returns smoothly to its natural elevation across the shoulder. A 30 m DEM
-cannot express a 7 m road on its own; the graded corridor is what makes driving
-possible.
-
-**Real OSM tags always win.** `width`, `lanes`, `surface`, `maxspeed`, `oneway`,
-`bridge`, `tunnel` and `layer` are read per way. Config values only fill gaps.
-
-**Nothing from the game is copied.** Generated levels reference BeamNG's own
-shared textures and decal materials *by path* — 40 base-game terrain textures for
-the 12 materials — which is the intended modding workflow and keeps the project
-legally clean. The only files in the archive are JSON and one `.ter`.
+1. **The terrain is the road.** In BeamNG a `DecalRoad` is only a decal — it has no
+   collision. Each road's centreline is sampled from the DEM, smoothed, grade-limited,
+   pinned at shared junctions, and blended into the heightmap so the carriageway is
+   smooth and drivable.
+2. **Hydrology and bridges are coupled.** Rivers and waterbodies are extracted with
+   DEM elevations *before* terrain grading so under-deck carving, bridge vertical
+   curves, split Collada `_deck`/`_structure` meshes, and bridgehead ramps meet with
+   zero step lip.
+3. **Real OSM tags always win.** `width`, `lanes`, `surface`, `maxspeed`, `oneway`,
+   `bridge`, `tunnel`, `gauge`, and `layer` are read per way; config defaults only fill gaps.
+4. **Nothing from the game is copied.** Terrain (`12` surfaces across `100` base-game
+   textures), decal roads, bridges, and summer vegetation (`.link` pointers to stock
+   `east_coast_usa` / `italy` species) reference BeamNG's shipped assets *by path*,
+   keeping the repository and produced `.zip` archives clean of game asset bytes.
 
 ## Installation
 
-Requires **Python 3.12+** and BeamNG.drive **0.39.x**.
+Requires **Python 3.12+** and BeamNG.drive **0.39+ / 0.40+**.
 
 ```bash
 pip install -e ".[all]"
@@ -145,9 +105,10 @@ pip install -e ".[all]"
 
 | Extra | Pulls in | Needed for |
 |---|---|---|
-| *(core)* | numpy, pyproj, shapely, PyYAML, Pillow | everything |
+| *(core)* | numpy, pyproj, shapely, PyYAML, Pillow | everything (including pure-Python `.osm.pbf` streaming) |
 | `raster` | rasterio | reading GeoTIFF DEMs |
 | `smooth` | scipy | road profile smoothing |
+| `pbf` | osmium | optional native `.osm.pbf` acceleration |
 | `dev` | pytest, ruff | development |
 
 Windows is the primary target because that is where BeamNG runs; the generator
@@ -172,25 +133,30 @@ changed. Add `--json` for machine-readable output.
 ```
 src/ivanovo2beam/
   gis/         projection, geodesy, metric world plane
-  osm/         Overpass fetch, streaming parse, tile merge
-  terrain/     DEM sources (Copernicus/SRTM/Terrain Tiles), grid builder, road grading
-  roads/       OSM → road network → terrain corridors + DecalRoads
-  beamng/      .ter codec, level scene writer, terrain material library
+  osm/         Overpass fetch, streaming XML + .osm.pbf, tile merge
+  terrain/     DEM sources (Copernicus/SRTM/Terrain Tiles), corridor grading, water carve, landcover
+  roads/       road network, DecalRoads, markings/cuts, coupled 3D bridges, 1520 mm railways
+  water/       OSM waterways/waterbodies → River splines & WaterBlock export
+  vegetation/  ESA WorldCover 2021 + OSM woods → .link summer species + .forest4.json
+  buildings/   optional OSM footprints & procedural Collada meshes
+  beamng/      .ter v9 codec, scene tree writer, 12-surface terrain PBR library
   sectors/     spatial grid
-  validation/  structural validation of built levels
+  validation/  structural & material validation of built levels
+  provenance.py SHA-256 input manifests & ODbL/Copernicus attribution notices
   config.py    config loading and validation
   build.py     pipeline orchestration
   cli.py       command line interface
-configs/       region and level definitions
-docs/          architecture, coordinates, data sources, research
-tests/         493 tests; 485 run offline, the rest need network or a BeamNG install
+configs/       golden_sector.yaml, ivanovo_shuya.yaml, ivanovo_mvp.yaml, etc.
+docs/          architecture, performance, coordinates, data sources, research
+scripts/       live BeamNG MCP benchmark & deployment helpers
+tests/         744 tests total; 741 offline (`-m "not network"`), 3 live-network
 ```
 
 ## Testing
 
 ```bash
-pytest -m "not network and not beamng"   # 485 tests, everything CI runs
-pytest -m network                        # live Overpass / DEM fetches
+pytest -m "not network"                # 741 offline tests, everything CI runs
+pytest -m network                        # 3 live Overpass / DEM fetch tests
 pytest -m beamng                         # tests needing a BeamNG install
 ```
 
@@ -230,35 +196,35 @@ be added: their terms prohibit building derived mapping datasets.
 | Milestone | Contents | State |
 |---|---|---|
 | **M0 Research** | Engine limits, prior art, licensing | Done |
-| **M1 Data pipeline** | Coordinates, OSM, DEM, cache | Done |
-| **M2 First drivable sector** | 5 × 5 km Ivanovo, terrain + roads + spawn | Generated; in-game test pending |
-| **M3 Ivanovo city** | Buildings, vegetation, water, rail, landmarks | Not started |
-| **M4 Ivanovo–Shuya corridor** | ~29 km intercity route | Not started |
-| **M5 Regional road network** | Whole-oblast roads, tiled terrain | Not started |
-| **M6 Full oblast** | Complete 220 × 145 km | Not started |
-| **M7 Optimization** | LOD, sector streaming, quality presets | Not started |
-| **M8 Public release** | v1.0.0 | Not started |
+| **M1 Data pipeline** | Coordinates, OSM PBF/Overpass, DEM, WorldCover cache | Done |
+| **M2 First drivable sector** | 5 × 5 km Ivanovo (`ivanovo_mvp`) | Done |
+| **M3 City & natural features** | Buildings, vegetation, water, rail, 3D bridges | Done |
+| **M4 Ivanovo–Shuya corridor** | ~29 km intercity route (`ivanovo_shuya`) + Golden Sector (`golden_sector`) | Done (Golden Sector live-verified at 1080p) |
+| **M5 Regional road network** | Whole-oblast roads, tiled terrain | Planned |
+| **M6 Full oblast** | Complete 220 × 145 km | Planned |
+| **M7 Optimization** | 512 px base maps, `.forest4.json` + `.link`, tiered DecalRoad LOD, MCP benchmark | Done (`1920×1080` verified; `2560×1440` `NOT_TESTED`) |
+| **M8 Public release** | v1.0.0 | Planned |
 
 ## Known limitations
 
-* **The level has not been loaded in the game yet** (see above).
-* Only roads and terrain are generated. No buildings, trees, water or rail yet.
-* Terrain resolution is 1.25 m while the DEM is 30 m: away from graded road
-  corridors the surface is a smooth interpolation of a 30 m grid, so it is
-  correct in bulk but has no fine relief.
-* `tunnel=*` ways are graded as though they were surface roads, which is wrong
-  where a tunnel passes under a hill. Marked for M3.
-* Overpass is a donated service. A large build can hit its rate limits; the
-  tiled fetch degrades gracefully and reports which tiles are missing, but the
-  road network will have gaps.
-* The whole-oblast build is arithmetically possible but not implemented. At the
-  engine's 8192-vertex limit, 220 × 145 km needs tens of GB of `.ter` data and
-  must be tiled — see [`docs/research/beamng_engine_limits.md`](docs/research/beamng_engine_limits.md).
+* Terrain sampling resolution is 1.0–8.0 m per vertex depending on config while the
+  input Copernicus DEM is 30 m: away from graded corridors and carved waterways,
+  natural relief follows smooth bilinear DEM interpolation.
+* `tunnel=*` ways set `grade_terrain=False` and suppress surface DecalRoad output
+  rather than generating subterranean tunnel meshes.
+* Overpass is a donated service. Regional builds should use a local Geofabrik
+  `.osm.pbf` file in `.cache/` (`osm/pbf.py`); Overpass fallback degrades
+  gracefully per tile if rate-limited.
+* The whole-oblast build (220 × 145 km) requires multi-`TerrainBlock` tiling at
+  BeamNG's 8192-vertex limit — see
+  [`docs/research/beamng_engine_limits.md`](docs/research/beamng_engine_limits.md).
 
 ## Documentation
 
 * [Coordinate system](docs/coordinate_system.md) — why this projection, and how accuracy is proven
-* [Architecture](docs/architecture.md) — pipeline stages, data flow, and the decisions behind them
+* [Architecture](docs/architecture.md) — pipeline stages, coupled subsystems, and module boundaries
+* [Performance & budgets](docs/performance.md) — runtime optimizations, MCP benchmark harness, and D3D12 metrics
+* [Project status](docs/STATUS.md) — Golden Sector sign-off, MapNG baseline comparison, and reproduction CLI
 * [Data sources](docs/data_sources.md) — datasets, licences, attribution obligations
 * [BeamNG install](docs/beamng_install.md) — getting a generated level into the game
 * [Development](docs/development.md) — setup, testing, and the sandbox gotchas
