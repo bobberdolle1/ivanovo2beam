@@ -45,7 +45,7 @@ roads:
 
 level:
   id: ivanovo_shuya_v2
-  title: "Ivanovo 1:1 - Ivanovo-Kokhma-Shuya Corridor V2 (Р152)"
+  title: "Ivanovo - Kokhma - Shuya Corridor 1:1 (Р152)"
   # Midpoint of Ivanovo (40.97393, 56.99987) and Shuya (41.36444, 56.84861).
   center: [41.16958, 56.92439]
   # Spawn on Ivanovo-Shuya Highway (Кохомское шоссе / выезд на Шую).

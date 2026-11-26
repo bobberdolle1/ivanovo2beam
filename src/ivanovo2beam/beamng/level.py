@@ -35,6 +35,7 @@ Objects created here:
 from __future__ import annotations
 
 import json
+import shutil
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -48,6 +49,39 @@ _SCENE_NAMESPACE = uuid.UUID("1b4e28ba-2fa1-11d2-883f-0016d3cca427")
 
 #: Root group every level's scene hangs from.
 ROOT_GROUP = "MissionGroup"
+
+#: Directory holding curated real in-game level preview PNGs shipped with the package.
+BUNDLED_PREVIEWS_DIR = Path(__file__).resolve().parent / "previews"
+
+#: Curated human-friendly BeamNG level-selector metadata for primary shipped maps.
+LEVEL_METADATA: dict[str, dict[str, str]] = {
+    "ivanovo_shuya_v2": {
+        "title": "Ivanovo - Kokhma - Shuya Corridor 1:1 (Р152)",
+        "description": (
+            "1:1 scale 32.8 x 32.8 km central Russian corridor connecting Ivanovo, "
+            "Kokhma, and Shuya along the Р152 highway (OpenStreetMap & Copernicus DEM). "
+            "Includes 82 bridges, Uvod & Teza river crossings, summer forests, urban "
+            "blocks, and 6 spawn locations."
+        ),
+        "roads": "Р152 regional highway, urban asphalt streets, gravel roads and forest tracks (OpenStreetMap)",
+        "features": "1:1 scale 33 km corridor, 82 coupled bridges, summer forests & GroundCover, urban blocks, GOST roadside props",
+        "suitable_for": "free roam, highway cruising, traffic, gravel",
+        "country": "Russia",
+    },
+    "ivanovo_golden_sector": {
+        "title": "Ivanovo 1:1 - Golden Sector (Kokhma SE / Р152 Uvod Crossing)",
+        "description": (
+            "1:1 scale 4.1 x 4.1 km high-resolution (1.0 m) benchmark sector covering "
+            "the Kokhma SE / Р152 Uvod River crossing (OpenStreetMap & Copernicus DEM). "
+            "Features coupled river bridges, summer birch/pine forests, 8-layer "
+            "GroundCover, and urban junctions."
+        ),
+        "roads": "Р152 highway, urban streets, gravel and dirt tracks (OpenStreetMap)",
+        "features": "1.0 m high-res terrain, coupled Uvod River bridges, dense summer forests & GroundCover",
+        "suitable_for": "free roam, highway cruising, benchmarking, traffic",
+        "country": "Russia",
+    },
+}
 
 
 def stable_uuid(*parts: object) -> str:
@@ -294,6 +328,11 @@ class TerrainPlacement:
         return obj
 
 
+_DEFAULT_ROADS_DESC = "Asphalt, gravel and dirt roads generated from OpenStreetMap"
+_DEFAULT_SUITABLE_FOR = "free roam, traffic"
+_DEFAULT_FEATURES = "1:1 scale real-world terrain and road network"
+
+
 def build_info_json(
     level_id: str,
     title: str,
@@ -302,13 +341,15 @@ def build_info_json(
     extent_m: float,
     authors: str = "ivanovo2beam",
     biome: str = "central Russian plain",
-    roads: str = "Asphalt, gravel and dirt roads generated from OpenStreetMap",
-    suitable_for: str = "free roam, traffic",
-    features: str = "1:1 scale real-world terrain and road network",
+    roads: str = _DEFAULT_ROADS_DESC,
+    suitable_for: str = _DEFAULT_SUITABLE_FOR,
+    features: str = _DEFAULT_FEATURES,
     supports_traffic: bool = True,
     supports_time_of_day: bool = True,
     default_date: dict[str, int] | None = None,
     region: str = "europe",
+    country: str | None = None,
+    previews: Sequence[str] | None = None,
     road_rules: dict[str, bool] | None = None,
     spawn_points: Sequence[dict[str, Any]] | dict[str, Any] | None = None,
     default_spawn_point_name: str | None = "spawn_default",
@@ -316,7 +357,7 @@ def build_info_json(
     """Build a level's ``info.json``.
 
     Args:
-        level_id: Level identifier (used only for the preview filename).
+        level_id: Level identifier (used for the preview filename and curated metadata lookup).
         title: Title shown in the level selector.
         description: Longer description.
         extent_m: Ground extent in metres, recorded as the nominal ``size``.
@@ -329,6 +370,8 @@ def build_info_json(
         supports_time_of_day: Whether time of day may be changed.
         default_date: Default in-game date.
         region: Geographic region code, defaults to "europe".
+        country: Optional human-readable country label.
+        previews: Optional ordered list of preview image filenames.
         road_rules: Road rules dict, defaults to {"rightHandDrive": False, "turnOnRed": False}.
         spawn_points: Named spawn point definitions.
         default_spawn_point_name: Object name of the default spawn point.
@@ -336,12 +379,30 @@ def build_info_json(
     Returns:
         The ``info.json`` contents.
     """
+    meta = LEVEL_METADATA.get(level_id)
+    if meta is not None:
+        if title in (level_id, "Ivanovo 1:1 - Ivanovo-Kokhma-Shuya Corridor V2 (Р152)"):
+            title = meta["title"]
+        if not description or description.startswith("1:1 scale map of "):
+            description = meta["description"]
+        if roads == _DEFAULT_ROADS_DESC:
+            roads = meta["roads"]
+        if features == _DEFAULT_FEATURES:
+            features = meta["features"]
+        if suitable_for == _DEFAULT_SUITABLE_FOR:
+            suitable_for = meta["suitable_for"]
+        if country is None:
+            country = meta.get("country")
+
+    preview_list = [str(p) for p in previews] if previews is not None else [f"{level_id}_preview.png"]
+    primary_preview = preview_list[0] if preview_list else f"{level_id}_preview.png"
+
     size = round(extent_m)
     info: dict[str, Any] = {
         "defaultDate": default_date or {"year": 2026, "month": 6, "day": 20},
         "title": title,
         "description": description,
-        "previews": [f"{level_id}_preview.png"],
+        "previews": preview_list,
         "size": [size, size],
         "biome": biome,
         "region": region,
@@ -353,6 +414,8 @@ def build_info_json(
         "supportsTimeOfDay": supports_time_of_day,
         "roadRules": road_rules if road_rules is not None else {"rightHandDrive": False, "turnOnRed": False},
     }
+    if country:
+        info["country"] = country
     if default_spawn_point_name:
         info["defaultSpawnPointName"] = default_spawn_point_name
     if spawn_points is not None:
@@ -362,7 +425,7 @@ def build_info_json(
             {
                 "objectname": default_spawn_point_name,
                 "translationId": "ui.freeroam.spawns.default",
-                "preview": f"{level_id}_preview.png",
+                "preview": primary_preview,
             }
         ]
     return info
@@ -620,6 +683,45 @@ def build_road_object(
     }
 
 
+def install_bundled_previews(
+    level_dir: Path,
+    level_id: str,
+    *,
+    previews: Sequence[str] | None = None,
+    write_preview_alias: bool = True,
+) -> list[Path]:
+    """Copy a bundled real in-game screenshot preview into ``level_dir`` if available.
+
+    When a curated preview exists under ``beamng/previews/<level_id>_preview.png``,
+    it is copied into ``level_dir`` before ``generate_level_preview_png`` runs so
+    primary levels display an actual in-game screenshot rather than the fallback
+    gradient. Also writes ``preview.png`` as an alias when requested.
+    """
+    src = BUNDLED_PREVIEWS_DIR / f"{level_id}_preview.png"
+    if not src.is_file():
+        return []
+
+    root = level_dir.resolve()
+    targets: list[str] = [f"{level_id}_preview.png"]
+    if previews:
+        for item in previews:
+            name = str(item)
+            if name not in targets:
+                targets.append(name)
+    if write_preview_alias and "preview.png" not in targets:
+        targets.append("preview.png")
+
+    copied: list[Path] = []
+    for rel in targets:
+        dst = (level_dir / rel).resolve()
+        if not dst.is_relative_to(root):
+            raise ValueError(f"refusing to write preview outside the level directory: {rel}")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+        copied.append(dst)
+    return copied
+
+
 def write_level_files(level_dir: Path, files: dict[str, str]) -> list[Path]:
     """Write rendered level files under a level directory.
 
@@ -643,4 +745,18 @@ def write_level_files(level_dir: Path, files: dict[str, str]) -> list[Path]:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(contents, encoding="utf-8")
         written.append(target)
+
+    if "info.json" in files:
+        try:
+            info = json.loads(files["info.json"])
+        except json.JSONDecodeError:
+            info = {}
+        previews = info.get("previews") if isinstance(info, dict) and isinstance(info.get("previews"), list) else []
+        level_id = level_dir.name
+        if previews and isinstance(previews[0], str) and previews[0].endswith("_preview.png"):
+            level_id = previews[0].removesuffix("_preview.png")
+        for path in install_bundled_previews(level_dir, level_id, previews=previews):
+            if path not in written:
+                written.append(path)
+        written.sort()
     return written
