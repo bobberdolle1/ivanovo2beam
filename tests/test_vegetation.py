@@ -1121,6 +1121,12 @@ class TestGroundCoverAndMultiTierForest:
                     assert isinstance(uvs, list) and len(uvs) == 4
 
         assert {"Grass", "Meadow", "DryGrass", "Field", "ForestFloor"}.issubset(active_layers)
+        assert stats.total_max_elements <= 240_000
+        close_gc = next(o for o in objs if o["name"] == "gc_meadow_grass_close")
+        assert close_gc["radius"] <= 40.0
+        for t in close_gc["Types"]:
+            if t.get("clumpRadius") is not None:
+                assert t["clumpRadius"] <= 1.0
 
     def test_groundcover_links_3d_shapes_when_beamng_present(self, tmp_path: Path) -> None:
         import zipfile

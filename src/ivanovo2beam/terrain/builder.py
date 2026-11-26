@@ -597,8 +597,16 @@ def grade_corridors(
             if blend_half <= half_width:
                 alpha = np.where(dist <= half_width, 1.0, 0.0)
             else:
-                frac = np.clip((dist - half_width) / (blend_half - half_width), 0.0, 1.0)
-                alpha = 0.5 * (1.0 + np.cos(math.pi * frac))
+                flat_half = (
+                    min(blend_half, max(half_width, 0.72 * cell_size_m))
+                    if cell_size_m <= 4.0
+                    else half_width
+                )
+                if blend_half <= flat_half:
+                    alpha = np.where(dist <= flat_half, 1.0, 0.0)
+                else:
+                    frac = np.clip((dist - flat_half) / (blend_half - flat_half), 0.0, 1.0)
+                    alpha = 0.5 * (1.0 + np.cos(math.pi * frac))
             road_z = (z0 + t * (z1 - z0)).astype(np.float32)
 
             win_inf = influence[row_lo : row_hi + 1, col_lo : col_hi + 1]
@@ -636,15 +644,13 @@ def grade_corridors(
                 win_tw[ties] += seg_claim[ties]
                 win_claim[ties] = np.maximum(win_claim[ties], seg_claim[ties])
 
-            in_sh = (dist > half_width) & (dist <= corridor_half)
-            if in_sh.any():
-                win_sh_mask[in_sh] = True
-
             # Keep carriageway Asphalt strictly inside half_width_m (with sub-cell inset on paved
             # roads so 1 m square terrain pixels never poke outside feathered DecalRoad edges),
-            # and paint a narrow Gravel shoulder rim right along the decal edge so tall Grass
-            # GroundCover billboards do not poke through white edge markings.
-            is_paved = corridor.material_key in {"Asphalt", "Asphalt_worn", "Concrete"} and half_width >= 2.0
+            # and paint a Gravel shoulder rim right along the decal edge so tall Grass
+            # GroundCover billboards do not poke through white edge markings or narrow streets
+            # on 2 m / 4 m terrain grids.
+            is_paved_surface = corridor.material_key in {"Asphalt", "Asphalt_worn", "Concrete"}
+            is_paved = is_paved_surface and half_width >= 2.0
             paint_inset = min(0.22, 0.22 * cell_size_m) if is_paved else 0.0
             in_cw = dist <= max(0.5, half_width - paint_inset)
             if in_cw.any():
@@ -653,29 +659,24 @@ def grade_corridors(
                 win_mat[cw_owner] = material_idx
 
             # Limit painted shoulder verge width so 12 m grading skirts never paint
-            # 24 m-wide Gravel/Dirt highways along narrow rural tracks.
+            # 24 m-wide Gravel/Dirt highways along narrow rural tracks, while scaling
+            # paved Gravel rim on 2 m / 4 m grids so Grass vertices never sit under asphalt.
+            use_gravel_verge = is_paved_surface and corridor.shoulder_material_key == "Grass" and "Gravel" in material_index
             sh_pad = (
-                0.55
-                if (is_paved and corridor.shoulder_material_key == "Grass" and "Gravel" in material_index)
+                (0.55 if cell_size_m <= 1.5 else max(0.85, 0.55 * cell_size_m))
+                if use_gravel_verge
                 else (
                     max(2.0, cell_size_m * 0.6)
                     if corridor.shoulder_material_key == "Grass"
                     else max(0.8, cell_size_m * 0.6)
                 )
             )
-            eff_shoulder_idx = (
-                material_index["Gravel"]
-                if (is_paved and corridor.shoulder_material_key == "Grass" and "Gravel" in material_index)
-                else shoulder_idx
-            )
+            eff_shoulder_idx = material_index["Gravel"] if use_gravel_verge else shoulder_idx
             in_sh_paint = (dist > max(0.5, half_width - paint_inset)) & (dist <= min(corridor_half, half_width + sh_pad))
             if in_sh_paint.any():
                 sh_owner = in_sh_paint & (seg_claim >= win_claim - np.float32(1e-5))
                 win_sh[sh_owner] = eff_shoulder_idx
                 win_sh_mask[in_sh_paint] = True
-                win_sh_mask[in_sh & ~in_sh_paint] = False
-            else:
-                win_sh_mask[in_sh] = False
 
             touched += int(inside.sum())
 
@@ -1316,10 +1317,12 @@ def carve_water(
             sub_elev[bank_mask] = new_bank
             sub_touched[bank_mask] = True
 
-            # Narrow damp shoreline (<= 1.0m) -> Sand; narrow bank -> dithered RiverbankSoil
-            # Guarantee soil_out_w spans at least 1 grid step past sand_out_w on coarse grids too.
-            sand_out_w = min(1.2, max(0.85, cell_size_m * 0.6))
-            soil_out_w = max(2.8, sand_out_w + max(1.8, cell_size_m * 1.1))
+            # Narrow damp shoreline -> Sand; narrow bank -> dithered RiverbankSoil.
+            # Keep mud/soil bands compact on coarse 4 m grids and narrow streams.
+            sand_out_w = min(1.2, max(0.75, cell_size_m * 0.45))
+            soil_out_w = max(2.8, sand_out_w + max(1.8, cell_size_m * 0.9))
+            if hw <= 3.0:
+                soil_out_w = min(soil_out_w, max(2.2, cell_size_m * 0.85))
             in_sand = dist_from_shore <= sand_out_w
             in_soil = (dist_from_shore > sand_out_w) & (dist_from_shore <= soil_out_w)
             soil_prob = np.clip(1.0 - (dist_from_shore - sand_out_w) / max(0.5, soil_out_w - sand_out_w), 0.0, 1.0)
@@ -1854,7 +1857,7 @@ def strip_forest_canopy(
     idx_forest_floor = material_index.get("ForestFloor")
     if idx_forest_floor is not None:
         if cell_size_m <= 4.0:
-            mat_r = max(1, round(3.5 / cell_size_m))
+            mat_r = max(2, round(6.5 / cell_size_m))
             forest_weight = _box_blur_float(forest_mask.astype(np.float64), mat_r, passes=2)
             noise = _fbm_noise_grid(
                 n,
@@ -1862,10 +1865,10 @@ def strip_forest_canopy(
                 origin_x,
                 origin_y,
                 seed=313,
-                octaves_m=((48.0, 0.45), (16.0, 0.35), (5.0, 0.20)),
+                octaves_m=((64.0, 0.45), (22.0, 0.35), (max(5.0, 2.2 * cell_size_m), 0.20)),
             )
             # Deep forest cores stay ForestFloor; edges and small sparse tree clumps dither naturally
-            paint_ff = forest_mask & ((forest_weight >= 0.82) | (forest_weight > (0.30 + 0.52 * noise)))
+            paint_ff = forest_mask & ((forest_weight >= 0.84) | (forest_weight > (0.28 + 0.54 * noise)))
             layers[paint_ff] = idx_forest_floor
         else:
             layers[forest_mask] = idx_forest_floor
@@ -1921,7 +1924,7 @@ def paint_landcover(
             origin_x,
             origin_y,
             seed=101,
-            octaves_m=((110.0, 0.45), (38.0, 0.35), (12.0, 0.20)),
+            octaves_m=((120.0, 0.45), (44.0, 0.35), (max(14.0, 3.0 * cell_size_m), 0.20)),
         )
         noise_detail = _fbm_noise_grid(
             n,
@@ -1929,7 +1932,7 @@ def paint_landcover(
             origin_x,
             origin_y,
             seed=202,
-            octaves_m=((28.0, 0.45), (9.0, 0.35), (3.0, 0.20)),
+            octaves_m=((36.0, 0.45), (14.0, 0.35), (max(3.5, 2.2 * cell_size_m), 0.20)),
         )
 
     for mat_key, poly_list in polygons_by_material.items():
@@ -1964,13 +1967,24 @@ def paint_landcover(
             continue
 
         assert noise_macro is not None and noise_detail is not None
-        feather_r = max(1, round(3.0 / cell_size_m))
+        feather_r = max(2, round(6.5 / cell_size_m))
         weight = _box_blur_float(mask.astype(np.float64), feather_r, passes=2)
 
         if mat_key == "ForestFloor":
-            # Keep ForestFloor in deep woods; dither forest edges and skip tiny sparse tree clumps
-            paint = mask & ((weight >= 0.82) | (weight > (0.30 + 0.52 * noise_detail)))
-            layers[paint] = mat_idx
+            # Keep ForestFloor in deep woods with organic mossy Grass/Meadow glades so large
+            # forest interiors never render as solid dark-brown dirt slabs; dither edges smoothly.
+            paint = mask & ((weight >= 0.84) | (weight > (0.28 + 0.54 * noise_detail)))
+            idx_grass = material_index.get("Grass")
+            idx_meadow = material_index.get("Meadow")
+            chosen_ff = np.full((n, n), mat_idx, dtype=np.uint8)
+            glade_val = noise_macro * 0.60 + noise_detail * 0.40
+            if idx_grass is not None:
+                grass_glade = glade_val > 0.50
+                chosen_ff = np.where(grass_glade, idx_grass, chosen_ff)
+            if idx_meadow is not None:
+                meadow_glade = (glade_val > 0.68) & (noise_detail > 0.52)
+                chosen_ff = np.where(meadow_glade, idx_meadow, chosen_ff)
+            layers[paint] = chosen_ff[paint]
             total_painted += int(paint.sum())
         elif mat_key == "Field":
             # Organic dithered field borders + stubble/DryGrass/Meadow breakup inside large fields

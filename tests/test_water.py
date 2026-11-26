@@ -618,6 +618,77 @@ class TestBeamNGExport:
             sx, sy, _ = b["scale"]
             assert not (cx - sx * 0.5 < 70.0 < cx + sx * 0.5 and cy - sy * 0.5 < 60.0 < cy + sy * 0.5)
 
+    def test_export_water_to_scene_clips_to_bounds_and_coalesces_diagonal_river(self):
+        tree = SceneTree("ivanovo_test")
+        offmap_river = RiverChannel(
+            osm_id=501,
+            name="Offmap",
+            waterway_type="river",
+            points=np.array([[-500.0, 100.0], [-100.0, 100.0]], dtype=np.float64),
+            width_m=20.0,
+            depth_m=2.0,
+            z_water=np.array([100.0, 99.0], dtype=np.float64),
+        )
+        straddling_river = RiverChannel(
+            osm_id=502,
+            name="Crossing",
+            waterway_type="river",
+            points=np.array([[-200.0, 200.0], [1200.0, 200.0]], dtype=np.float64),
+            width_m=20.0,
+            depth_m=2.0,
+            z_water=np.array([100.0, 93.0], dtype=np.float64),
+        )
+        offmap_body = WaterBody(
+            osm_id=503,
+            name="OffmapReservoir",
+            water_type="reservoir",
+            outer_ring=np.array([[-800.0, -800.0], [-200.0, -800.0], [-200.0, -200.0], [-800.0, -200.0], [-800.0, -800.0]]),
+            depth_m=3.5,
+            z_water=95.0,
+        )
+        # Diagonal 40m-wide river polygon straddling clip_bounds [0..1000]^2
+        diag_ring = np.array(
+            [
+                [-400.0, -400.0],
+                [-360.0, -400.0],
+                [1400.0, 1360.0],
+                [1400.0, 1400.0],
+                [1360.0, 1400.0],
+                [-400.0, -360.0],
+                [-400.0, -400.0],
+            ],
+            dtype=np.float64,
+        )
+        diag_body = WaterBody(
+            osm_id=504,
+            name="DiagRiver",
+            water_type="river",
+            outer_ring=diag_ring,
+            depth_m=2.5,
+            z_water=90.0,
+        )
+        net = WaterNetwork(rivers=[offmap_river, straddling_river], water_bodies=[offmap_body, diag_body])
+        clip = (0.0, 0.0, 1000.0, 1000.0)
+        count = export_water_to_scene(tree, net, clip_bounds=clip)
+        objs = tree.objects[WATER_GROUP]
+        assert count == len(objs)
+
+        rivers = [o for o in objs if o["class"] == "River"]
+        assert len(rivers) == 1
+        assert rivers[0]["nodes"][0][0] == pytest.approx(0.0, abs=1e-3)
+        assert rivers[0]["nodes"][-1][0] == pytest.approx(1000.0, abs=1e-3)
+
+        blocks = [o for o in objs if o["class"] == "WaterBlock"]
+        assert all(not b["name"].startswith("waterblock_503") for b in blocks)
+        assert 4 <= len(blocks) <= 40
+        for b in blocks:
+            cx, cy, _ = b["position"]
+            sx, sy, _ = b["scale"]
+            assert cx - sx * 0.5 >= -1.0 and cx + sx * 0.5 <= 1001.0
+            assert cy - sy * 0.5 >= -1.0 and cy + sy * 0.5 <= 1001.0
+            # Must not spill into dry corner (800, 100) far from diagonal river
+            assert not (cx - sx * 0.5 <= 800.0 <= cx + sx * 0.5 and cy - sy * 0.5 <= 100.0 <= cy + sy * 0.5)
+
 
 class TestInfoJson:
     def test_info_json_road_rules_and_region(self):
