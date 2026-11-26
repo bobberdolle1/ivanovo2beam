@@ -1249,6 +1249,139 @@ _PROVIDERS: dict[str, Callable[[BBox, float | None, float, Path], _FetchResult]]
 # --------------------------------------------------------------------------- #
 
 
+def _cached_dem_candidates(
+    bbox: BBox,
+    cache_dir: Path,
+    *,
+    requested_source: str,
+    allow_fallback: bool,
+    exclude_path: Path | None = None,
+) -> list[tuple[bool, float, bool, float, int, Path, dict[str, Any], _TileGrid]]:
+    """Find valid cached GeoTIFFs overlapping ``bbox``, ranked by coverage and fidelity."""
+    candidates: list[tuple[bool, float, bool, float, int, Path, dict[str, Any], _TileGrid]] = []
+    req_area = max(1e-12, (bbox.east - bbox.west) * (bbox.north - bbox.south))
+    for tif_cand in sorted(cache_dir.glob("*.tif")):
+        if tif_cand.name.startswith("."):
+            continue
+        if exclude_path is not None and tif_cand == exclude_path:
+            continue
+        entry = _valid_cache_entry(tif_cand, tif_cand.with_suffix(".json"))
+        if entry is None:
+            continue
+        schema = entry.get("schema")
+        if schema is not None and not str(schema).startswith("ivanovo2beam.dem/"):
+            continue
+        crs_epsg = entry.get("crs_epsg")
+        if crs_epsg is not None and crs_epsg != 4326:
+            continue
+        cached_source = entry.get("source")
+        if not isinstance(cached_source, str) or cached_source not in _SOURCES:
+            continue
+        if not allow_fallback and cached_source != requested_source:
+            continue
+        meta_bbox = entry.get("bbox")
+        if not isinstance(meta_bbox, dict):
+            continue
+        try:
+            mw = float(meta_bbox["west"])
+            ms = float(meta_bbox["south"])
+            me = float(meta_bbox["east"])
+            mn = float(meta_bbox["north"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if me < bbox.west or mw > bbox.east or mn < bbox.south or ms > bbox.north:
+            continue
+        try:
+            tile = _read_tile_grid(tif_cand)
+        except (DemSourceUnavailable, OSError, ValueError):
+            continue
+        tile_west = tile.left_center
+        tile_east = tile.left_center + (tile.width - 1) * tile.xres
+        tile_north = tile.top_center
+        tile_south = tile.top_center - (tile.height - 1) * tile.yres
+        ov_w = max(bbox.west, tile_west)
+        ov_e = min(bbox.east, tile_east)
+        ov_s = max(bbox.south, tile_south)
+        ov_n = min(bbox.north, tile_north)
+        if ov_e <= ov_w or ov_n <= ov_s:
+            continue
+        covers_full = (
+            tile_west <= bbox.west + _PIXEL_TOL
+            and tile_east >= bbox.east - _PIXEL_TOL
+            and tile_south <= bbox.south + _PIXEL_TOL
+            and tile_north >= bbox.north - _PIXEL_TOL
+        )
+        overlap_frac = ((ov_e - ov_w) * (ov_n - ov_s)) / req_area
+        native_m = _native_resolution_m(tile.xres, tile.yres, bbox.center[1])
+        candidates.append(
+            (
+                covers_full,
+                round(overlap_frac, 6),
+                cached_source == requested_source,
+                -native_m,
+                -int(tif_cand.stat().st_size),
+                tif_cand,
+                entry,
+                tile,
+            )
+        )
+    candidates.sort(key=lambda item: item[:5], reverse=True)
+    return candidates
+
+
+def _slice_from_cached_dem(
+    bbox: BBox,
+    cache_dir: Path,
+    *,
+    requested_source: str,
+    resolution_m: float | None,
+    allow_fallback: bool,
+    work: Path,
+    exclude_path: Path | None = None,
+) -> tuple[_FetchResult, str] | None:
+    """Crop/resample an overlapping cached GeoTIFF in ``cache_dir`` when offline."""
+    candidates = _cached_dem_candidates(
+        bbox,
+        cache_dir,
+        requested_source=requested_source,
+        allow_fallback=allow_fallback,
+        exclude_path=exclude_path,
+    )
+    if not candidates:
+        return None
+    work.mkdir(parents=True, exist_ok=True)
+    for idx, (_full, _frac, _match, _neg_res, _neg_sz, cand_tif, entry, tile) in enumerate(candidates):
+        native = _native_resolution_m(tile.xres, tile.yres, bbox.center[1])
+        factor = _decimation_factor(resolution_m, native)
+        out = work / f"cached_slice_{idx}.tif"
+        try:
+            stats = _mosaic_geographic_tiles([tile], bbox, out, decimate=factor)
+        except DemSourceUnavailable:
+            continue
+        if math.isnan(stats["min"]):
+            continue
+        payload = _Payload(
+            url=f"cache://{cand_tif.name}",
+            path=cand_tif,
+            n_bytes=int(cand_tif.stat().st_size),
+            sha256=str(entry["sha256"]),
+            etag=None,
+        )
+        result = _FetchResult(
+            path=out,
+            payloads=(payload,),
+            detail={
+                "cached_slice_from": cand_tif.name,
+                "cached_source_urls": list(entry.get("source_urls", [])),
+                "native_resolution_m": native,
+                "decimation": factor,
+            },
+            stats=stats,
+        )
+        return result, str(entry["source"])
+    return None
+
+
 def fetch_dem(
     bbox: BBox,
     cache_dir: Path,
@@ -1350,6 +1483,18 @@ def fetch_dem(
                 continue
             resolved = candidate
             break
+        if result is None:
+            cached_slice = _slice_from_cached_dem(
+                bbox,
+                cache_dir,
+                requested_source=source,
+                resolution_m=resolution_m,
+                allow_fallback=allow_fallback,
+                work=work / "cached_slice",
+                exclude_path=tif_path,
+            )
+            if cached_slice is not None:
+                result, resolved = cached_slice
         if result is None:
             raise DemFetchError(
                 f"no DEM source could deliver bbox {bbox.as_tuple()}: " + " | ".join(attempts),
