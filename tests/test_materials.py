@@ -339,3 +339,50 @@ class TestAssetReferences:
         assert sum((a - b) ** 2 for a, b in zip(grass, field, strict=True)) ** 0.5 > 65.0
         # RiverbankSoil & Sand stay clearly separated
         assert sum((a - b) ** 2 for a, b in zip(sand, bank, strict=True)) ** 0.5 > 120.0
+
+    def test_meadow_and_dry_grass_present_with_valid_channels(self) -> None:
+        for required in (
+            "Grass",
+            "Meadow",
+            "DryGrass",
+            "Field",
+            "ForestFloor",
+            "RiverbankSoil",
+            "Sand",
+            "Pebbles",
+            "Dirt",
+            "Concrete",
+            "Gravel",
+            "Rock",
+            "Asphalt",
+            "Asphalt_worn",
+        ):
+            assert required in DEFAULT_MATERIAL_ORDER
+            assert required in MATERIAL_LIBRARY
+        grouped = asset_paths_by_material(["Meadow", "DryGrass"])
+        assert len(grouped["Meadow"]) == 10
+        assert len(grouped["DryGrass"]) == 10
+
+    def test_base_textures_have_isotropic_variation_and_no_flat_stripes(self, tmp_path) -> None:
+        import zlib
+        import numpy as np
+        from ivanovo2beam.beamng.materials import DEFAULT_BASE_TEX_SIZE, write_terrain_base_textures
+
+        paths = write_terrain_base_textures(tmp_path, ["Grass", "Meadow", "Field", "DryGrass"])
+        color_paths = [p for p in paths if p.name.endswith("_b.png")]
+        assert len(color_paths) >= 4
+        for p in color_paths:
+            raw = p.read_bytes()
+            pos = 8
+            idat = bytearray()
+            while pos < len(raw):
+                ln = struct.unpack(">I", raw[pos : pos + 4])[0]
+                ctype = raw[pos + 4 : pos + 8]
+                if ctype == b"IDAT":
+                    idat.extend(raw[pos + 8 : pos + 8 + ln])
+                pos += 12 + ln
+            dec = zlib.decompress(bytes(idat))
+            arr = np.frombuffer(dec, dtype=np.uint8).reshape(
+                DEFAULT_BASE_TEX_SIZE, 1 + DEFAULT_BASE_TEX_SIZE * 3
+            )[:, 1:]
+            assert float(arr.std()) > 4.0

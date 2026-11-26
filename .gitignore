@@ -11,6 +11,7 @@ pytest-cache-files-*/
 # Cache of downloaded / derived geodata
 .cache/
 .scratch/
+.tmp/
 
 # Python
 __pycache__/

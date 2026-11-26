@@ -47,7 +47,8 @@ def tmp_path(request: pytest.FixtureRequest) -> Iterator[Path]:
         Path to an empty directory, removed after the test.
     """
     safe_name = request.node.name.replace("[", "_").replace("]", "_").replace("/", "_")[:40]
-    base = REPO_ROOT / "build" / "tmp"
+    env_tmp = os.environ.get("IVANOVO_PYTEST_TMP")
+    base = Path(env_tmp) if env_tmp else (REPO_ROOT / "build" / "tmp")
     base.mkdir(parents=True, exist_ok=True)
     directory = base / f"{safe_name}-{uuid.uuid4().hex[:8]}"
     directory.mkdir()

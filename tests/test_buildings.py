@@ -795,3 +795,112 @@ class TestExport:
 
     def test_unique_threshold_is_documented_and_sane(self) -> None:
         assert 100.0 < UNIQUE_AREA_M2 < 100_000.0
+
+
+class TestRussianRegionalBuildings:
+    _osm = staticmethod(_make_osm)
+
+    def test_russian_village_house_and_yes_area_tiers(self, projection) -> None:
+        osm = self._osm(
+            projection,
+            [
+                (rectangle(5.0, 5.0, 0.0, 0.0).tolist(), {"building": "yes"}),      # 25 m2 shed-scale
+                (rectangle(10.0, 10.0, 50.0, 0.0).tolist(), {"building": "yes"}),   # 100 m2 house-scale
+                (rectangle(25.0, 20.0, 150.0, 0.0).tolist(), {"building": "yes"}),  # 500 m2 commercial-scale
+                (rectangle(10.0, 9.0, 250.0, 0.0).tolist(), {"building": "house"}),
+                (rectangle(6.0, 4.0, 300.0, 0.0).tolist(), {"building": "dacha"}),
+            ],
+        )
+        buildings, _ = extract_buildings(osm, projection)
+        small_yes = next(b for b in buildings if b.klass == "yes" and b.area_m2 < 35.0)
+        dacha_b = next(b for b in buildings if b.klass == "house" and b.area_m2 < 35.0)
+        house_b = next(b for b in buildings if b.klass == "house" and b.area_m2 > 50.0)
+        med_yes = next(b for b in buildings if b.klass == "yes" and 80.0 < b.area_m2 < 120.0)
+        big_yes = next(b for b in buildings if b.klass == "yes" and b.area_m2 > 400.0)
+
+        assert small_yes.height_m == pytest.approx(2.8)
+        assert med_yes.height_m == pytest.approx(4.2)
+        assert big_yes.height_m == pytest.approx(7.0)
+        assert house_b.height_m == pytest.approx(3.6)
+        assert dacha_b.klass == "house"
+
+    def test_osm_roof_shape_normalization_and_skillion(self) -> None:
+        from ivanovo2beam.buildings.mesh import normalize_roof_shape
+
+        assert normalize_roof_shape("hipped") == "hip"
+        assert normalize_roof_shape("gabled") == "gable"
+        assert normalize_roof_shape("hipped-and-gabled") == "gable"
+        assert normalize_roof_shape("skillion") == "skillion"
+        assert normalize_roof_shape("flat_roof") == "flat"
+
+        skillion_mesh = extrude_footprint(rectangle(8.0, 6.0), height_m=3.0, roof="skillion")
+        low, high = skillion_mesh.bounds_z()
+        assert low == pytest.approx(0.0)
+        assert high > 3.0
+
+        hipped_mesh = extrude_footprint(rectangle(12.0, 8.0), height_m=3.6, roof="hipped")
+        assert hipped_mesh.bounds_z()[1] > 3.6
+
+    def test_regional_residential_materials_variety_and_textures(self, tmp_path: Path) -> None:
+        from ivanovo2beam.buildings.export import BUILDING_MATERIALS, resolve_building_materials
+
+        ring = rectangle(10.0, 9.0)
+        walls = set()
+        roofs = set()
+        for oid in range(1, 25):
+            b = BuildingFootprint(oid, ring, "house", 3.6, 1.0, "", 90.0, "default")
+            w, r = resolve_building_materials(b)
+            walls.add(w)
+            roofs.add(r)
+            assert w in BUILDING_MATERIALS
+            assert r in BUILDING_MATERIALS
+
+        assert len(walls) >= 4
+        assert len(roofs) >= 3
+        for spec in BUILDING_MATERIALS.values():
+            assert spec["baseColorMap"].startswith("/assets/materials/tileable/")
+
+        # Sheds get weathered planks + slate/metal roof
+        shed = BuildingFootprint(7, rectangle(5.0, 4.0), "shed", 2.8, 1.0, "", 20.0, "default")
+        sw, sr = resolve_building_materials(shed)
+        assert sw == "bld_wood_shed"
+        assert sr in {"bld_roof_slate", "bld_roof_metal"}
+
+    def test_sloped_hillside_anchor_prevents_uphill_burial_and_downhill_floating(
+        self, tmp_path: Path
+    ) -> None:
+        class _SlopedBuild:
+            def __init__(self) -> None:
+                # Linear slope along x: 100.0 m at x=0 rising to 105.0 m at x=50
+                xs = np.linspace(100.0, 110.0, 100, dtype=np.float32)
+                self.elevations = np.broadcast_to(xs, (100, 100)).copy()
+                self.origin_x = 0.0
+                self.origin_y = 0.0
+                self.cell_size_m = 1.0
+
+        build = _SlopedBuild()
+        # Building spanning x=10..30 (ground drops/rises ~2m across footprint)
+        fp = BuildingFootprint(
+            osm_id=501,
+            ring=rectangle(20.0, 10.0, 10.0, 10.0),
+            klass="house",
+            height_m=3.6,
+            levels=1.0,
+            name="",
+            area_m2=200.0,
+            height_source="default",
+        )
+        objs, stats = export_buildings([fp], build, level_id="lvl", level_dir=tmp_path, batch_chunks=True)
+        assert stats.chunks == 1
+        dae_rel = objs[0]["shapeName"].removeprefix("/levels/lvl/")
+        root = ET.fromstring((tmp_path / dae_rel).read_text(encoding="utf-8"))
+        pos_el = root.find(
+            f".//{COLLADA_NS}source[@id='lvl_chunk_0_0-mesh-positions']/{COLLADA_NS}float_array"
+        )
+        assert pos_el is not None and pos_el.text
+        vals = [float(v) for v in pos_el.text.split()]
+        zs = vals[2::3]
+        # Downhill corner ground is ~101.0m, uphill corner ground is ~103.0m.
+        # Skirt must extend below 101.0m and eave/roof must sit above 103.0m + 3.0m.
+        assert min(zs) <= 99.5
+        assert max(zs) >= 106.0

@@ -58,6 +58,7 @@ from ivanovo2beam.roads.bridges import (
 from ivanovo2beam.roads.build import (
     _should_generate_markings,
     add_network_to_scene,
+    build_carriageway_index,
     generate_lane_markings,
     road_to_decal_objects,
     roads_to_corridors,
@@ -66,6 +67,7 @@ from ivanovo2beam.roads.build import (
 )
 from ivanovo2beam.roads.materials import write_road_materials
 from ivanovo2beam.roads.network import extract_roads, road_network_stats
+from ivanovo2beam.roads.props import add_roadside_props_to_scene
 from ivanovo2beam.roads.railways import (
     export_railways,
     extract_railways,
@@ -738,9 +740,16 @@ def build_level(
         if forest_geoms:
             landcover_polys["ForestFloor"] = forest_geoms
 
-        building_rings = [b.ring for b in buildings] if buildings else []
-        if industrial_rings or building_rings:
-            landcover_polys["Concrete"] = industrial_rings + building_rings
+        # Only paint Concrete under industrial/commercial zones and large multi-story
+        # footprints; private houses, dachas and sheds sit naturally on grass/garden soil
+        # with their foundation skirts embedded into the terrain.
+        large_building_rings = [
+            b.ring
+            for b in buildings
+            if getattr(b, "archetype", "") in {"industrial", "commercial", "apartment"}
+        ]
+        if industrial_rings or large_building_rings:
+            landcover_polys["Concrete"] = industrial_rings + large_building_rings
 
         forest_polys = forest_geoms if forest_geoms else None
         build = build_terrain(
@@ -809,6 +818,7 @@ def build_level(
         build,
         group_path=("level_objects", "road_network"),
         max_node_spacing_m=max_decal_node_spacing_m,
+        include_props=False,
     )
     if bridge_profiles:
         portal_pts: list[tuple[float, float]] = []
@@ -865,6 +875,18 @@ def build_level(
                         tree.add_object(("level_objects", "road_network"), mark_obj)
                         export_stats["exported"] += 1
                         export_stats["nodes"] += len(mark_obj["nodes"])  # type: ignore[arg-type]
+
+    # -- roadside props (signs, poles, bus stops, guardrails) --------------
+    road_prop_stats = add_roadside_props_to_scene(
+        tree,
+        roads,
+        build,
+        level_dir=level_dir,
+        osm_data=osm_data,
+        projection=config.projection,
+        carriageway_index=build_carriageway_index(roads),
+    )
+    export_stats.update(road_prop_stats)
 
     # -- water scene objects -----------------------------------------------
     if water_network is not None:
@@ -948,6 +970,7 @@ def build_level(
     building_stats: dict[str, Any] = {"enabled": config.buildings_enabled}
     if config.buildings_enabled and buildings:
         report(0.82, f"generating {len(buildings)} buildings")
+        bld_bounds = (origin_x + 2.0, origin_y + 2.0, origin_x + extent - 2.0, origin_y + extent - 2.0)
         building_objects, building_export = export_buildings(
             buildings,
             build,
@@ -955,6 +978,7 @@ def build_level(
             level_dir=level_dir,
             max_instances=max_buildings,
             batch_chunks=True,
+            terrain_bounds=bld_bounds,
         )
         for obj in building_objects:
             tree.add_object(("level_objects", "buildings"), obj)

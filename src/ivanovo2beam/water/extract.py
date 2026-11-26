@@ -209,6 +209,39 @@ def _running_median(values: NDArray[np.float64], window: int = 5) -> NDArray[np.
     return out
 
 
+def _is_dry_water_feature(tags: dict[str, str]) -> bool:
+    """Return True if OSM tags mark a waterway/waterbody as dry, seasonal, or intermittent."""
+    intermittent = tags.get("intermittent", "").strip().lower()
+    seasonal = tags.get("seasonal", "").strip().lower()
+    water = tags.get("water", "").strip().lower()
+    regime = tags.get("water_regime", "").strip().lower()
+    return (
+        intermittent in {"yes", "true", "dry"}
+        or seasonal in {"yes", "true"}
+        or water == "dry"
+        or regime in {"dry", "intermittent"}
+    )
+
+
+def _is_underground_waterway(tags: dict[str, str]) -> bool:
+    """Return True if a linear waterway runs underground (culvert, tunnel, negative layer)."""
+    tunnel = tags.get("tunnel", "").strip().lower()
+    culvert = tags.get("culvert", "").strip().lower()
+    location = tags.get("location", "").strip().lower()
+    if tunnel in {"culvert", "yes", "flooded", "building_passage"} or culvert == "yes":
+        return True
+    if location == "underground":
+        return True
+    raw_layer = tags.get("layer", "").strip()
+    if raw_layer:
+        try:
+            if int(raw_layer) < 0:
+                return True
+        except ValueError:
+            pass
+    return False
+
+
 def compute_downstream_water_profile(
     points: NDArray[np.float64],
     projection: RegionProjection,
@@ -222,9 +255,10 @@ def compute_downstream_water_profile(
     """Compute smooth, downstream monotonic water elevations along a waterway.
 
     Probes across the channel bed (``+-3 m`` and across ``width_m``), applies a
-    5-sample running median (``runningMedian(5)``), enforces strictly
-    non-increasing downstream flow (``med[i] = min(med[i-1], med[i])``), and
-    places the water surface ``surface_offset_m`` (+0.25 m) above channel min.
+    5-sample running median (``runningMedian(5)``), clamps long segments along
+    sub-sampled interior points, enforces strictly non-increasing downstream flow
+    (``med[i] = min(med[i-1], med[i])``), and places the water surface
+    ``surface_offset_m`` (+0.25 m) above channel min.
 
     Channel probing and median filtering adapted from MapNG
     (https://github.com/nikkiluzader/mapng), MIT License.
@@ -285,8 +319,8 @@ def compute_downstream_water_profile(
 
     med = _running_median(ground, window=5)
 
-    # Clamp against lowest ground across full channel width so water never floats on side slopes
-    half_w = max(probe_r, float(width_m) * 0.5)
+    # Clamp against lowest ground across full channel width (+1.5m bank margin) so water never floats
+    half_w = max(probe_r, float(width_m) * 0.5 + 1.5)
     across_min = ground.copy()
     for frac in (-1.0, -0.5, 0.5, 1.0):
         ax = cx + normals[:, 0] * (frac * half_w)
@@ -296,16 +330,25 @@ def compute_downstream_water_profile(
         across_min = np.minimum(across_min, az)
     med = np.minimum(med, across_min)
 
-    # Clamp segment midpoints so straight segments over curved bends do not float > 0.5m
-    mid_x = 0.5 * (cx[:-1] + cx[1:])
-    mid_y = 0.5 * (cy[:-1] + cy[1:])
-    mid_z = _sample_dem_world(mid_x, mid_y, projection, dem)
+    # Probe intermediate points along segments (every ~15m, at least midpoint) so long spans
+    # over curved bends or valleys cannot float > 0.5m above intermediate ground.
     for i in range(1, n):
-        if np.isfinite(mid_z[i - 1]):
-            cap = float(mid_z[i - 1]) + 0.5
-            if 0.5 * (med[i] + med[i - 1]) > cap:
-                med[i] = min(med[i], cap)
-                med[i - 1] = min(med[i - 1], cap)
+        slen = float(seg_lens[i - 1])
+        n_sub = max(2, min(16, round(slen / 15.0) + 1))
+        ts = np.linspace(0.2, 0.8, max(1, n_sub - 1)) if n_sub > 2 else np.array([0.5])
+        sx = cx[i - 1] + (cx[i] - cx[i - 1]) * ts
+        sy = cy[i - 1] + (cy[i] - cy[i - 1]) * ts
+        sz = _sample_dem_world(sx, sy, projection, dem)
+        valid_sz = sz[np.isfinite(sz)]
+        if valid_sz.size:
+            for t_val, z_val in zip(ts, sz, strict=True):
+                if not np.isfinite(z_val):
+                    continue
+                cap = float(z_val) + 0.5
+                interp_z = float(med[i - 1] + t_val * (med[i] - med[i - 1]))
+                if interp_z > cap:
+                    med[i] = min(med[i], cap)
+                    med[i - 1] = min(med[i - 1], cap)
 
     # Smooth gently if long spacing requested, while preserving channel minimum cap
     total_len = float(seg_lens.sum())
@@ -331,18 +374,37 @@ def compute_lake_water_elevation(
 ) -> float:
     """Compute level water surface z_water for a lake/reservoir.
 
-    Samples DEM along the perimeter and selects a representative level surface.
+    Samples DEM across the interior basin (falling back to the perimeter ring for
+    narrow polygons) and selects the 25th percentile so standing water sits cleanly
+    inside its basin without floating above low banks or dropping below flat water.
     """
     if dem is None or outer_ring.shape[0] < 3:
         return default_elevation_m
 
-    lons, lats = projection.world_to_geo_array(outer_ring[:, 0], outer_ring[:, 1])
-    samples = np.asarray(dem.sample_array(lons, lats), dtype=np.float64)
+    import shapely
+
+    poly = Polygon(outer_ring)
+    if poly.is_valid and not poly.is_empty:
+        minx, miny, maxx, maxy = poly.bounds
+        span = max(maxx - minx, maxy - miny)
+        if span >= 6.0:
+            grid_n = 16
+            xs = np.linspace(minx + 0.5, maxx - 0.5, grid_n)
+            ys = np.linspace(miny + 0.5, maxy - 0.5, grid_n)
+            gx, gy = np.meshgrid(xs, ys)
+            fx, fy = gx.ravel(), gy.ravel()
+            inside = shapely.contains_xy(poly, fx, fy)
+            if int(inside.sum()) >= 4:
+                interior_samples = _sample_dem_world(fx[inside], fy[inside], projection, dem)
+                valid_int = interior_samples[np.isfinite(interior_samples)]
+                if valid_int.size >= 4:
+                    return float(np.percentile(valid_int, 25))
+
+    samples = _sample_dem_world(outer_ring[:, 0], outer_ring[:, 1], projection, dem)
     valid = samples[np.isfinite(samples)]
     if valid.size == 0:
         return default_elevation_m
-    # Use 10th percentile / min to sit at or slightly below the natural bank
-    return float(np.percentile(valid, 10))
+    return float(np.percentile(valid, 20))
 
 
 def _assemble_multipolygon(
@@ -557,6 +619,8 @@ def extract_water(
     for way in all_ways:
         waterway = way.tags.get("waterway")
         if waterway in WATERWAY_SPECS and not way.is_area:
+            if _is_dry_water_feature(way.tags) or _is_underground_waterway(way.tags):
+                continue
             coords = []
             for nid in way.nodes:
                 c = osm_data.node_coord(nid)
@@ -618,6 +682,8 @@ def extract_water(
             or landuse in ("reservoir", "basin")
         )
         if is_water and way.is_closed:
+            if _is_dry_water_feature(way.tags):
+                continue
             coords = []
             for nid in way.nodes:
                 c = osm_data.node_coord(nid)

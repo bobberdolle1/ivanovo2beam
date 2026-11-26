@@ -526,6 +526,98 @@ class TestBeamNGExport:
         classes = {obj["class"] for obj in water_objects}
         assert classes == {"River", "WaterBlock"}
 
+    def test_extract_water_skips_culverts_underground_and_dry(self, projection):
+        from ivanovo2beam.water.extract import extract_water
+
+        lon0, lat0 = projection.origin_lon, projection.origin_lat
+        dlat = 1.0 / 111_000.0
+        dlon = 1.0 / (111_000.0 * np.cos(np.radians(lat0)))
+
+        nodes: dict[int, OsmNode] = {}
+        ways: list[OsmWay] = []
+        nid = 1
+
+        def _add_way(wid: int, coords_m: list[tuple[float, float]], tags: dict[str, str]) -> None:
+            nonlocal nid
+            w_nids: list[int] = []
+            closed = len(coords_m) >= 3 and coords_m[0] == coords_m[-1]
+            pts = coords_m[:-1] if closed else coords_m
+            for x, y in pts:
+                nodes[nid] = OsmNode(id=nid, lon=lon0 + x * dlon, lat=lat0 + y * dlat)
+                w_nids.append(nid)
+                nid += 1
+            if closed:
+                w_nids.append(w_nids[0])
+            ways.append(OsmWay(id=wid, nodes=tuple(w_nids), tags=tags))
+
+        _add_way(1001, [(5.0, 10.0), (50.0, 10.0)], {"waterway": "stream", "name": "SurfaceStream"})
+        _add_way(1002, [(5.0, 20.0), (50.0, 20.0)], {"waterway": "river", "tunnel": "culvert", "layer": "-1"})
+        _add_way(1003, [(5.0, 30.0), (50.0, 30.0)], {"waterway": "ditch", "intermittent": "yes"})
+        _add_way(
+            1004,
+            [(10.0, 40.0), (30.0, 40.0), (30.0, 55.0), (10.0, 55.0), (10.0, 40.0)],
+            {"natural": "water", "water": "pond"},
+        )
+        _add_way(
+            1005,
+            [(35.0, 40.0), (55.0, 40.0), (55.0, 55.0), (35.0, 55.0), (35.0, 40.0)],
+            {"natural": "water", "intermittent": "yes"},
+        )
+
+        osm = OsmData(nodes=nodes, ways=ways)
+        net = extract_water(osm, projection, MockDem(100.0))
+        assert [r.osm_id for r in net.rivers] == [1001]
+        assert [b.osm_id for b in net.water_bodies] == [1004]
+
+    def test_build_river_object_subdivide_and_calm_waves(self):
+        channel = RiverChannel(
+            osm_id=5,
+            name="Uvod",
+            waterway_type="river",
+            points=np.array([[0.0, 0.0], [40.0, 0.0]], dtype=np.float64),
+            width_m=24.0,
+            depth_m=2.5,
+            z_water=np.array([95.0, 94.8], dtype=np.float64),
+        )
+        obj = build_river_object("lvl", channel)
+        assert obj["subdivideLength"] == 4.0
+        assert obj["overallWaveMagnitude"] <= 0.05
+        assert all(w["waveMagnitude"] <= 0.1 for w in obj["Waves (vertex undulation)"])
+
+    def test_export_water_to_scene_tiles_concave_oxbow_polygon(self):
+        tree = SceneTree("ivanovo_test")
+        # Concave C-shaped oxbow polygon spanning 120x120m (fill ratio < 0.72)
+        oxbow = WaterBody(
+            osm_id=42,
+            name="Oxbow",
+            water_type="oxbow",
+            outer_ring=np.array(
+                [
+                    [0.0, 0.0],
+                    [120.0, 0.0],
+                    [120.0, 20.0],
+                    [20.0, 20.0],
+                    [20.0, 100.0],
+                    [120.0, 100.0],
+                    [120.0, 120.0],
+                    [0.0, 120.0],
+                    [0.0, 0.0],
+                ],
+                dtype=np.float64,
+            ),
+            depth_m=2.0,
+            z_water=95.0,
+        )
+        count = export_water_to_scene(tree, WaterNetwork(water_bodies=[oxbow]))
+        assert count > 1
+        blocks = tree.objects[WATER_GROUP]
+        assert all(b["class"] == "WaterBlock" for b in blocks)
+        # None of the tiled WaterBlocks should sit over the dry inner courtyard center (70, 60)
+        for b in blocks:
+            cx, cy, _ = b["position"]
+            sx, sy, _ = b["scale"]
+            assert not (cx - sx * 0.5 < 70.0 < cx + sx * 0.5 and cy - sy * 0.5 < 60.0 < cy + sy * 0.5)
+
 
 class TestInfoJson:
     def test_info_json_road_rules_and_region(self):

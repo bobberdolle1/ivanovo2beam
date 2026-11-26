@@ -543,50 +543,84 @@ def run_live_benchmark(
 
     log_path = user_dir / "beamng.log"
     old_log_head = log_path.read_text(encoding="utf-8", errors="ignore")[:256] if log_path.is_file() else ""
-    cmd = [str(beamng_exe), "-enablemcp", "-level", level_id, "-vehicle", vehicle]
-    game_cwd = beamng_exe.parent.parent
     t0 = time.perf_counter()
-    proc = subprocess.Popen(cmd, cwd=str(game_cwd) if game_cwd.is_dir() else None)
     samples: list[dict[str, Any]] = []
     limit_reason: str | None = None
     world_ready_wall_s: float | None = None
     mcp = BeamNgMcpClient(url=mcp_url)
     mcp_ready = False
+    proc: subprocess.Popen[Any] | None = None
+    beamng_pid: int | None = None
+    bridge: Any = None
 
     try:
-        # 1. Wait for MCP endpoint, then poll worldReadyState >= 1 (beamng.log is stdio-buffered)
-        deadline = t0 + load_timeout_s
-        base_port_match = re.search(r":(\d+)", mcp_url)
-        base_port = int(base_port_match.group(1)) if base_port_match else 29292
+        from beamng_host_bridge import STATE_FILE as _BRIDGE_STATE_FILE
+        from beamng_host_bridge import BeamNgBridgeClient
 
-        while time.perf_counter() < deadline:
-            if proc.poll() is not None:
-                raise RuntimeError(f"BeamNG exited prematurely with code {proc.returncode}")
+        if _BRIDGE_STATE_FILE.is_file():
+            cand_bridge = BeamNgBridgeClient(state_file=_BRIDGE_STATE_FILE)
+            if cand_bridge.get("/health", timeout=2.0).get("ok"):
+                bridge = cand_bridge
+    except Exception:
+        bridge = None
 
-            if not mcp_ready:
-                for port in range(base_port, base_port + 8):
-                    candidate = BeamNgMcpClient(url=f"http://127.0.0.1:{port}/mcp")
-                    if candidate.initialize():
-                        mcp = candidate
-                        mcp_ready = True
+    try:
+        if bridge is not None:
+            start_res = bridge.post(
+                "/beamng/start",
+                {
+                    "level_id": level_id,
+                    "vehicle": vehicle,
+                    "wait_ready": True,
+                    "timeout_s": load_timeout_s,
+                    "restart_if_running": True,
+                },
+                timeout=load_timeout_s + 30.0,
+            )
+            beamng_pid = int(start_res["pid"])
+            world_ready_wall_s = float(start_res.get("world_ready_s") or round(time.perf_counter() - t0, 2))
+            if start_res.get("mcp_url"):
+                mcp = BeamNgMcpClient(url=str(start_res["mcp_url"]))
+            mcp_ready = mcp.initialize()
+        else:
+            cmd = [str(beamng_exe), "-enablemcp", "-level", level_id, "-vehicle", vehicle]
+            game_cwd = beamng_exe.parent.parent
+            proc = subprocess.Popen(cmd, cwd=str(game_cwd) if game_cwd.is_dir() else None)
+            beamng_pid = proc.pid
+
+            # 1. Wait for MCP endpoint, then poll worldReadyState >= 1 (beamng.log is stdio-buffered)
+            deadline = t0 + load_timeout_s
+            base_port_match = re.search(r":(\d+)", mcp_url)
+            base_port = int(base_port_match.group(1)) if base_port_match else 29292
+
+            while time.perf_counter() < deadline:
+                if proc.poll() is not None:
+                    raise RuntimeError(f"BeamNG exited prematurely with code {proc.returncode}")
+
+                if not mcp_ready:
+                    for port in range(base_port, base_port + 8):
+                        candidate = BeamNgMcpClient(url=f"http://127.0.0.1:{port}/mcp")
+                        if candidate.initialize():
+                            mcp = candidate
+                            mcp_ready = True
+                            break
+
+                if mcp_ready:
+                    with contextlib.suppress(Exception):
+                        wrs_raw = mcp.call_tool("run_lua", {"code": "return tostring(worldReadyState or 0)"})
+                        wrs = int(float(wrs_raw.strip()))
+                        if wrs >= 1:
+                            if world_ready_wall_s is None:
+                                world_ready_wall_s = round(time.perf_counter() - t0, 2)
+                            if wrs >= 2 or (time.perf_counter() - t0 - world_ready_wall_s) >= 5.0:
+                                break
+                elif log_path.is_file():
+                    text = log_path.read_text(encoding="utf-8", errors="ignore")
+                    if text and text[:256] != old_log_head and "setting worldReadyState to 1" in text:
+                        world_ready_wall_s = round(time.perf_counter() - t0, 2)
                         break
 
-            if mcp_ready:
-                with contextlib.suppress(Exception):
-                    wrs_raw = mcp.call_tool("run_lua", {"code": "return tostring(worldReadyState or 0)"})
-                    wrs = int(float(wrs_raw.strip()))
-                    if wrs >= 1:
-                        if world_ready_wall_s is None:
-                            world_ready_wall_s = round(time.perf_counter() - t0, 2)
-                        if wrs >= 2 or (time.perf_counter() - t0 - world_ready_wall_s) >= 5.0:
-                            break
-            elif log_path.is_file():
-                text = log_path.read_text(encoding="utf-8", errors="ignore")
-                if text and text[:256] != old_log_head and "setting worldReadyState to 1" in text:
-                    world_ready_wall_s = round(time.perf_counter() - t0, 2)
-                    break
-
-            time.sleep(0.5)
+                time.sleep(0.5)
 
         if world_ready_wall_s is None:
             raise TimeoutError(f"Timed out after {load_timeout_s}s waiting for level load")
@@ -642,7 +676,7 @@ def run_live_benchmark(
                 row["nv_gpu_util_pct"] = nv["gpu_util_pct"]
                 row["nv_gpu_clock_mhz"] = nv["gpu_clock_mhz"]
 
-            pmem = get_process_memory_mib(proc.pid)
+            pmem = get_process_memory_mib(beamng_pid) if beamng_pid else None
             if pmem:
                 row["proc_working_set_mib"] = pmem["working_set_mib"]
                 row["proc_private_mib"] = pmem["private_bytes_mib"]
@@ -672,11 +706,15 @@ def run_live_benchmark(
                         )
                     },
                 )
-        _close_process_wm_close(proc.pid)
-        try:
-            proc.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            proc.terminate()
+        if bridge is not None:
+            with contextlib.suppress(Exception):
+                bridge.post("/beamng/stop")
+        elif proc is not None:
+            _close_process_wm_close(proc.pid)
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                proc.terminate()
 
     return {
         "wall_load_to_ready_s": world_ready_wall_s,

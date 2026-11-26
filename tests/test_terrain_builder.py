@@ -1334,9 +1334,212 @@ class TestCoupledTerrainBridgeWater:
             cell_size_m=1.0,
             bank_transition_m=8.0,
         )
-        # Inside bend at (55, 55): dist from water is ~3m -> RiverbankSoil, not double-dipped Sand
-        assert layers_w[55, 55] == mat_idx["RiverbankSoil"]
-        # 1m outside water edge (x=40, y=71 -> dist=7m, 1m from hw=6m) -> Sand
-        assert layers_w[71, 40] == mat_idx["Sand"]
-        # 2m outside water edge (x=40, y=72 -> dist=8m, 2m from hw=6m > 1.5m) -> RiverbankSoil
-        assert layers_w[72, 40] == mat_idx["RiverbankSoil"]
+        # Inside bend at (55, 55): dist from centerline is 9.0m -> no double-dipped Sand
+        assert layers_w[55, 55] in (mat_idx["RiverbankSoil"], mat_idx["Grass"])
+        # Shoreline rim along Catmull-Rom bend includes narrow Sand without multi-metre bleed
+        assert (layers_w[69:74, 40] == mat_idx["Sand"]).any()
+        assert layers_w[74, 40] != mat_idx["Sand"]
+
+
+class TestV2TerrainAndHydrologyRegressions:
+    def test_carve_water_couples_channel_inside_hw_and_slopes_pond_outer_bank(self) -> None:
+        from ivanovo2beam.beamng.materials import DEFAULT_MATERIAL_ORDER
+        from ivanovo2beam.terrain.builder import carve_water
+        from ivanovo2beam.water.extract import RiverChannel, WaterBody, WaterNetwork
+
+        mat_idx = {k: i for i, k in enumerate(DEFAULT_MATERIAL_ORDER)}
+        n, cell = 128, 1.0
+        elev = np.full((n, n), 100.0, dtype=np.float64)
+        layers = np.zeros((n, n), dtype=np.uint8)
+
+        river = RiverChannel(
+            osm_id=10,
+            name="Coupled",
+            waterway_type="river",
+            points=np.array([[0.0, 32.0], [127.0, 32.0]], dtype=np.float64),
+            width_m=20.0,  # hw = 10.0m, shore_hw = 9.2m
+            depth_m=2.0,
+            z_water=np.array([98.0, 98.0], dtype=np.float64),
+        )
+        pond = WaterBody(
+            osm_id=11,
+            name="Pond",
+            water_type="pond",
+            outer_ring=np.array(
+                [[45.0, 75.0], [85.0, 75.0], [85.0, 110.0], [45.0, 110.0], [45.0, 75.0]],
+                dtype=np.float64,
+            ),
+            depth_m=2.0,
+            z_water=93.0,
+        )
+        carve_water(
+            elev,
+            layers,
+            mat_idx,
+            WaterNetwork(rivers=[river], water_bodies=[pond]),
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=cell,
+            bank_transition_m=8.0,
+        )
+        # Centerline submerged to z_water - depth; at nominal hw=10m ground is >= z_water (no dry shelf!)
+        assert np.isclose(elev[32, 64], 96.0)
+        assert elev[32 + 10, 64] >= 98.0
+        # Outer pond bank (y=75 -> y=55) slopes smoothly from 93m up to 100m without vertical cliff
+        pond_bank_steps = np.abs(np.diff(elev[52:76, 65]))
+        assert float(np.max(pond_bank_steps)) < 0.65
+
+    def test_carve_water_road_protect_tapers_cliff(self) -> None:
+        from ivanovo2beam.beamng.materials import DEFAULT_MATERIAL_ORDER
+        from ivanovo2beam.terrain.builder import carve_water
+        from ivanovo2beam.water.extract import RiverChannel, WaterNetwork
+
+        mat_idx = {k: i for i, k in enumerate(DEFAULT_MATERIAL_ORDER)}
+        n = 96
+        elev = np.full((n, n), 100.0, dtype=np.float64)
+        layers = np.zeros((n, n), dtype=np.uint8)
+        road_keep = np.zeros((n, n), dtype=bool)
+        road_keep[:, :36] = True  # embankment edge 6m west of shoreline
+
+        river = RiverChannel(
+            osm_id=12,
+            name="BankRoad",
+            waterway_type="river",
+            points=np.array([[48.0, 0.0], [48.0, 95.0]], dtype=np.float64),
+            width_m=10.0,
+            depth_m=2.0,
+            z_water=np.array([96.0, 96.0], dtype=np.float64),
+        )
+        carve_water(
+            elev,
+            layers,
+            mat_idx,
+            WaterNetwork(rivers=[river]),
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=1.0,
+            road_keep_mask=road_keep,
+        )
+        # Keep zone stays at 100m, transition to carved river tapers gently
+        assert np.allclose(elev[48, :36], 100.0)
+        assert float(np.max(np.abs(np.diff(elev[48, 35:52])))) < 1.25
+
+    def test_reanchor_water_to_terrain_lowers_canopy_raised_river(self) -> None:
+        from ivanovo2beam.terrain.builder import _reanchor_water_to_terrain
+        from ivanovo2beam.water.extract import RiverChannel, WaterNetwork
+
+        elev = np.full((64, 64), 100.0, dtype=np.float64)
+        river = RiverChannel(
+            osm_id=77,
+            name="CanopyStream",
+            waterway_type="stream",
+            points=np.array([[8.0, 32.0], [56.0, 32.0]], dtype=np.float64),
+            width_m=4.0,
+            depth_m=0.8,
+            z_water=np.array([112.0, 112.0], dtype=np.float64),  # +12m canopy offset
+        )
+        _reanchor_water_to_terrain(
+            elev,
+            WaterNetwork(rivers=[river]),
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=1.0,
+        )
+        assert np.all(river.z_water <= 100.0)
+
+    def test_strip_forest_canopy_feathers_boundary_and_dithers_sparse_clump(self) -> None:
+        from shapely.geometry import Polygon
+
+        from ivanovo2beam.beamng.materials import DEFAULT_MATERIAL_ORDER
+        from ivanovo2beam.terrain.builder import strip_forest_canopy
+
+        mat_idx = {k: i for i, k in enumerate(DEFAULT_MATERIAL_ORDER)}
+        n = 96
+        elev = np.full((n, n), 100.0, dtype=np.float64)
+        layers = np.zeros((n, n), dtype=np.uint8)
+        # Large canopy-raised forest block + tiny 4x4m sparse tree clump
+        big_forest = Polygon([[20.0, 20.0], [60.0, 20.0], [60.0, 60.0], [20.0, 60.0], [20.0, 20.0]])
+        elev[20:61, 20:61] = 112.0
+        tiny_clump = Polygon([[76.0, 76.0], [80.0, 76.0], [80.0, 80.0], [76.0, 80.0], [76.0, 76.0]])
+
+        _, stats = strip_forest_canopy(
+            elev,
+            layers,
+            mat_idx,
+            [big_forest, tiny_clump],
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=1.0,
+            canopy_height_m=12.0,
+        )
+        assert stats["canopy_height_m"] == pytest.approx(12.0)
+        # Feathered boundary smooths the 12m DSM edge instead of leaving a 1-cell cliff
+        edge_steps = np.abs(np.diff(elev[40, 14:28]))
+        assert float(np.max(edge_steps)) < 3.0
+        # Tiny sparse clump must not paint a full solid ForestFloor square
+        tiny_slice = layers[76:81, 76:81]
+        assert int((tiny_slice == mat_idx["ForestFloor"]).sum()) < tiny_slice.size
+
+    def test_grade_corridors_insets_asphalt_and_caps_track_shoulder(self) -> None:
+        from ivanovo2beam.beamng.materials import DEFAULT_MATERIAL_ORDER
+
+        mat_idx = {k: i for i, k in enumerate(DEFAULT_MATERIAL_ORDER)}
+        n = 64
+        elev = np.full((n, n), 100.0, dtype=np.float64)
+        layers = np.zeros((n, n), dtype=np.uint8)
+
+        asphalt_road = RoadCorridor(
+            points=np.array([[4.0, 20.0], [60.0, 20.0]]),
+            half_width_m=4.0,
+            corridor_half_width_m=8.0,
+            surface_z=np.array([100.0, 100.0]),
+            key="urban",
+            material_key="Asphalt",
+            shoulder_material_key="Grass",
+        )
+        wide_track = RoadCorridor(
+            points=np.array([[4.0, 44.0], [60.0, 44.0]]),
+            half_width_m=1.75,
+            corridor_half_width_m=12.0,
+            surface_z=np.array([100.0, 100.0]),
+            key="track",
+            material_key="Gravel",
+            shoulder_material_key="Dirt",
+        )
+        grade_corridors(
+            elev,
+            layers,
+            mat_idx,
+            [asphalt_road, wide_track],
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=1.0,
+        )
+        # Asphalt must stay inset inside half_width=4.0 (no bleed at +/-4m rows 16 & 24)
+        assert layers[16, 32] != mat_idx["Asphalt"]
+        assert layers[24, 32] != mat_idx["Asphalt"]
+        assert layers[20, 32] == mat_idx["Asphalt"]
+        # Track shoulder Dirt must NOT blast across the full 24m corridor (5m away is Grass)
+        assert layers[49, 32] == mat_idx["Grass"]
+
+    def test_paint_landcover_natural_variation_breakup(self) -> None:
+        from shapely.geometry import Polygon
+
+        from ivanovo2beam.beamng.materials import DEFAULT_MATERIAL_ORDER
+        from ivanovo2beam.terrain.builder import paint_landcover
+
+        mat_idx = {k: i for i, k in enumerate(DEFAULT_MATERIAL_ORDER)}
+        layers = np.zeros((160, 160), dtype=np.uint8)
+        field_poly = Polygon([[20.0, 20.0], [140.0, 20.0], [140.0, 80.0], [20.0, 80.0], [20.0, 20.0]])
+        paint_landcover(
+            layers,
+            mat_idx,
+            {"Field": [field_poly]},
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=1.0,
+            natural_variation=True,
+        )
+        assert (layers == mat_idx["Field"]).any()
+        assert (layers == mat_idx["Meadow"]).any()
+        assert (layers == mat_idx["DryGrass"]).any()

@@ -35,11 +35,36 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 _FIXED_TIMESTAMP = "2026-01-01T00:00:00"
 
 #: Roof pitch as a fraction of half the building depth.
-_ROOF_PITCH = 0.35
+_ROOF_PITCH = 0.30
 
 #: Bounds on generated roof height, in metres.
 _MIN_ROOF_M = 0.8
 _MAX_ROOF_M = 4.5
+
+_ROOF_ALIASES: dict[str, str] = {
+    "flat": "flat",
+    "flat_roof": "flat",
+    "hip": "hip",
+    "hipped": "hip",
+    "pyramidal": "hip",
+    "half-hipped": "hip",
+    "skillion": "skillion",
+    "lean_to": "skillion",
+    "gable": "gable",
+    "gabled": "gable",
+    "pitched": "gable",
+    "gambrel": "gable",
+    "mansard": "gable",
+    "hipped-and-gabled": "gable",
+    "saltbox": "gable",
+    "round": "gable",
+}
+
+
+def normalize_roof_shape(roof: str | None, fallback: str = "gable") -> str:
+    """Normalise an OSM ``roof:shape`` tag into ``flat``, ``hip``, ``skillion``, or ``gable``."""
+    key = (roof or fallback).strip().lower()
+    return _ROOF_ALIASES.get(key, _ROOF_ALIASES.get(fallback.strip().lower(), "gable"))
 
 
 @dataclass(slots=True)
@@ -183,12 +208,14 @@ def _face_normal(
 
 def roof_height_for(ring: NDArray[np.float64], klass_roof: str) -> float:
     """Return a plausible roof height for a footprint."""
-    if klass_roof == "flat":
+    roof = normalize_roof_shape(klass_roof)
+    if roof == "flat":
         return 0.0
     xs = ring[:, 0]
     ys = ring[:, 1]
     depth = min(float(xs.max() - xs.min()), float(ys.max() - ys.min()))
-    return float(np.clip(depth * _ROOF_PITCH, _MIN_ROOF_M, _MAX_ROOF_M))
+    height = float(np.clip(depth * _ROOF_PITCH, _MIN_ROOF_M, _MAX_ROOF_M))
+    return min(height, 2.2) if roof == "skillion" else height
 
 
 class MeshBuilder:
@@ -473,6 +500,7 @@ def _build_extruded_body(
     roof_material: str,
 ) -> None:
     """Build walls, roof and ground cap in the ridge-aligned local frame."""
+    roof = normalize_roof_shape(roof)
     n_ring = ring.shape[0]
     base_z = min_height_m - skirt_depth_m
     top_z = min_height_m + height_m
@@ -562,6 +590,27 @@ def _build_extruded_body(
 
         for cell in cells:
             builder.add_roof_triangles(cell, lift_hip, material=roof_material, up=True)
+        return
+
+    if roof == "skillion":
+        span_y = max(1e-6, maxy - miny)
+
+        def lift_skillion(_x: float, y: float) -> float:
+            t = (y - miny) / span_y
+            return top_z + roof_height * min(1.0, max(0.0, t))
+
+        wall_tops = [lift_skillion(ring[i, 0], ring[i, 1]) for i in range(n_ring)]
+        builder.add_wall_strip(
+            ring, [base_z] * n_ring, wall_tops, material=wall_material, is_inner=False
+        )
+        for h in holes:
+            nh = h.shape[0]
+            h_tops = [lift_skillion(h[i, 0], h[i, 1]) for i in range(nh)]
+            builder.add_wall_strip(
+                h, [base_z] * nh, h_tops, material=wall_material, is_inner=True
+            )
+        builder.add_roof_triangles(polygon, lambda _x, _y: base_z, material=wall_material, up=False)
+        builder.add_roof_triangles(polygon, lift_skillion, material=roof_material, up=True)
         return
 
     # Gable roof

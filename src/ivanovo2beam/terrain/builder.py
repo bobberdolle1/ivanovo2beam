@@ -640,12 +640,42 @@ def grade_corridors(
             if in_sh.any():
                 win_sh_mask[in_sh] = True
 
-            # Keep carriageway Asphalt strictly inside half_width_m
-            in_cw = dist <= half_width
+            # Keep carriageway Asphalt strictly inside half_width_m (with sub-cell inset on paved
+            # roads so 1 m square terrain pixels never poke outside feathered DecalRoad edges),
+            # and paint a narrow Gravel shoulder rim right along the decal edge so tall Grass
+            # GroundCover billboards do not poke through white edge markings.
+            is_paved = corridor.material_key in {"Asphalt", "Asphalt_worn", "Concrete"} and half_width >= 2.0
+            paint_inset = min(0.22, 0.22 * cell_size_m) if is_paved else 0.0
+            in_cw = dist <= max(0.5, half_width - paint_inset)
             if in_cw.any():
                 win_cw[in_cw] = True
                 cw_owner = in_cw & (seg_claim >= win_claim - np.float32(1e-5))
                 win_mat[cw_owner] = material_idx
+
+            # Limit painted shoulder verge width so 12 m grading skirts never paint
+            # 24 m-wide Gravel/Dirt highways along narrow rural tracks.
+            sh_pad = (
+                0.55
+                if (is_paved and corridor.shoulder_material_key == "Grass" and "Gravel" in material_index)
+                else (
+                    max(2.0, cell_size_m * 0.6)
+                    if corridor.shoulder_material_key == "Grass"
+                    else max(0.8, cell_size_m * 0.6)
+                )
+            )
+            eff_shoulder_idx = (
+                material_index["Gravel"]
+                if (is_paved and corridor.shoulder_material_key == "Grass" and "Gravel" in material_index)
+                else shoulder_idx
+            )
+            in_sh_paint = (dist > max(0.5, half_width - paint_inset)) & (dist <= min(corridor_half, half_width + sh_pad))
+            if in_sh_paint.any():
+                sh_owner = in_sh_paint & (seg_claim >= win_claim - np.float32(1e-5))
+                win_sh[sh_owner] = eff_shoulder_idx
+                win_sh_mask[in_sh_paint] = True
+                win_sh_mask[in_sh & ~in_sh_paint] = False
+            else:
+                win_sh_mask[in_sh] = False
 
             touched += int(inside.sum())
 
@@ -659,7 +689,7 @@ def grade_corridors(
         surface_z = tie_z_sum[blended].astype(np.float64) / np.where(w_b > 0.0, w_b, 1.0)
         elevations[blended] = elevations[blended] * (1.0 - inf_b) + surface_z * inf_b
 
-        # 2 m seam blur pass over junction transitions within 0.5 m height delta
+        # 2 m seam blur pass over junction transitions within 4.0 m height delta
         if seam_mask.any():
             blur_r = max(1, round(2.0 / cell_size_m))
             blur_band = _morph_mask(seam_mask, blur_r, erode=False) & blended
@@ -675,16 +705,42 @@ def grade_corridors(
                         nr = np.clip(br + dr, 0, n - 1)
                         nc = np.clip(bc + dc, 0, n - 1)
                         nz = elevations[nr, nc]
-                        ok = blended[nr, nc] & (np.abs(nz - z_base) <= 0.5)
+                        ok = blended[nr, nc] & (np.abs(nz - z_base) <= 4.0)
                         acc = np.where(ok, acc + nz, acc)
                         cnt = np.where(ok, cnt + 1.0, cnt)
                 elevations[br, bc] = acc / cnt
 
-        # Paint carriageway strictly inside half_width_m and shoulders inside corridor_half_width_m
+        # Paint carriageway strictly inside half_width_m and shoulders inside shoulder verge
         carriageway = carriageway_mask & (influence >= np.float32(1.0 - 1e-6))
         shoulder = shoulder_mask & blended & ~carriageway
         layers[carriageway] = owner_material[carriageway]
         layers[shoulder] = owner_shoulder[shoulder]
+
+        # Relax artificial steep steps in road shoulders/skirts (never altering flat carriageways)
+        # when nearby road corridors meet at different heights on steep hillsides.
+        if cell_size_m <= 4.0:
+            skirt = blended & ~carriageway_mask
+            if skirt.any():
+                max_step = 0.45 * cell_size_m
+                sr, sc = np.where(skirt)
+                for _ in range(6):
+                    cur = elevations[sr, sc]
+                    nbr_sum = np.zeros_like(cur)
+                    nbr_cnt = np.zeros_like(cur)
+                    max_diff = np.zeros_like(cur)
+                    for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                        nr = np.clip(sr + dr, 0, n - 1)
+                        nc = np.clip(sc + dc, 0, n - 1)
+                        nz = elevations[nr, nc]
+                        nbr_sum += nz
+                        nbr_cnt += 1.0
+                        max_diff = np.maximum(max_diff, np.abs(nz - cur))
+                    steep_idx = max_diff > max_step
+                    if not steep_idx.any():
+                        break
+                    elevations[sr[steep_idx], sc[steep_idx]] = (
+                        0.35 * cur[steep_idx] + 0.65 * (nbr_sum[steep_idx] / nbr_cnt[steep_idx])
+                    )
 
     stats = {
         "corridors": len([c for c in corridors if c.grade_terrain and c.surface_z is not None]),
@@ -845,6 +901,228 @@ def build_road_keep_mask(
     return keep
 
 
+def _box_blur_float(arr: NDArray[np.float64], radius: int, *, passes: int = 2) -> NDArray[np.float64]:
+    """Fast separable box blur using cumulative sums (edge-replicated)."""
+    if radius <= 0 or arr.shape[0] == 0 or arr.shape[1] == 0:
+        return arr.astype(np.float64, copy=True)
+    out = arr.astype(np.float64, copy=True)
+    w = 2 * radius + 1
+    for _ in range(max(1, passes)):
+        # Horizontal pass
+        p_h = np.pad(out, ((0, 0), (radius, radius)), mode="edge")
+        cs_h = np.empty((out.shape[0], p_h.shape[1] + 1), dtype=np.float64)
+        cs_h[:, 0] = 0.0
+        np.cumsum(p_h, axis=1, out=cs_h[:, 1:])
+        out = (cs_h[:, w:] - cs_h[:, :-w]) / float(w)
+        # Vertical pass
+        p_v = np.pad(out, ((radius, radius), (0, 0)), mode="edge")
+        cs_v = np.empty((p_v.shape[0] + 1, out.shape[1]), dtype=np.float64)
+        cs_v[0, :] = 0.0
+        np.cumsum(p_v, axis=0, out=cs_v[1:, :])
+        out = (cs_v[w:, :] - cs_v[:-w, :]) / float(w)
+    return out
+
+
+def _deterministic_hash_noise(
+    rows: NDArray[np.intp] | int,
+    cols: NDArray[np.intp] | int,
+    *,
+    seed: int = 1337,
+) -> NDArray[np.float64]:
+    """Return deterministic pseudo-random values in ``[0, 1)`` for integer grid coords."""
+    r = np.asarray(rows, dtype=np.uint64)
+    c = np.asarray(cols, dtype=np.uint64)
+    h = r * np.uint64(374761393) + c * np.uint64(668265263) + np.uint64(seed * 1442695041)
+    h = (h ^ (h >> np.uint64(13))) * np.uint64(1274126177)
+    h = h ^ (h >> np.uint64(16))
+    return (h & np.uint64(0xFFFFFF)).astype(np.float64) / float(0x1000000)
+
+
+def _fbm_noise_grid(
+    n: int,
+    cell_size_m: float,
+    origin_x: float,
+    origin_y: float,
+    *,
+    seed: int = 42,
+    octaves_m: tuple[tuple[float, float], ...] = ((96.0, 0.45), (32.0, 0.30), (10.0, 0.17), (3.5, 0.08)),
+) -> NDArray[np.float64]:
+    """Generate world-anchored multi-scale 2D smooth value noise in ``[0, 1]``."""
+    all_x = origin_x + np.arange(n, dtype=np.float64) * cell_size_m
+    all_y = origin_y + np.arange(n, dtype=np.float64) * cell_size_m
+    total = np.zeros((n, n), dtype=np.float64)
+    w_sum = 0.0
+
+    for idx, (scale_m, weight) in enumerate(octaves_m):
+        fx = all_x / scale_m
+        fy = all_y / scale_m
+        ix0 = np.floor(fx).astype(np.int64)
+        iy0 = np.floor(fy).astype(np.int64)
+        tx = fx - ix0
+        ty = fy - iy0
+        sx = tx * tx * (3.0 - 2.0 * tx)
+        sy = ty * ty * (3.0 - 2.0 * ty)
+
+        x0 = ix0[None, :]
+        x1 = x0 + 1
+        y0 = iy0[:, None]
+        y1 = y0 + 1
+        s = seed + idx * 97
+        v00 = _deterministic_hash_noise(y0, x0, seed=s)
+        v01 = _deterministic_hash_noise(y0, x1, seed=s)
+        v10 = _deterministic_hash_noise(y1, x0, seed=s)
+        v11 = _deterministic_hash_noise(y1, x1, seed=s)
+        oct_val = (
+            v00 * (1.0 - sx[None, :]) * (1.0 - sy[:, None])
+            + v01 * sx[None, :] * (1.0 - sy[:, None])
+            + v10 * (1.0 - sx[None, :]) * sy[:, None]
+            + v11 * sx[None, :] * sy[:, None]
+        )
+        total += weight * oct_val
+        w_sum += weight
+
+    return np.clip(total / max(1e-9, w_sum), 0.0, 1.0)
+
+
+def _catmull_rom_subdivide(
+    pts: NDArray[np.float64],
+    zw: NDArray[np.float64],
+    *,
+    max_step_m: float = 6.0,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Subdivide a river polyline along a smooth Catmull-Rom spline matching BeamNG ``River``."""
+    n_pts = pts.shape[0]
+    if n_pts < 3 or max_step_m <= 0.0:
+        return pts, zw
+
+    out_pts: list[NDArray[np.float64]] = []
+    out_z: list[float] = []
+    for i in range(n_pts - 1):
+        p0 = pts[max(0, i - 1)]
+        p1 = pts[i]
+        p2 = pts[i + 1]
+        p3 = pts[min(n_pts - 1, i + 2)]
+        z1 = float(zw[i])
+        z2 = float(zw[i + 1])
+        seg_len = float(math.hypot(float(p2[0] - p1[0]), float(p2[1] - p1[1])))
+        steps = max(1, math.ceil(seg_len / max_step_m))
+        for k in range(steps):
+            t = k / steps
+            t2 = t * t
+            t3 = t2 * t
+            pt = 0.5 * (
+                (2.0 * p1)
+                + (-p0 + p2) * t
+                + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+                + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3
+            )
+            out_pts.append(pt)
+            out_z.append(z1 + t * (z2 - z1))
+    out_pts.append(pts[-1])
+    out_z.append(float(zw[-1]))
+    return np.asarray(out_pts, dtype=np.float64), np.asarray(out_z, dtype=np.float64)
+
+
+def _reanchor_water_to_terrain(
+    elevations: NDArray[np.float64],
+    water_network: Any,
+    *,
+    origin_x: float,
+    origin_y: float,
+    cell_size_m: float,
+    road_keep_mask: NDArray[np.bool_] | None = None,
+) -> int:
+    """Lower raised river/pond water levels after forest canopy stripping.
+
+    Because ``extract_water`` runs against raw Copernicus DEM (which includes +10..15 m
+    tree canopy height in forested corridors), waterways inside forests can sit metres
+    above the canopy-stripped ground. Clamping raised nodes against the post-canopy
+    terrain keeps ``carve_water`` and BeamNG scene objects aligned with the ground.
+    """
+    n = elevations.shape[0]
+    adjusted = 0
+
+    def _sample(wx: float, wy: float) -> float | None:
+        c = round((wx - origin_x) / cell_size_m)
+        r = round((wy - origin_y) / cell_size_m)
+        if 0 <= r < n and 0 <= c < n:
+            if road_keep_mask is not None and road_keep_mask[r, c]:
+                return None
+            return float(elevations[r, c])
+        return None
+
+    for river in getattr(water_network, "rivers", ()):
+        pts = river.points
+        zw = river.z_water
+        if pts.shape[0] < 2:
+            continue
+        hw = max(3.0, float(river.width_m) * 0.5 + 2.0)
+        deltas = np.diff(pts, axis=0)
+        lens = np.hypot(deltas[:, 0], deltas[:, 1])
+        safe = np.where(lens < 1e-6, 1.0, lens)
+        seg_t = deltas / safe[:, None]
+        tang = np.zeros_like(pts)
+        tang[0] = seg_t[0]
+        tang[-1] = seg_t[-1]
+        if pts.shape[0] > 2:
+            mid = seg_t[:-1] + seg_t[1:]
+            ml = np.hypot(mid[:, 0], mid[:, 1])
+            tang[1:-1] = np.where(ml[:, None] > 1e-6, mid / np.maximum(ml[:, None], 1e-9), seg_t[:-1])
+
+        ground_caps = np.full(pts.shape[0], np.inf, dtype=np.float64)
+        for i in range(pts.shape[0]):
+            px, py = float(pts[i, 0]), float(pts[i, 1])
+            nx, ny = -float(tang[i, 1]), float(tang[i, 0])
+            samples: list[float] = []
+            for frac in (-1.0, -0.5, 0.0, 0.5, 1.0):
+                val = _sample(px + nx * (frac * hw), py + ny * (frac * hw))
+                if val is not None:
+                    samples.append(val)
+            if samples:
+                ground_caps[i] = min(samples)
+
+        changed = False
+        for i in range(pts.shape[0]):
+            if np.isfinite(ground_caps[i]) and zw[i] > ground_caps[i]:
+                zw[i] = ground_caps[i]
+                changed = True
+                adjusted += 1
+        if changed:
+            for i in range(1, zw.size):
+                zw[i] = min(zw[i - 1], zw[i])
+
+    for body in getattr(water_network, "water_bodies", ()):
+        outer = body.outer_ring
+        if len(outer) < 3:
+            continue
+        min_x, min_y, max_x, max_y = body.bounds
+        col_lo = max(0, math.floor((min_x - origin_x) / cell_size_m))
+        col_hi = min(n - 1, math.ceil((max_x - origin_x) / cell_size_m))
+        row_lo = max(0, math.floor((min_y - origin_y) / cell_size_m))
+        row_hi = min(n - 1, math.ceil((max_y - origin_y) / cell_size_m))
+        if col_hi < col_lo or row_hi < row_lo:
+            continue
+        poly = Polygon(outer, holes=[h for h in body.inner_rings if len(h) >= 4])
+        if not poly.is_valid:
+            poly = _normalize_polygonal(make_valid(poly))
+            if poly is None:
+                continue
+        step = max(1, round(max(col_hi - col_lo, row_hi - row_lo) / 16))
+        rs = np.arange(row_lo, row_hi + 1, step)
+        cs = np.arange(col_lo, col_hi + 1, step)
+        gx, gy = np.meshgrid(origin_x + cs * cell_size_m, origin_y + rs * cell_size_m)
+        inside = shapely.contains_xy(poly, gx.ravel(), gy.ravel()).reshape(rs.size, cs.size)
+        if inside.any():
+            vals = elevations[np.ix_(rs, cs)][inside]
+            if vals.size:
+                target_z = float(np.percentile(vals, 25))
+                if body.z_water > target_z + 0.75:
+                    body.z_water = target_z
+                    adjusted += 1
+
+    return adjusted
+
+
 def carve_water(
     elevations: NDArray[np.float64],
     layers: NDArray[np.uint8],
@@ -859,12 +1137,10 @@ def carve_water(
 ) -> tuple[int, dict[str, Any]]:
     """Carve water channels, rivers, lakes, and basins into the terrain.
 
-    Depresses terrain inside water channels and polygons down to z_water - depth_m
-    with smoothstep bank transitions (6-12m) and paints bank materials:
-    - Submerged bed: Pebbles (idx 11)
-    - Shallow beaches: Sand (idx 10)
-    - Wet banks: RiverbankSoil (idx 4)
-    Preserves island rings inside water bodies.
+    Couples the river channel bed strictly inside the ``River`` ribbon width so
+    water sheets never float above dry troughs, slopes banks gently outward to
+    prevent vertical mud cliffs, anti-aliases shorelines, and paints subtle
+    noise-dithered wet-bank materials. Preserves island rings inside water bodies.
 
     Args:
         elevations: (n, n) elevation grid, modified in place.
@@ -885,30 +1161,45 @@ def carve_water(
     idx_riverbank_soil = material_index.get("RiverbankSoil")
 
     bw = max(6.0, min(12.0, float(bank_transition_m)))
+    max_outer_reach = max(bw, 22.0)
     touched_mask = np.zeros((n, n), dtype=bool)
     all_x = origin_x + np.arange(n, dtype=np.float64) * cell_size_m
     all_y = origin_y + np.arange(n, dtype=np.float64) * cell_size_m
     terrain_max_x = origin_x + (n - 1) * cell_size_m
     terrain_max_y = origin_y + (n - 1) * cell_size_m
-    clip_pad = bw + cell_size_m
+    clip_pad = max_outer_reach + cell_size_m
     clip_min_x = origin_x - clip_pad
     clip_min_y = origin_y - clip_pad
     clip_max_x = terrain_max_x + clip_pad
     clip_max_y = terrain_max_y + clip_pad
     shore_pad_cells = math.ceil(bw / cell_size_m) + 1
-    outer_pad_cells = math.ceil(0.75 * bw / cell_size_m) + 1
+    outer_pad_cells = math.ceil(max_outer_reach / cell_size_m) + 1
 
-    # 1. Carve linear river channels (accumulate polyline distance per river to keep bends smooth)
+    # Smooth road protection weight (1.0 on keep mask, tapering smoothly to 0 over ~5 m)
+    # so road embankments next to water never form 5 m vertical cliffs.
+    road_protect: NDArray[np.float64] | None = None
+    if road_keep_mask is not None and road_keep_mask.any():
+        keep_f = road_keep_mask.astype(np.float64)
+        blur_r = round(4.0 / cell_size_m) if cell_size_m <= 4.0 else 0
+        if blur_r > 0:
+            dil_f = _morph_mask(road_keep_mask, 1, erode=False).astype(np.float64)
+            road_protect = np.maximum(keep_f, _box_blur_float(dil_f, blur_r, passes=3))
+        else:
+            road_protect = keep_f
+
+    # 1. Carve linear river channels along Catmull-Rom curve matching BeamNG River
     rivers = getattr(water_network, "rivers", ())
-    sand_width = min(bw * 0.45, max(1.5, cell_size_m * 1.05))
     for river in rivers:
-        pts = river.points
-        zw = river.z_water
+        raw_pts = river.points
+        raw_zw = river.z_water
+        if raw_pts.shape[0] < 2:
+            continue
+        pts, zw = _catmull_rom_subdivide(raw_pts, raw_zw, max_step_m=max(4.0, cell_size_m * 4.0))
         depth_m = float(river.depth_m)
         hw = float(river.width_m) / 2.0
-        total_reach = hw + bw
-        if pts.shape[0] < 2:
-            continue
+        # Waterline sits slightly inside hw so the BeamNG River ribbon overlaps rising banks cleanly
+        shore_hw = max(0.8, hw - 0.8) if hw >= 3.0 else hw * 0.85
+        total_reach = shore_hw + max_outer_reach
 
         r_min_x, r_min_y = float(pts[:, 0].min()) - total_reach, float(pts[:, 1].min()) - total_reach
         r_max_x, r_max_y = float(pts[:, 0].max()) + total_reach, float(pts[:, 1].max()) + total_reach
@@ -957,14 +1248,19 @@ def carve_water(
                 sub_best[better] = dist[better]
                 best_zw[sy0:sy1, sx0:sx1][better] = water_z[better]
 
-        inside_channel = best_dist <= hw
-        in_bank = (best_dist > hw) & (best_dist <= total_reach)
+        inside_channel = best_dist <= shore_hw
+        in_bank = (best_dist > shore_hw) & (best_dist <= total_reach)
         if not (inside_channel.any() or in_bank.any()):
             continue
 
         sub_keep = (
             road_keep_mask[r_row_lo : r_row_hi + 1, r_col_lo : r_col_hi + 1]
             if road_keep_mask is not None
+            else None
+        )
+        sub_prot = (
+            road_protect[r_row_lo : r_row_hi + 1, r_col_lo : r_col_hi + 1]
+            if road_protect is not None
             else None
         )
         chan_mask = inside_channel & (~sub_keep) if sub_keep is not None else inside_channel
@@ -976,29 +1272,64 @@ def carve_water(
         sub_layers = layers[r_row_lo : r_row_hi + 1, r_col_lo : r_col_hi + 1]
         sub_touched = touched_mask[r_row_lo : r_row_hi + 1, r_col_lo : r_col_hi + 1]
 
+        # Deterministic spatial noise for organic wet-bank dithering
+        r_idx = np.arange(r_row_lo, r_row_hi + 1, dtype=np.intp)[:, None]
+        c_idx = np.arange(r_col_lo, r_col_hi + 1, dtype=np.intp)[None, :]
+        bank_noise = _deterministic_hash_noise(r_idx, c_idx, seed=701)
+
         if chan_mask.any():
-            bed_z = best_zw[chan_mask] - depth_m
-            sub_elev[chan_mask] = np.minimum(sub_elev[chan_mask], bed_z)
-            if idx_pebbles is not None:
-                sub_layers[chan_mask] = idx_pebbles
+            u = best_dist[chan_mask] / shore_hw
+            # Smooth U-shaped channel rising from (z_water - depth) at centerline to (z_water + 0.05) at shore_hw
+            rise = 0.5 * (1.0 - np.cos(math.pi * u))
+            target_chan = (best_zw[chan_mask] - depth_m) + (depth_m + 0.05) * rise
+            cur_chan = sub_elev[chan_mask]
+            new_chan = np.minimum(cur_chan, target_chan)
+            if sub_prot is not None:
+                p_c = sub_prot[chan_mask]
+                new_chan = cur_chan * p_c + new_chan * (1.0 - p_c)
+            sub_elev[chan_mask] = new_chan
             sub_touched[chan_mask] = True
 
+            # Submerged bed -> Pebbles; outer wet rim (<= 0.8m inside shore) -> subtle Sand/RiverbankSoil
+            rim_w = min(shore_hw * 0.3, max(0.7, cell_size_m * 0.6))
+            deep_bed = best_dist[chan_mask] <= max(0.3, shore_hw - rim_w)
+            if idx_pebbles is not None and idx_sand is not None:
+                rim_mat = np.where(bank_noise[chan_mask] < 0.65, idx_sand, idx_pebbles)
+                sub_layers[chan_mask] = np.where(deep_bed, idx_pebbles, rim_mat)
+            elif idx_pebbles is not None:
+                sub_layers[chan_mask] = np.where(deep_bed, idx_pebbles, sub_layers[chan_mask])
+
         if bank_mask.any():
-            dist_from_water = best_dist[bank_mask] - hw
-            frac = dist_from_water / bw
+            dist_from_shore = best_dist[bank_mask] - shore_hw
+            cur_bank = sub_elev[bank_mask]
+            shore_z = best_zw[bank_mask] + 0.05
+            drop = np.maximum(0.0, cur_bank - shore_z)
+            # Gentle bank slope <= ~30%: widen transition adaptively for tall bluffs
+            eff_bw = np.clip(np.maximum(bw, drop / 0.30), bw, max_outer_reach)
+            frac = np.clip(dist_from_shore / eff_bw, 0.0, 1.0)
             smooth = 0.5 * (1.0 - np.cos(math.pi * frac))
-            bed_z = best_zw[bank_mask] - depth_m
-            bank_z = bed_z + smooth * (sub_elev[bank_mask] - bed_z)
-            sub_elev[bank_mask] = np.minimum(sub_elev[bank_mask], bank_z)
+            target_bank = shore_z + smooth * (cur_bank - shore_z)
+            new_bank = np.minimum(cur_bank, target_bank)
+            if sub_prot is not None:
+                p_b = sub_prot[bank_mask]
+                new_bank = cur_bank * p_b + new_bank * (1.0 - p_b)
+            sub_elev[bank_mask] = new_bank
             sub_touched[bank_mask] = True
 
-            shallow_bank = dist_from_water <= sand_width
-            if idx_sand is not None and idx_riverbank_soil is not None:
-                sub_layers[bank_mask] = np.where(shallow_bank, idx_sand, idx_riverbank_soil)
-            elif idx_sand is not None:
-                sub_layers[bank_mask] = np.where(shallow_bank, idx_sand, sub_layers[bank_mask])
-            elif idx_riverbank_soil is not None:
-                sub_layers[bank_mask] = np.where(~shallow_bank, idx_riverbank_soil, sub_layers[bank_mask])
+            # Narrow damp shoreline (<= 1.0m) -> Sand; narrow bank -> dithered RiverbankSoil
+            # Guarantee soil_out_w spans at least 1 grid step past sand_out_w on coarse grids too.
+            sand_out_w = min(1.2, max(0.85, cell_size_m * 0.6))
+            soil_out_w = max(2.8, sand_out_w + max(1.8, cell_size_m * 1.1))
+            in_sand = dist_from_shore <= sand_out_w
+            in_soil = (dist_from_shore > sand_out_w) & (dist_from_shore <= soil_out_w)
+            soil_prob = np.clip(1.0 - (dist_from_shore - sand_out_w) / max(0.5, soil_out_w - sand_out_w), 0.0, 1.0)
+            paint_soil = in_soil & (bank_noise[bank_mask] < (0.35 + 0.65 * soil_prob))
+            cur_l = sub_layers[bank_mask]
+            if idx_sand is not None:
+                cur_l = np.where(in_sand, idx_sand, cur_l)
+            if idx_riverbank_soil is not None:
+                cur_l = np.where(paint_soil, idx_riverbank_soil, cur_l)
+            sub_layers[bank_mask] = cur_l
 
     # 2. Carve standing water bodies (lakes, reservoirs, ponds)
     bodies = getattr(water_network, "water_bodies", ())
@@ -1023,10 +1354,10 @@ def carve_water(
             continue
 
         min_x, min_y, max_x, max_y = poly.bounds
-        col_lo = max(0, math.floor((min_x - bw - origin_x) / cell_size_m))
-        col_hi = min(n - 1, math.ceil((max_x + bw - origin_x) / cell_size_m))
-        row_lo = max(0, math.floor((min_y - bw - origin_y) / cell_size_m))
-        row_hi = min(n - 1, math.ceil((max_y + bw - origin_y) / cell_size_m))
+        col_lo = max(0, math.floor((min_x - max_outer_reach - origin_x) / cell_size_m))
+        col_hi = min(n - 1, math.ceil((max_x + max_outer_reach - origin_x) / cell_size_m))
+        row_lo = max(0, math.floor((min_y - max_outer_reach - origin_y) / cell_size_m))
+        row_hi = min(n - 1, math.ceil((max_y + max_outer_reach - origin_y) / cell_size_m))
         if col_hi < col_lo or row_hi < row_lo:
             continue
 
@@ -1036,9 +1367,18 @@ def carve_water(
         grid_y = np.broadcast_to(all_y[row_lo : row_hi + 1][:, None], (ny, nx))
 
         # Vectorized containment: True for lake basin, False for islands (holes)
-        inside = shapely.contains_xy(poly, grid_x.ravel(), grid_y.ravel()).reshape(ny, nx)
-        if road_keep_mask is not None:
-            inside &= ~road_keep_mask[row_lo : row_hi + 1, col_lo : col_hi + 1]
+        inside_raw = shapely.contains_xy(poly, grid_x.ravel(), grid_y.ravel()).reshape(ny, nx)
+        sub_keep = (
+            road_keep_mask[row_lo : row_hi + 1, col_lo : col_hi + 1]
+            if road_keep_mask is not None
+            else None
+        )
+        sub_prot = (
+            road_protect[row_lo : row_hi + 1, col_lo : col_hi + 1]
+            if road_protect is not None
+            else None
+        )
+        inside = inside_raw & (~sub_keep) if sub_keep is not None else inside_raw
         if not inside.any():
             continue
 
@@ -1046,10 +1386,19 @@ def carve_water(
         sub_layers = layers[row_lo : row_hi + 1, col_lo : col_hi + 1]
         sub_touched = touched_mask[row_lo : row_hi + 1, col_lo : col_hi + 1]
 
-        # Erode/dilate so shapely.distance runs ONLY on the narrow shoreline band.
+        r_idx = np.arange(row_lo, row_hi + 1, dtype=np.intp)[:, None]
+        c_idx = np.arange(col_lo, col_hi + 1, dtype=np.intp)[None, :]
+        pond_noise = _deterministic_hash_noise(r_idx, c_idx, seed=709)
+
+        # Erode/dilate so shapely.distance runs ONLY on the shoreline bands.
         deep_interior = _morph_mask(inside, shore_pad_cells, erode=True)
         if deep_interior.any():
-            sub_elev[deep_interior] = np.minimum(sub_elev[deep_interior], z_water - depth_m)
+            cur_d = sub_elev[deep_interior]
+            new_d = np.minimum(cur_d, z_water - depth_m)
+            if sub_prot is not None:
+                p_d = sub_prot[deep_interior]
+                new_d = cur_d * p_d + new_d * (1.0 - p_d)
+            sub_elev[deep_interior] = new_d
             if idx_pebbles is not None:
                 sub_layers[deep_interior] = idx_pebbles
             sub_touched[deep_interior] = True
@@ -1065,7 +1414,12 @@ def carve_water(
             if deep_mask.any():
                 dr = band_rows[deep_mask]
                 dc = band_cols[deep_mask]
-                sub_elev[dr, dc] = np.minimum(sub_elev[dr, dc], z_water - depth_m)
+                cur_dm = sub_elev[dr, dc]
+                new_dm = np.minimum(cur_dm, z_water - depth_m)
+                if sub_prot is not None:
+                    p_dm = sub_prot[dr, dc]
+                    new_dm = cur_dm * p_dm + new_dm * (1.0 - p_dm)
+                sub_elev[dr, dc] = new_dm
                 if idx_pebbles is not None:
                     sub_layers[dr, dc] = idx_pebbles
                 sub_touched[dr, dc] = True
@@ -1076,32 +1430,64 @@ def carve_water(
                 sc = band_cols[shallow_mask]
                 t = dist_to_shore[shallow_mask] / bw
                 smooth = t * t * (3.0 - 2.0 * t)
-                bed_z = z_water - depth_m * smooth
-                sub_elev[sr, sc] = np.minimum(sub_elev[sr, sc], bed_z)
+                # Depress at least 0.15m at shoreline so WaterBlock wave ripples never expose dry teeth
+                shore_lip = min(0.15, depth_m * 0.25)
+                bed_z = z_water - shore_lip - max(0.0, depth_m - shore_lip) * smooth
+                cur_sm = sub_elev[sr, sc]
+                new_sm = np.minimum(cur_sm, bed_z)
+                if sub_prot is not None:
+                    p_sm = sub_prot[sr, sc]
+                    new_sm = cur_sm * p_sm + new_sm * (1.0 - p_sm)
+                sub_elev[sr, sc] = new_sm
                 sub_touched[sr, sc] = True
 
-                pebbles_sub = t > 0.4
+                pebbles_sub = dist_to_shore[shallow_mask] >= 1.2
                 sand_sub = ~pebbles_sub
                 if idx_pebbles is not None:
                     sub_layers[sr[pebbles_sub], sc[pebbles_sub]] = idx_pebbles
                 if idx_sand is not None:
                     sub_layers[sr[sand_sub], sc[sand_sub]] = idx_sand
 
-        # Paint wet bank immediately outside shoreline (within 0.75 * bw)
-        outside_band = (~inside) & _morph_mask(inside, outer_pad_cells, erode=False)
-        if road_keep_mask is not None:
-            outside_band &= ~road_keep_mask[row_lo : row_hi + 1, col_lo : col_hi + 1]
+        # Smoothly slope outside shoreline up to surrounding terrain (eliminates vertical mud cliffs!)
+        # and paint a subtle narrow dithered riverbank rim.
+        outside_band = (~inside_raw) & _morph_mask(inside_raw, outer_pad_cells, erode=False)
+        if sub_keep is not None:
+            outside_band &= ~sub_keep
         if outside_band.any():
             pts_outside = shapely.points(grid_x[outside_band], grid_y[outside_band])
             dist_out = shapely.distance(boundary, pts_outside)
-            wet_out_mask = dist_out <= (0.75 * bw)
-            if wet_out_mask.any():
-                out_rows, out_cols = np.where(outside_band)
-                wr = out_rows[wet_out_mask]
-                wc = out_cols[wet_out_mask]
-                if idx_riverbank_soil is not None:
-                    sub_layers[wr, wc] = idx_riverbank_soil
-                sub_touched[wr, wc] = True
+            out_rows, out_cols = np.where(outside_band)
+            cur_out = sub_elev[out_rows, out_cols]
+            shore_lip = min(0.15, depth_m * 0.25)
+            shore_z = z_water - shore_lip
+            drop = np.maximum(0.0, cur_out - shore_z)
+            eff_bw = np.clip(np.maximum(bw, drop / 0.30), bw, max_outer_reach)
+            slope_hit = dist_out <= eff_bw
+            if slope_hit.any():
+                hr = out_rows[slope_hit]
+                hc = out_cols[slope_hit]
+                frac = np.clip(dist_out[slope_hit] / eff_bw[slope_hit], 0.0, 1.0)
+                smooth = 0.5 * (1.0 - np.cos(math.pi * frac))
+                target_out = shore_z + smooth * (cur_out[slope_hit] - shore_z)
+                new_out = np.minimum(cur_out[slope_hit], target_out)
+                if sub_prot is not None:
+                    p_o = sub_prot[hr, hc]
+                    new_out = cur_out[slope_hit] * p_o + new_out * (1.0 - p_o)
+                sub_elev[hr, hc] = new_out
+                sub_touched[hr, hc] = True
+
+            # Narrow wet rim: <=0.5m Sand, 0.5..2.4m dithered RiverbankSoil
+            rim_sand = dist_out <= 0.5
+            rim_soil = (dist_out > 0.5) & (dist_out <= 2.4)
+            if idx_sand is not None and rim_sand.any():
+                sub_layers[out_rows[rim_sand], out_cols[rim_sand]] = idx_sand
+            if idx_riverbank_soil is not None and rim_soil.any():
+                s_prob = np.clip(1.0 - (dist_out[rim_soil] - 0.5) / 1.9, 0.0, 1.0)
+                keep_soil = pond_noise[out_rows[rim_soil], out_cols[rim_soil]] < (0.3 + 0.7 * s_prob)
+                sr_o = out_rows[rim_soil][keep_soil]
+                sc_o = out_cols[rim_soil][keep_soil]
+                sub_layers[sr_o, sc_o] = idx_riverbank_soil
+                sub_touched[sr_o, sc_o] = True
 
     touched_count = int(touched_mask.sum())
     stats = {
@@ -1451,11 +1837,38 @@ def strip_forest_canopy(
 
     canopy_height = float(np.clip(jump, 0.0, 15.0))
     if canopy_height > 0.0:
-        elevations[forest_mask] -= canopy_height
+        blur_r = round(3.5 / cell_size_m) if cell_size_m <= 4.0 else 0
+        if blur_r > 0:
+            # Smoothly feather canopy subtraction across the forest boundary (~7-8m)
+            # and relax any residual DSM step inside the transition band so neither
+            # smooth 30m DEM ramps nor sharp canopy boundaries create cliffs.
+            canopy_weight = _box_blur_float(forest_mask.astype(np.float64), blur_r, passes=2)
+            elevations -= canopy_height * canopy_weight
+            edge_blend = np.clip(4.0 * canopy_weight * (1.0 - canopy_weight), 0.0, 1.0)
+            if edge_blend.any():
+                smoothed = _box_blur_float(elevations, blur_r, passes=2)
+                elevations[:] = elevations * (1.0 - edge_blend) + smoothed * edge_blend
+        else:
+            elevations[forest_mask] -= canopy_height
 
     idx_forest_floor = material_index.get("ForestFloor")
     if idx_forest_floor is not None:
-        layers[forest_mask] = idx_forest_floor
+        if cell_size_m <= 4.0:
+            mat_r = max(1, round(3.5 / cell_size_m))
+            forest_weight = _box_blur_float(forest_mask.astype(np.float64), mat_r, passes=2)
+            noise = _fbm_noise_grid(
+                n,
+                cell_size_m,
+                origin_x,
+                origin_y,
+                seed=313,
+                octaves_m=((48.0, 0.45), (16.0, 0.35), (5.0, 0.20)),
+            )
+            # Deep forest cores stay ForestFloor; edges and small sparse tree clumps dither naturally
+            paint_ff = forest_mask & ((forest_weight >= 0.82) | (forest_weight > (0.30 + 0.52 * noise)))
+            layers[paint_ff] = idx_forest_floor
+        else:
+            layers[forest_mask] = idx_forest_floor
 
     forest_cells = int(forest_mask.sum())
     stats = {
@@ -1473,8 +1886,14 @@ def paint_landcover(
     origin_x: float,
     origin_y: float,
     cell_size_m: float,
+    natural_variation: bool = False,
 ) -> int:
     """Paint landcover polygons onto the terrain layer map.
+
+    When ``natural_variation=True``, softens hard polygon boundaries with
+    multi-scale noise dithering, breaks up monotonous ``Field`` blocks and open
+    ``Grass`` meadows with ``Meadow`` / ``DryGrass`` patches, and avoids painting
+    harsh brown ``ForestFloor`` slabs under tiny sparse tree clumps.
 
     Args:
         layers: (n, n) material index grid, modified in place.
@@ -1483,6 +1902,7 @@ def paint_landcover(
         origin_x: World X of minimum corner.
         origin_y: World Y of minimum corner.
         cell_size_m: Ground spacing in metres.
+        natural_variation: Enable organic noise-dithered edges and biome breakup.
 
     Returns:
         Total cells painted.
@@ -1491,10 +1911,32 @@ def paint_landcover(
     n = layers.shape[0]
     all_x = origin_x + np.arange(n, dtype=np.float64) * cell_size_m
     all_y = origin_y + np.arange(n, dtype=np.float64) * cell_size_m
+
+    noise_macro: NDArray[np.float64] | None = None
+    noise_detail: NDArray[np.float64] | None = None
+    if natural_variation:
+        noise_macro = _fbm_noise_grid(
+            n,
+            cell_size_m,
+            origin_x,
+            origin_y,
+            seed=101,
+            octaves_m=((110.0, 0.45), (38.0, 0.35), (12.0, 0.20)),
+        )
+        noise_detail = _fbm_noise_grid(
+            n,
+            cell_size_m,
+            origin_x,
+            origin_y,
+            seed=202,
+            octaves_m=((28.0, 0.45), (9.0, 0.35), (3.0, 0.20)),
+        )
+
     for mat_key, poly_list in polygons_by_material.items():
         mat_idx = material_index.get(mat_key)
         if mat_idx is None:
             continue
+        mask = np.zeros((n, n), dtype=bool)
         for shape in poly_list:
             poly = _to_shapely_polygon(shape)
             if poly is None:
@@ -1511,8 +1953,64 @@ def paint_landcover(
             gx = np.broadcast_to(all_x[col_lo : col_hi + 1][None, :], (ny, nx))
             gy = np.broadcast_to(all_y[row_lo : row_hi + 1][:, None], (ny, nx))
             inside = shapely.contains_xy(poly, gx.ravel(), gy.ravel()).reshape(ny, nx)
-            layers[row_lo : row_hi + 1, col_lo : col_hi + 1][inside] = mat_idx
-            total_painted += int(inside.sum())
+            mask[row_lo : row_hi + 1, col_lo : col_hi + 1] |= inside
+
+        if not mask.any():
+            continue
+
+        if not natural_variation or mat_key == "Concrete" or cell_size_m > 4.0:
+            layers[mask] = mat_idx
+            total_painted += int(mask.sum())
+            continue
+
+        assert noise_macro is not None and noise_detail is not None
+        feather_r = max(1, round(3.0 / cell_size_m))
+        weight = _box_blur_float(mask.astype(np.float64), feather_r, passes=2)
+
+        if mat_key == "ForestFloor":
+            # Keep ForestFloor in deep woods; dither forest edges and skip tiny sparse tree clumps
+            paint = mask & ((weight >= 0.82) | (weight > (0.30 + 0.52 * noise_detail)))
+            layers[paint] = mat_idx
+            total_painted += int(paint.sum())
+        elif mat_key == "Field":
+            # Organic dithered field borders + stubble/DryGrass/Meadow breakup inside large fields
+            dilated = _morph_mask(mask, feather_r, erode=False)
+            paint = dilated & (weight > (0.18 + 0.62 * noise_detail))
+            idx_dry = material_index.get("DryGrass")
+            idx_meadow = material_index.get("Meadow")
+            chosen = np.full((n, n), mat_idx, dtype=np.uint8)
+            if idx_dry is not None:
+                dry_patch = (noise_macro * 0.65 + noise_detail * 0.35) < 0.48
+                chosen = np.where(dry_patch, idx_dry, chosen)
+            if idx_meadow is not None:
+                meadow_patch = (noise_macro > 0.62) & (noise_detail > 0.44)
+                chosen = np.where(meadow_patch, idx_meadow, chosen)
+            layers[paint] = chosen[paint]
+            total_painted += int(paint.sum())
+        else:
+            # Grass or other soft cover: feather boundary smoothly
+            dilated = _morph_mask(mask, feather_r, erode=False)
+            paint = dilated & (weight > (0.20 + 0.60 * noise_detail))
+            layers[paint] = mat_idx
+            total_painted += int(paint.sum())
+
+    if natural_variation and cell_size_m <= 8.0:
+        assert noise_macro is not None and noise_detail is not None
+        idx_grass = material_index.get("Grass", 0)
+        idx_meadow = material_index.get("Meadow")
+        idx_dry = material_index.get("DryGrass")
+        open_grass = layers == idx_grass
+        if open_grass.any() and (idx_meadow is not None or idx_dry is not None):
+            blend_val = noise_macro * 0.65 + noise_detail * 0.35
+            if idx_meadow is not None:
+                meadow_mask = open_grass & (blend_val > 0.54) & (blend_val <= 0.74)
+                layers[meadow_mask] = idx_meadow
+                total_painted += int(meadow_mask.sum())
+            if idx_dry is not None:
+                dry_mask = open_grass & (blend_val > 0.74)
+                layers[dry_mask] = idx_dry
+                total_painted += int(dry_mask.sum())
+
     return total_painted
 
 
@@ -1700,7 +2198,7 @@ def build_terrain(
         stats["forest_cells"] = forest_cells
         stats.update(forest_stats)
 
-    # 2. Landcover material painting
+    # 2. Landcover material painting + Russian summer meadow variation
     if landcover_polygons or paint_landcover_fn is not None:
         report(0.39, "painting landcover polygons")
         if paint_landcover_fn is not None:
@@ -1719,7 +2217,31 @@ def build_terrain(
                 origin_x=origin_x,
                 origin_y=origin_y,
                 cell_size_m=cell_size_m,
+                natural_variation=True,
             )
+    elif cell_size_m <= 8.0 and ("Meadow" in material_index or "DryGrass" in material_index):
+        paint_landcover(
+            layers,
+            material_index,
+            {},
+            origin_x=origin_x,
+            origin_y=origin_y,
+            cell_size_m=cell_size_m,
+            natural_variation=True,
+        )
+
+    # Re-anchor raised water elevations after canopy stripping so forest streams/ponds
+    # align with the stripped ground rather than floating at canopy-top DEM heights.
+    if water_network is not None:
+        reanchored = _reanchor_water_to_terrain(
+            elevations,
+            water_network,
+            origin_x=origin_x,
+            origin_y=origin_y,
+            cell_size_m=cell_size_m,
+        )
+        if reanchored:
+            stats["water_reanchored_nodes"] = reanchored
 
     # 3. Road corridor grading + coupled bridge deck & ramp profiles
     graded_cells = 0
@@ -1924,6 +2446,26 @@ def build_terrain(
                 water_stats["under_deck_leveled"] = dam_lowered
             stats["water_cells"] = water_cells
             stats.update(water_stats)
+
+    # Clear GroundCover-spawning grass/meadow beneath bridge decks so tall
+    # billboards never poke through bridge abutments or deck edges.
+    if bridge_spans:
+        idx_under = material_index.get("Gravel", material_index.get("Pebbles"))
+        if idx_under is not None:
+            under_bridge = _rasterize_bridge_under_mask(
+                bridge_spans,
+                origin_x=origin_x,
+                origin_y=origin_y,
+                grid_size=grid_size,
+                cell_size_m=cell_size_m,
+                end_margin_m=0.5,
+            )
+            grass_like = np.zeros((grid_size, grid_size), dtype=bool)
+            for gk in ("Grass", "Meadow", "DryGrass", "Field", "ForestFloor"):
+                gi = material_index.get(gk)
+                if gi is not None:
+                    grass_like |= layers == gi
+            layers[under_bridge & grass_like] = idx_under
 
     report(0.80, "choosing the vertical range")
     if max_height_m is not None:

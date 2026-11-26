@@ -257,16 +257,22 @@ def cmd_install(args: argparse.Namespace) -> int:
     if target.exists() or target.is_symlink():
         if not args.force:
             raise ConfigError(f"{target} already exists; pass --force to overwrite")
-        if target.is_dir() and not target.is_symlink():
-            # Purge children in-place instead of rmtree(target) + makedirs(target),
-            # avoiding Windows NTFS pending-delete WinError 5 on immediate recreate.
-            for child in list(target.iterdir()):
-                if child.is_dir() and not child.is_symlink():
-                    shutil.rmtree(child)
-                else:
-                    child.unlink()
-        else:
-            target.unlink()
+        try:
+            if target.is_dir() and not target.is_symlink():
+                # Purge children in-place instead of rmtree(target) + makedirs(target),
+                # avoiding Windows NTFS pending-delete WinError 5 on immediate recreate.
+                for child in list(target.iterdir()):
+                    if child.is_dir() and not child.is_symlink():
+                        shutil.rmtree(child)
+                    else:
+                        child.unlink()
+            else:
+                target.unlink()
+        except PermissionError as exc:
+            raise ConfigError(
+                f"cannot overwrite {target}: {exc}. "
+                "Close BeamNG.drive first (or switch away from this level) so no file handles lock it."
+            ) from exc
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, target, dirs_exist_ok=True)
     _emit(

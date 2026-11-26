@@ -44,6 +44,7 @@ from ivanovo2beam.buildings.mesh import (
     _build_extruded_body,
     _centre,
     extrude_footprint,
+    normalize_roof_shape,
     roof_height_for,
     write_dae,
 )
@@ -105,7 +106,47 @@ BUILDING_MATERIALS: dict[str, dict[str, Any]] = {
         "baseColorMap": "/assets/materials/tileable/wood/weatherboards/t_weatherboards_b.color.dds",
         "normalMap": "/assets/materials/tileable/wood/weatherboards/t_weatherboards_nm.normal.dds",
         "roughnessMap": "/assets/materials/tileable/wood/weatherboards/t_weatherboards_r.data.dds",
-        "baseColorFactor": [0.58, 0.48, 0.38, 1.0],
+        "baseColorFactor": [0.60, 0.50, 0.40, 1.0],
+    },
+    "bld_wood_sage": {
+        "title": "Muted sage-green painted wooden siding (Russian private houses & dachas)",
+        "groundType": "WOOD",
+        "baseColorMap": "/assets/materials/tileable/wood/weatherboards/t_weatherboards_b.color.dds",
+        "normalMap": "/assets/materials/tileable/wood/weatherboards/t_weatherboards_nm.normal.dds",
+        "roughnessMap": "/assets/materials/tileable/wood/weatherboards/t_weatherboards_r.data.dds",
+        "baseColorFactor": [0.46, 0.55, 0.44, 1.0],
+    },
+    "bld_wood_ochre": {
+        "title": "Muted warm ochre painted wooden siding (Russian private houses & dachas)",
+        "groundType": "WOOD",
+        "baseColorMap": "/assets/materials/tileable/wood/weatherboards/t_weatherboards_b.color.dds",
+        "normalMap": "/assets/materials/tileable/wood/weatherboards/t_weatherboards_nm.normal.dds",
+        "roughnessMap": "/assets/materials/tileable/wood/weatherboards/t_weatherboards_r.data.dds",
+        "baseColorFactor": [0.66, 0.57, 0.41, 1.0],
+    },
+    "bld_wood_blue": {
+        "title": "Faded slate-blue painted wooden siding (Russian village houses)",
+        "groundType": "WOOD",
+        "baseColorMap": "/assets/materials/tileable/wood/weatherboards/t_weatherboards_b.color.dds",
+        "normalMap": "/assets/materials/tileable/wood/weatherboards/t_weatherboards_nm.normal.dds",
+        "roughnessMap": "/assets/materials/tileable/wood/weatherboards/t_weatherboards_r.data.dds",
+        "baseColorFactor": [0.48, 0.56, 0.62, 1.0],
+    },
+    "bld_wood_shed": {
+        "title": "Weathered timber planks for sheds, barns and outbuildings",
+        "groundType": "WOOD",
+        "baseColorMap": "/assets/materials/tileable/wood/ut_bld_wood_old/t_ut_bld_wood_old_b.color.dds",
+        "normalMap": "/assets/materials/tileable/wood/ut_bld_wood_old/t_ut_bld_wood_old_nm.normal.dds",
+        "roughnessMap": "/assets/materials/tileable/wood/ut_bld_wood_old/t_ut_bld_wood_old_r.data.dds",
+        "baseColorFactor": [0.54, 0.48, 0.41, 1.0],
+    },
+    "bld_brick_residential": {
+        "title": "Muted red-brown brick for Russian private houses and cottages",
+        "groundType": "CONCRETE",
+        "baseColorMap": "/assets/materials/tileable/brick/brick_plain/t_bricks_red_01_b.color.dds",
+        "normalMap": "/assets/materials/tileable/brick/brick_plain/t_bricks_red_01_nm.normal.dds",
+        "roughnessMap": "/assets/materials/tileable/brick/brick_plain/t_bricks_red_01_r.data.dds",
+        "baseColorFactor": [0.58, 0.36, 0.28, 1.0],
     },
     "bld_roof_tar": {
         "title": "Flat tar roof for apartment blocks and factories",
@@ -116,51 +157,107 @@ BUILDING_MATERIALS: dict[str, dict[str, Any]] = {
         "baseColorFactor": [0.20, 0.20, 0.22, 1.0],
     },
     "bld_roof_slate": {
-        "title": "Pitched slate roof tiles for houses and churches",
+        "title": "Weathered grey slate (shifer) roofs for houses, sheds and churches",
         "groundType": "CONCRETE",
         "baseColorMap": "/assets/materials/tileable/roofing/t_slate_rooftiles_01/t_slate_rooftiles_01_b.color.dds",
         "normalMap": "/assets/materials/tileable/roofing/t_slate_rooftiles_01/t_slate_rooftiles_01_nm.normal.dds",
         "roughnessMap": "/assets/materials/tileable/roofing/t_slate_rooftiles_01/t_slate_rooftiles_01_r.data.dds",
-        "baseColorFactor": [0.35, 0.35, 0.38, 1.0],
+        "baseColorFactor": [0.40, 0.41, 0.44, 1.0],
     },
     "bld_roof_metal": {
-        "title": "Sheet metal roofs for industrial and domestic buildings",
+        "title": "Galvanized sheet metal roofs for domestic and industrial buildings",
         "groundType": "METAL",
         "baseColorMap": "/assets/materials/tileable/metal/m_si_metal_roof/t_si_metal_roof_b.color.dds",
         "normalMap": "/assets/materials/tileable/metal/m_si_metal_roof/t_si_metal_roof_nm.normal.dds",
         "roughnessMap": "/assets/materials/tileable/metal/m_si_metal_roof/t_si_metal_roof_r.data.dds",
         "baseColorFactor": [0.45, 0.48, 0.52, 1.0],
     },
+    "bld_roof_metal_green": {
+        "title": "Muted forest-green metal roofing for Russian dachas and cottages",
+        "groundType": "METAL",
+        "baseColorMap": "/assets/materials/tileable/metal/m_si_metal_roof/t_si_metal_roof_b.color.dds",
+        "normalMap": "/assets/materials/tileable/metal/m_si_metal_roof/t_si_metal_roof_nm.normal.dds",
+        "roughnessMap": "/assets/materials/tileable/metal/m_si_metal_roof/t_si_metal_roof_r.data.dds",
+        "baseColorFactor": [0.24, 0.35, 0.26, 1.0],
+    },
+    "bld_roof_metal_red": {
+        "title": "Muted burgundy-terracotta metal roofing for Russian houses",
+        "groundType": "METAL",
+        "baseColorMap": "/assets/materials/tileable/metal/m_si_metal_roof/t_si_metal_roof_b.color.dds",
+        "normalMap": "/assets/materials/tileable/metal/m_si_metal_roof/t_si_metal_roof_nm.normal.dds",
+        "roughnessMap": "/assets/materials/tileable/metal/m_si_metal_roof/t_si_metal_roof_r.data.dds",
+        "baseColorFactor": [0.45, 0.25, 0.22, 1.0],
+    },
 }
+
+
+_HOUSE_WALL_PALETTE: tuple[str, ...] = (
+    "bld_wood_wall",
+    "bld_wood_sage",
+    "bld_wood_ochre",
+    "bld_wood_blue",
+    "bld_wood_wall",
+    "bld_brick_residential",
+)
+
+_HOUSE_ROOF_PALETTE: tuple[str, ...] = (
+    "bld_roof_slate",
+    "bld_roof_metal",
+    "bld_roof_metal_green",
+    "bld_roof_metal_red",
+    "bld_roof_slate",
+)
 
 
 def resolve_building_materials(footprint: BuildingFootprint) -> tuple[str, str]:
     """Return ``(wall_material, roof_material)`` for an Ivanovo building footprint."""
     mat_hint = (footprint.material or "").strip().lower()
     klass = footprint.klass
+    oid = abs(int(footprint.osm_id))
 
     # 1. Wall material
-    if mat_hint in {"brick", "red_brick"} or klass == "industrial":
+    if klass == "industrial":
         wall_mat = "bld_brick_industrial"
-    elif mat_hint in {"wood", "timber", "log"} or klass in {"house", "shed", "garage"}:
-        wall_mat = "bld_wood_wall"
+    elif mat_hint in {"brick", "red_brick"}:
+        wall_mat = (
+            "bld_brick_residential"
+            if klass in {"house", "yes"} and footprint.area_m2 <= 300.0
+            else "bld_brick_industrial"
+        )
+    elif mat_hint in {"wood", "timber", "log"}:
+        wall_mat = "bld_wood_shed" if klass == "shed" else "bld_wood_wall"
     elif mat_hint in {"concrete", "panel"}:
         wall_mat = "bld_concrete_panel"
-    elif mat_hint == "plaster" or klass in {"school", "hospital", "commercial"}:
+    elif mat_hint in {"plaster", "stucco", "pebbledash"} or klass in {"school", "hospital", "commercial"}:
         wall_mat = "bld_plaster_civic"
     elif klass == "apartments":
         wall_mat = "bld_brick_khrushchevka" if footprint.levels <= 5.0 else "bld_concrete_panel"
+    elif klass == "shed":
+        wall_mat = "bld_wood_shed"
+    elif klass == "garage":
+        wall_mat = "bld_concrete_panel" if oid % 2 == 0 else "bld_brick_khrushchevka"
+    elif klass == "house":
+        wall_mat = _HOUSE_WALL_PALETTE[oid % len(_HOUSE_WALL_PALETTE)]
+    elif klass == "yes":
+        if footprint.area_m2 < 40.0:
+            wall_mat = "bld_wood_shed"
+        elif footprint.area_m2 <= 260.0 and footprint.levels <= 2.5:
+            wall_mat = _HOUSE_WALL_PALETTE[oid % len(_HOUSE_WALL_PALETTE)]
+        else:
+            wall_mat = "bld_brick_khrushchevka" if footprint.levels <= 5.0 else "bld_plaster_civic"
     else:
-        wall_mat = "bld_wood_wall" if klass in {"house", "shed"} else "bld_plaster_civic"
+        wall_mat = "bld_plaster_civic"
 
     # 2. Roof material
-    roof_shape = (footprint.roof_shape or "").strip().lower()
+    roof_shape = normalize_roof_shape(footprint.roof_shape, building_class_for(klass).roof)
     if roof_shape == "flat" or klass in {"apartments", "hospital", "commercial"}:
         roof_mat = "bld_roof_tar"
     elif klass == "industrial":
-        roof_mat = "bld_roof_metal" if footprint.osm_id % 2 == 0 else "bld_roof_tar"
-    elif klass in {"house", "church", "shed"}:
-        roof_mat = "bld_roof_slate" if footprint.osm_id % 2 == 0 else "bld_roof_metal"
+        roof_mat = "bld_roof_metal" if oid % 2 == 0 else "bld_roof_tar"
+    elif klass == "shed":
+        roof_mat = "bld_roof_slate" if oid % 3 != 0 else "bld_roof_metal"
+    elif klass in {"house", "yes", "church"}:
+        roof_mat = _HOUSE_ROOF_PALETTE[oid % len(_HOUSE_ROOF_PALETTE)]
     else:
         roof_mat = "bld_roof_tar"
 
@@ -398,6 +495,7 @@ def export_buildings(
     variants_per_class: int = VARIANTS_PER_CLASS,
     unique_area_m2: float = UNIQUE_AREA_M2,
     max_instances: int | None = None,
+    terrain_bounds: tuple[float, float, float, float] | None = None,
 ) -> tuple[list[dict[str, Any]], BuildingExportStats]:
     """Turn footprints into BeamNG objects and their meshes.
 
@@ -418,6 +516,17 @@ def export_buildings(
     shapes_dir.mkdir(parents=True, exist_ok=True)
 
     selected = list(buildings)
+    if terrain_bounds is not None:
+        bx0, by0, bx1, by1 = terrain_bounds
+        in_bounds: list[BuildingFootprint] = []
+        for b in selected:
+            xs = b.ring[:, 0]
+            ys = b.ring[:, 1]
+            if float(xs.min()) >= bx0 and float(xs.max()) <= bx1 and float(ys.min()) >= by0 and float(ys.max()) <= by1:
+                in_bounds.append(b)
+            else:
+                stats.placements_skipped += 1
+        selected = in_bounds
     if max_instances is not None and len(selected) > max_instances:
         selected.sort(key=lambda b: (-b.area_m2, b.osm_id))
         selected = selected[: max(0, max_instances)]
@@ -497,15 +606,19 @@ def _export_buildings_chunked(
             holes_local = [h - offset for h in footprint.holes]
 
             klass = building_class_for(footprint.klass)
-            roof = footprint.roof_shape or klass.roof
-            roof_h = footprint.roof_height_m or roof_height_for(footprint.ring, roof)
+            roof = normalize_roof_shape(footprint.roof_shape, klass.roof)
+            roof_h = (
+                footprint.roof_height_m
+                if footprint.roof_height_m is not None
+                else roof_height_for(footprint.ring, roof)
+            )
 
-            # Sample corner ground elevations to determine slope skirt
+            # Sample corner ground elevations to prevent uphill burial and downhill floating
             corner_zs = [_sample_ground(build, float(pt[0]), float(pt[1])) for pt in footprint.ring[:-1]]
             min_corner = min(corner_zs) if corner_zs else ground_z
-            slope_drop = max(0.0, ground_z - min_corner)
-            # Minimum -3.0m slope skirt, extending further on steep slopes
-            skirt_depth = max(3.0, slope_drop + 2.0)
+            max_corner = max(corner_zs) if corner_zs else ground_z
+            anchor_z = max(ground_z, max_corner - 0.25)
+            skirt_depth = max(3.0, (anchor_z - min_corner) + 2.0)
 
             # Build in local building frame then offset into chunk space
             try:
@@ -540,7 +653,7 @@ def _export_buildings_chunked(
                     for corner_i in range(3):
                         vi, ni = tri[corner_i]
                         px, py, pz = bld_mesh.positions[vi]
-                        pts.append((px + b_cx, py + b_cy, pz + ground_z))
+                        pts.append((px + b_cx, py + b_cy, pz + anchor_z))
                         normals.append(bld_mesh.normals[ni])
                         uvs.append(bld_mesh.uvs[uv_idx[corner_i]])
                     builder.mesh.add_triangle(

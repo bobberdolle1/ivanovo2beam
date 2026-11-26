@@ -954,10 +954,10 @@ class TestDecalRoadSafetyAndMaterials:
     def test_tiered_decal_lod_settings_by_road_class(self) -> None:
         pts = np.array([[0.0, 0.0], [100.0, 0.0]])
         cases = [
-            ("trunk", [650.0, 150.0], 1.5, 0.5, 13),
-            ("secondary", [450.0, 100.0], 2.0, 0.5, 14),
-            ("residential", [250.0, 75.0], 2.0, 0.5, 14),
-            ("service", [120.0, 40.0], 2.0, 0.5, 15),
+            ("trunk", [750.0, 180.0], 1.5, 0.5, 12),
+            ("secondary", [550.0, 120.0], 1.5, 0.5, 15),
+            ("residential", [400.0, 100.0], 2.0, 0.5, 20),
+            ("service", [250.0, 75.0], 2.0, 0.5, 22),
         ]
         for highway, exp_fade, exp_break, exp_detail, exp_prio in cases:
             road = self._make_road(410, pts, highway=highway)
@@ -1024,11 +1024,12 @@ class TestDecalRoadSafetyAndMaterials:
         assert len(edges) == 2
         assert all(e["renderPriority"] == 1 for e in edges)
 
-        # Narrow primary or secondary/residential 2-lane roads get no markings
+        # Secondary wide 2-lane roads now get markings; narrow non-highway residential gets none
         secondary_wide = self._make_road(416, pts, highway="secondary", lanes=2, width_m=9.0, oneway=False)
-        primary_narrow = self._make_road(417, pts, highway="primary", lanes=2, width_m=7.0, oneway=False)
-        assert generate_lane_markings(secondary_wide, "test_level", pts_3d) == []
-        assert generate_lane_markings(primary_narrow, "test_level", pts_3d) == []
+        residential_2lane = self._make_road(417, pts, highway="residential", lanes=2, width_m=7.0, oneway=False)
+        sec_marks = generate_lane_markings(secondary_wide, "test_level", pts_3d, is_start_junction=False, is_end_junction=False)
+        assert len(sec_marks) == 3
+        assert generate_lane_markings(residential_2lane, "test_level", pts_3d) == []
 
 
 class TestGoldenSectorRoadOverhaul:
@@ -1133,8 +1134,8 @@ class TestGoldenSectorRoadOverhaul:
         by_name = {o["name"]: o for o in objs}
 
         assert by_name["way601"]["renderPriority"] == 13
-        assert by_name["way602"]["renderPriority"] == 14
-        assert by_name["way603"]["renderPriority"] == 15
+        assert by_name["way602"]["renderPriority"] == 15
+        assert by_name["way603"]["renderPriority"] == 23
         assert by_name["way603"]["textureLength"] == pytest.approx(88.0)
         assert by_name["way601"]["textureLength"] == pytest.approx(11.0)
         # Junction end on way602 (50,0) gets 0 fade, dead-end (50,80) gets 2m fade
@@ -1294,5 +1295,104 @@ class TestGoldenSectorRoadOverhaul:
                 step = math.hypot(b[0] - a[0], b[1] - a[1])
                 assert 0.5 <= step <= 2.05
                 assert all(math.isfinite(v) for v in a) and all(math.isfinite(v) for v in b)
+
+    def test_t_junction_preserves_opposite_edge_and_tight_cut_zone(self) -> None:
+        from ivanovo2beam.roads.build import build_carriageway_index
+
+        main = self._road(901, np.array([[0.0, 0.0], [160.0, 0.0]]), highway="primary", lanes=2, width_m=10.0)
+        # Side street joins from NORTH (y > 0) and terminates right at (80, 0)
+        stem = self._road(902, np.array([[80.0, 60.0], [80.0, 0.0]]), highway="secondary", lanes=2, width_m=8.0)
+        idx = build_carriageway_index([main, stem])
+        pts_3d = np.array([[0.0, 0.0, 0.0], [160.0, 0.0, 0.0]])
+
+        marks = generate_lane_markings(
+            main,
+            "test_level",
+            pts_3d,
+            is_start_junction=False,
+            is_end_junction=False,
+            carriageway_index=idx,
+            crossing_margin_m=1.5,
+        )
+        # North edge (+4.7m, right) is split into 2 pieces around x=[74.5..85.5],
+        # while South edge (-4.7m, left) stays completely unbroken (1 piece)!
+        left_edges = [m for m in marks if m["name"].startswith("way901_line_left")]
+        right_edges = [m for m in marks if m["name"].startswith("way901_line_right")]
+        assert len(left_edges) == 1
+        assert len(right_edges) == 2
+        right_xs = sorted(n[0] for m in right_edges for n in m["nodes"])
+        assert any(65.0 <= x <= 76.0 for x in right_xs)
+        assert any(84.0 <= x <= 95.0 for x in right_xs)
+
+    def test_angled_ramp_y_fork_keeps_markings_tight_to_gore(self) -> None:
+        from types import SimpleNamespace
+
+        from ivanovo2beam.beamng.level import SceneTree
+        from ivanovo2beam.roads.build import add_network_to_scene
+
+        elev = np.full((12, 12), 10.0, dtype=np.float64)
+        build = SimpleNamespace(elevations=elev, origin_x=-50.0, origin_y=-50.0, cell_size_m=50.0)
+        tree = SceneTree(level_id="test_level")
+
+        # Main 2-lane primary + 14-deg one-way ramp merging on the North (+Y / right normal) side
+        main = self._road(911, np.array([[0.0, 0.0], [200.0, 0.0]]), highway="primary", lanes=2, width_m=10.0)
+        ramp = self._road(
+            912,
+            np.array([[100.0, 0.0], [200.0, 25.0]]),
+            highway="primary_link",
+            lanes=1,
+            width_m=5.5,
+            oneway=True,
+        )
+        add_network_to_scene(tree, [main, ramp], build)
+        by_name = {o["name"]: o for o in tree.objects[("level_objects", "road_network")]}
+
+        # One-way ramp gets edge markings and resumes well before x=200 (not dropped for 100m!)
+        ramp_marks = [o for k, o in by_name.items() if k.startswith("way912_line_")]
+        assert ramp_marks
+        assert max(n[0] for m in ramp_marks for n in m["nodes"]) > 170.0
+        # Main road keeps its centerline unbroken past x=100 gore
+        main_center = [o for k, o in by_name.items() if k.startswith("way911_mark_1")]
+        assert len(main_center) == 1
+        # Ground road gets tight decalBias and edge_grass has zero alphaRef/translucentZWrite
+        assert by_name["way911"]["decalBias"] == pytest.approx(0.0015)
+
+    def test_four_way_crossing_minor_track_never_cuts_highway_centerline(self) -> None:
+        from ivanovo2beam.roads.build import build_carriageway_index
+        from ivanovo2beam.roads.materials import build_road_materials_json
+
+        mats = build_road_materials_json("test_level")
+        assert "alphaRef" not in mats["m_road_asphalt_edge_grass"]
+        assert mats["m_road_asphalt_edge_grass"]["translucentZWrite"] is False
+        assert "m_road_asphalt_edge_dirt" in mats
+
+        main = self._road(921, np.array([[0.0, 0.0], [200.0, 0.0]]), highway="primary", lanes=2, width_m=10.0)
+        cross_sec = self._road(922, np.array([[60.0, -40.0], [60.0, 40.0]]), highway="secondary", lanes=2, width_m=8.0)
+        farm_track = self._road(
+            923,
+            np.array([[140.0, -40.0], [140.0, 40.0]]),
+            highway="track",
+            lanes=1,
+            width_m=4.0,
+            surface="gravel",
+            material_key="Gravel",
+            decal_material="m_dirt_road_gravels",
+        )
+        idx = build_carriageway_index([main, cross_sec, farm_track])
+        pts_3d = np.array([[0.0, 0.0, 0.0], [200.0, 0.0, 0.0]])
+        marks = generate_lane_markings(
+            main,
+            "test_level",
+            pts_3d,
+            is_start_junction=False,
+            is_end_junction=False,
+            carriageway_index=idx,
+            crossing_margin_m=1.5,
+        )
+        # Cut ONLY once around secondary road (x=60), NOT at farm track (x=140)
+        center = [m for m in marks if m["name"].startswith("way921_mark_1")]
+        assert len(center) == 2
+        piece2_xs = [n[0] for n in center[1]["nodes"]]
+        assert min(piece2_xs) < 67.0 and max(piece2_xs) > 199.0
 
 

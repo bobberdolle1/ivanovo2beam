@@ -214,7 +214,8 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_asphalt",
             macro_set="asphalt/macro_asphalt",
             macro_prefix="t_macro_asphalt",
-            base_color=(58, 60, 64),
+            base_color=(56, 58, 62),
+            base_size=512,
             detail_size=3,
             detail_strength=(0.3, 0.2),
             osm_surface=("asphalt", "paved", "chipseal"),
@@ -227,7 +228,8 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_asphalt_03",
             macro_set="asphalt/macro_asphalt",
             macro_prefix="t_macro_asphalt",
-            base_color=(78, 80, 82),
+            base_color=(76, 78, 80),
+            base_size=512,
             detail_size=3,
             detail_strength=(0.4, 0.3),
             osm_surface=(),
@@ -240,7 +242,8 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_concrete_damaged",
             macro_set="concrete/macro_concrete",
             macro_prefix="t_macro_concrete",
-            base_color=(142, 140, 134),
+            base_color=(128, 126, 120),
+            base_size=512,
             detail_size=4,
             detail_strength=(0.35, 0.25),
             osm_surface=("concrete", "concrete:plates", "paving_stones"),
@@ -255,7 +258,8 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             # while the filenames use "t_macro_clumpy_*" (same in east_coast_usa).
             macro_set="soil/macro_clumply",
             macro_prefix="t_macro_clumpy",
-            base_color=(124, 118, 108),
+            base_color=(114, 110, 102),
+            base_size=512,
             detail_size=3,
             detail_strength=(0.35, 0.3),
             osm_surface=("gravel", "fine_gravel", "pebblestone", "compacted"),
@@ -268,7 +272,8 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_dirt_crumbly",
             macro_set="soil/macro_clumply",
             macro_prefix="t_macro_clumpy",
-            base_color=(108, 86, 62),
+            base_color=(96, 80, 58),
+            base_size=512,
             detail_size=3,
             detail_strength=(0.25, 0.2),
             osm_surface=("dirt", "ground", "mud", "earth", "unpaved"),
@@ -281,11 +286,50 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_grass_01",
             macro_set="grass/macro_grass",
             macro_prefix="t_macro_grass",
-            base_color=(68, 118, 46),
+            base_color=(74, 94, 50),
+            base_size=512,
             detail_size=3,
-            detail_strength=(0.24, 0.14),
-            normal_detail_strength=(0.55, 0.12),
+            macro_size=48,
+            detail_strength=(0.20, 0.12),
+            normal_detail_strength=(0.75, 0.14),
             detail_distances=(0, 0, 45, 90),
+            macro_distances=(0, 0, 120, 3000),
+            osm_surface=(),
+        ),
+        TerrainMaterialSpec(
+            key="Meadow",
+            title="Lush summer meadow with clover and wildflowers",
+            groundmodel="GRASS",
+            texture_set="grass/t_grass_02",
+            texture_prefix="t_grass_02",
+            macro_set="grass/t_macro_grass",
+            macro_prefix="t_macro_grass",
+            base_color=(82, 98, 52),
+            base_size=512,
+            detail_size=3,
+            macro_size=45,
+            detail_strength=(0.22, 0.12),
+            normal_detail_strength=(0.75, 0.14),
+            detail_distances=(0, 0, 45, 90),
+            macro_distances=(0, 0, 120, 3000),
+            osm_surface=(),
+        ),
+        TerrainMaterialSpec(
+            key="DryGrass",
+            title="Sun-warmed dry grass, scrub and field margins",
+            groundmodel="GRASS",
+            texture_set="soil/t_dirt_dry_grassy",
+            texture_prefix="t_dirt_dry_grassy",
+            macro_set="grass/macro_dry_grass_02",
+            macro_prefix="t_macro_dry_grass_02",
+            base_color=(108, 102, 64),
+            base_size=512,
+            detail_size=3,
+            macro_size=50,
+            detail_strength=(0.24, 0.18),
+            normal_detail_strength=(0.70, 0.15),
+            detail_distances=(0, 0, 40, 80),
+            macro_distances=(0, 0, 150, 3000),
             osm_surface=(),
         ),
         TerrainMaterialSpec(
@@ -294,28 +338,34 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             groundmodel="GRASS",
             texture_set="grass/t_dirt_dry_grass",
             texture_prefix="t_dirt_dry_grass",
-            macro_set="grass/t_macro_dry_grass",
-            macro_prefix="t_macro_dry_grass",
-            base_color=(142, 122, 68),
+            macro_set="grass/macro_dry_grass_02",
+            macro_prefix="t_macro_dry_grass_02",
+            base_color=(134, 124, 72),
+            base_size=512,
             detail_size=4,
-            detail_strength=(0.32, 0.22),
+            macro_size=56,
+            detail_strength=(0.26, 0.18),
             normal_detail_strength=(0.65, 0.18),
             detail_distances=(0, 0, 50, 100),
+            macro_distances=(0, 0, 180, 3000),
             osm_surface=(),
         ),
         TerrainMaterialSpec(
             key="ForestFloor",
             title="Earthy forest floor litter, humus and moss",
             groundmodel="GRASS",
-            texture_set="forest/t_forest_ground",
-            texture_prefix="t_forest_ground",
+            texture_set="forest/t_forest_ground_02",
+            texture_prefix="t_forest_ground_02",
             macro_set="forest/t_macro_dirt_forest",
             macro_prefix="t_macro_dirt_forest",
-            base_color=(66, 56, 38),
+            base_color=(58, 50, 34),
+            base_size=512,
             detail_size=4,
-            detail_strength=(0.34, 0.24),
-            normal_detail_strength=(0.7, 0.2),
+            macro_size=48,
+            detail_strength=(0.28, 0.22),
+            normal_detail_strength=(0.70, 0.20),
             detail_distances=(0, 0, 45, 90),
+            macro_distances=(0, 0, 120, 3000),
             osm_surface=(),
         ),
         TerrainMaterialSpec(
@@ -326,7 +376,8 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_mud",
             macro_set="soil/macro_clumply",
             macro_prefix="t_macro_clumpy",
-            base_color=(76, 62, 46),
+            base_color=(64, 54, 42),
+            base_size=512,
             detail_size=3,
             detail_strength=(0.30, 0.25),
             osm_surface=(),
@@ -339,7 +390,8 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_dirt_rocky",
             macro_set="rock/macro_rocky",
             macro_prefix="t_macro_rocky",
-            base_color=(102, 102, 100),
+            base_color=(96, 96, 94),
+            base_size=512,
             detail_size=4,
             detail_strength=(0.3, 0.25),
             osm_surface=("rock",),
@@ -352,9 +404,10 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_sand",
             macro_set="sand/t_macro_sand",
             macro_prefix="t_macro_sand",
-            base_color=(182, 160, 114),
+            base_color=(146, 132, 100),
+            base_size=512,
             detail_size=3,
-            detail_strength=(0.30, 0.22),
+            detail_strength=(0.28, 0.22),
             osm_surface=("sand",),
         ),
         TerrainMaterialSpec(
@@ -365,7 +418,8 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
             texture_prefix="t_pebbles",
             macro_set="rock/macro_rocky",
             macro_prefix="t_macro_rocky",
-            base_color=(112, 108, 100),
+            base_color=(96, 92, 86),
+            base_size=512,
             detail_size=3,
             detail_strength=(0.3, 0.25),
             osm_surface=("pebbles",),
@@ -381,6 +435,8 @@ MATERIAL_LIBRARY: dict[str, TerrainMaterialSpec] = {
 #: changes every generated terrain.
 DEFAULT_MATERIAL_ORDER: tuple[str, ...] = (
     "Grass",
+    "Meadow",
+    "DryGrass",
     "Field",
     "ForestFloor",
     "Dirt",
@@ -576,27 +632,45 @@ def _encode_png(pixels: NDArray[np.uint8]) -> bytes:
 
 
 def _tileable_color_patch(base_rgb: tuple[int, int, int], seed_key: str, size: int = 256) -> NDArray[np.uint8]:
-    """Create a deterministic, seamlessly tileable base-colour RGB array."""
+    """Create a deterministic, isotropic, seamlessly tileable base-colour RGB array.
+
+    Uses periodic multi-octave bilinear value noise rather than low-frequency
+    directional cosines so large flat fields never exhibit diagonal wallpaper stripes.
+    """
     digest = hashlib.sha256(seed_key.encode("utf-8")).digest()
     seed = int.from_bytes(digest[:8], "little")
     rng = np.random.default_rng(seed)
 
-    coords = np.linspace(0.0, 2.0 * math.pi, size, endpoint=False, dtype=np.float64)
-    gx, gy = np.meshgrid(coords, coords)
-    field_a = np.zeros((size, size), dtype=np.float64)
-    field_b = np.zeros((size, size), dtype=np.float64)
+    def _periodic_octave(cells: int) -> NDArray[np.float64]:
+        grid = rng.uniform(-1.0, 1.0, size=(cells, cells))
+        coords = np.arange(size, dtype=np.float64) * (cells / size)
+        c0 = np.floor(coords).astype(np.intp) % cells
+        c1 = (c0 + 1) % cells
+        t = coords - np.floor(coords)
+        s = t * t * (3.0 - 2.0 * t)
+        wy = s[:, None]
+        wx = s[None, :]
+        v00 = grid[c0[:, None], c0[None, :]]
+        v01 = grid[c0[:, None], c1[None, :]]
+        v10 = grid[c1[:, None], c0[None, :]]
+        v11 = grid[c1[:, None], c1[None, :]]
+        return (
+            v00 * (1.0 - wx) * (1.0 - wy)
+            + v01 * wx * (1.0 - wy)
+            + v10 * (1.0 - wx) * wy
+            + v11 * wx * wy
+        )
 
-    for fx, fy, amp in ((1, 0, 0.45), (0, 1, 0.45), (1, 1, 0.35), (2, -1, 0.25), (2, 2, 0.18), (3, -2, 0.12)):
-        pa, pb = rng.uniform(0.0, 2.0 * math.pi, size=2)
-        field_a += amp * np.cos(fx * gx + fy * gy + pa)
-        field_b += amp * np.cos(fx * gx - fy * gy + pb)
+    field_luma = np.zeros((size, size), dtype=np.float64)
+    field_warm = np.zeros((size, size), dtype=np.float64)
+    for cells, weight in ((4, 0.45), (8, 0.30), (16, 0.17), (32, 0.08)):
+        eff = min(max(2, cells), size)
+        field_luma += weight * _periodic_octave(eff)
+        field_warm += weight * _periodic_octave(eff)
 
-    # Normalise to roughly [-1, 1] and apply a gentle +/-9 RGB modulation.
-    norm_a = field_a / 1.8
-    norm_b = field_b / 1.8
-    r = np.clip(base_rgb[0] + norm_a * 8.0 + norm_b * 3.0, 0.0, 255.0)
-    g = np.clip(base_rgb[1] + norm_a * 10.0 - norm_b * 2.0, 0.0, 255.0)
-    b = np.clip(base_rgb[2] + norm_a * 6.0 + norm_b * 4.0, 0.0, 255.0)
+    r = np.clip(base_rgb[0] + field_luma * 6.0 + field_warm * 3.0, 0.0, 255.0)
+    g = np.clip(base_rgb[1] + field_luma * 6.5 - field_warm * 1.5, 0.0, 255.0)
+    b = np.clip(base_rgb[2] + field_luma * 4.5 - field_warm * 2.5, 0.0, 255.0)
     return np.stack((r, g, b), axis=-1).round().astype(np.uint8)
 
 

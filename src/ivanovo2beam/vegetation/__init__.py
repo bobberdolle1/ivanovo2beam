@@ -21,6 +21,7 @@ from ivanovo2beam.vegetation.extract import (
     extract_vegetation,
 )
 from ivanovo2beam.vegetation.forest import (
+    FOREST_SAPLING_DISTRIBUTION,
     FOREST_SPECIES_DISTRIBUTION,
     LINKED_SPECIES_DATA,
     SCRUB_SPECIES_DISTRIBUTION,
@@ -33,6 +34,15 @@ from ivanovo2beam.vegetation.forest import (
     discover_beamng_dir,
     export_vegetation,
 )
+from ivanovo2beam.vegetation.groundcover import (
+    EXCLUDED_TERRAIN_LAYERS,
+    GROUNDCOVER_MATERIALS,
+    LINKED_GROUNDCOVER_SHAPES,
+    GroundCoverStats,
+    build_groundcover_materials_json,
+    build_groundcover_objects,
+    export_groundcover,
+)
 from ivanovo2beam.vegetation.worldcover import (
     WC_TREES,
     WorldCoverGrid,
@@ -43,9 +53,14 @@ from ivanovo2beam.vegetation.worldcover import (
 )
 
 __all__ = [
+    "EXCLUDED_TERRAIN_LAYERS",
     "FARMLAND_TAGS",
+    "FOREST_SAPLING_DISTRIBUTION",
     "FOREST_SPECIES_DISTRIBUTION",
     "FOREST_TAGS",
+    "GROUNDCOVER_MATERIALS",
+    "GroundCoverStats",
+    "LINKED_GROUNDCOVER_SHAPES",
     "LINKED_SPECIES_DATA",
     "MEADOW_TAGS",
     "SCRUB_SPECIES_DISTRIBUTION",
@@ -58,9 +73,12 @@ __all__ = [
     "VegetationStats",
     "WorldCoverGrid",
     "build_forest_materials_json",
+    "build_groundcover_materials_json",
+    "build_groundcover_objects",
     "build_keepout_mask",
     "build_managed_item_data_json",
     "discover_beamng_dir",
+    "export_groundcover",
     "export_vegetation",
     "extract_vegetation",
     "fetch_and_cache_worldcover",

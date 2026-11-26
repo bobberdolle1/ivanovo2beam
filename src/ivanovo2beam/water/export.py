@@ -11,7 +11,12 @@ Emits:
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Any
+
+import numpy as np
+import shapely
+from shapely.geometry import Polygon
 
 from ivanovo2beam.beamng.level import ROOT_GROUP, stable_uuid
 
@@ -61,6 +66,7 @@ def build_river_object(
         "__parent": parent,
         "position": nodes[0][:3],
         "nodes": nodes,
+        "subdivideLength": 4.0,
         "baseColor": [44, 74, 60, 255],
         "cubemap": cubemap,
         "depthGradientMax": 10.0,
@@ -76,29 +82,29 @@ def build_river_object(
         "fullReflect": False,
         "lowLODDistance": 80.0,
         "overallFoamOpacity": 0.0,
-        "overallRippleMagnitude": 0.2,
-        "overallWaveMagnitude": 0.05,
+        "overallRippleMagnitude": 0.15,
+        "overallWaveMagnitude": 0.02,
         "reflectivity": 0.55,
         "rippleTex": ripple_tex,
         "specularPower": 200.0,
         "useOcclusionQuery": False,
         "waterFogDensity": 1.0,
         "waterFogDensityOffset": 0.1,
-        "wetDarkening": 0.35,
-        "wetDepth": 0.35,
+        "wetDarkening": 0.30,
+        "wetDepth": 0.45,
         "Foam": [
             {"foamDir": [0, -1], "foamSpeed": 0.075, "foamTexScale": [3, 3]},
             {"foamDir": [0.4, 0], "foamSpeed": 0.075, "foamTexScale": [10, 10]},
         ],
         "Ripples (texture animation)": [
-            {"rippleDir": [0, -1], "rippleMagnitude": 0.7, "rippleSpeed": -1.2, "rippleTexScale": [0.5, 0.5]},
-            {"rippleDir": [0.5, 1], "rippleMagnitude": 0.5, "rippleSpeed": 0.07, "rippleTexScale": [7, 7]},
-            {"rippleDir": [-0.5, 1], "rippleMagnitude": 0.4, "rippleSpeed": 0.017, "rippleTexScale": [30, 50]},
+            {"rippleDir": [0, -1], "rippleMagnitude": 0.6, "rippleSpeed": -1.0, "rippleTexScale": [0.5, 0.5]},
+            {"rippleDir": [0.5, 1], "rippleMagnitude": 0.4, "rippleSpeed": 0.06, "rippleTexScale": [7, 7]},
+            {"rippleDir": [-0.5, 1], "rippleMagnitude": 0.35, "rippleSpeed": 0.015, "rippleTexScale": [30, 50]},
         ],
         "Waves (vertex undulation)": [
-            {"waveDir": [0, 1], "waveMagnitude": 0.2, "waveSpeed": 3.0},
-            {"waveDir": [0.707, 0.707], "waveMagnitude": 0.2, "waveSpeed": 1.5},
-            {"waveDir": [0.5, 0.86], "waveMagnitude": 0.2, "waveSpeed": 1.5},
+            {"waveDir": [0, 1], "waveMagnitude": 0.05, "waveSpeed": 2.5},
+            {"waveDir": [0.707, 0.707], "waveMagnitude": 0.05, "waveSpeed": 1.5},
+            {"waveDir": [0.5, 0.86], "waveMagnitude": 0.05, "waveSpeed": 1.5},
         ],
     }
 
@@ -121,20 +127,23 @@ def build_water_block_object(
     ripple_tex: str = DEFAULT_RIPPLE_TEX,
     cubemap: str = DEFAULT_WATER_CUBEMAP,
     parent: str = "water",
+    bounds_override: tuple[float, float, float, float] | None = None,
+    name_suffix: str = "",
 ) -> dict[str, Any]:
     """Construct a BeamNG ``WaterBlock`` scene object from a :class:`WaterBody`."""
-    min_x, min_y, max_x, max_y = body.bounds
+    min_x, min_y, max_x, max_y = bounds_override if bounds_override is not None else body.bounds
     size_x = max(2.0, max_x - min_x)
     size_y = max(2.0, max_y - min_y)
     center_x = 0.5 * (min_x + max_x)
     center_y = 0.5 * (min_y + max_y)
     depth_z = max(1.0, float(body.depth_m))
     grid_element_size = compute_water_block_grid_element_size(size_x, size_y)
+    obj_id = f"{body.osm_id}{name_suffix}"
 
     return {
-        "name": f"waterblock_{body.osm_id}",
+        "name": f"waterblock_{obj_id}",
         "class": "WaterBlock",
-        "persistentId": stable_uuid(level_id, "WaterBlock", str(body.osm_id)),
+        "persistentId": stable_uuid(level_id, "WaterBlock", obj_id),
         "__parent": parent,
         "position": [round(center_x, 5), round(center_y, 5), round(body.z_water, 5)],
         "scale": [round(size_x, 5), round(size_y, 5), round(depth_z, 5)],
@@ -153,28 +162,89 @@ def build_water_block_object(
         "gridElementSize": grid_element_size,
         "gridSize": 1,
         "overallFoamOpacity": 0.0,
-        "overallRippleMagnitude": 0.2,
-        "overallWaveMagnitude": 0.1,
+        "overallRippleMagnitude": 0.15,
+        "overallWaveMagnitude": 0.015,
         "reflectivity": 0.55,
         "rippleTex": ripple_tex,
         "specularPower": 200.0,
         "useOcclusionQuery": False,
         "waterFogDensity": 1.0,
         "waterFogDensityOffset": 0.1,
-        "wetDarkening": 0.5,
-        "wetDepth": 0.2,
+        "wetDarkening": 0.35,
+        "wetDepth": 0.35,
         "Foam": [{}, {}],
         "Ripples (texture animation)": [
-            {"rippleDir": [0, 1], "rippleMagnitude": 0.8, "rippleSpeed": 0.001, "rippleTexScale": [12, 12]},
-            {"rippleDir": [0, 1], "rippleMagnitude": 0.5, "rippleSpeed": 0.02, "rippleTexScale": [6, 6]},
-            {"rippleDir": [0.7, -0.7], "rippleMagnitude": 1.0, "rippleSpeed": 0.02, "rippleTexScale": [3, 3]},
+            {"rippleDir": [0, 1], "rippleMagnitude": 0.6, "rippleSpeed": 0.001, "rippleTexScale": [12, 12]},
+            {"rippleDir": [0, 1], "rippleMagnitude": 0.4, "rippleSpeed": 0.02, "rippleTexScale": [6, 6]},
+            {"rippleDir": [0.7, -0.7], "rippleMagnitude": 0.8, "rippleSpeed": 0.02, "rippleTexScale": [3, 3]},
         ],
         "Waves (vertex undulation)": [
-            {"waveDir": [0, 1], "waveMagnitude": 0.2, "waveSpeed": 1.0},
-            {"waveDir": [0.707, 0.707], "waveMagnitude": 0.2, "waveSpeed": 1.0},
-            {"waveDir": [0.5, 0.86], "waveMagnitude": 0.2, "waveSpeed": 1.0},
+            {"waveDir": [0, 1], "waveMagnitude": 0.03, "waveSpeed": 1.0},
+            {"waveDir": [0.707, 0.707], "waveMagnitude": 0.03, "waveSpeed": 1.0},
+            {"waveDir": [0.5, 0.86], "waveMagnitude": 0.03, "waveSpeed": 1.0},
         ],
     }
+
+
+def _tile_water_body_bounds(body: WaterBody) -> list[tuple[float, float, float, float]]:
+    """Decompose concave, holed, or curved water bodies into tight non-overlapping rectangles.
+
+    Axis-aligned single ``WaterBlock`` boxes cover dry land (and islands) whenever
+    a pond/oxbow is diagonal or curved. Rectangular/high-fill bodies stay a single block.
+    """
+    min_x, min_y, max_x, max_y = body.bounds
+    sx = max_x - min_x
+    sy = max_y - min_y
+    bbox_area = sx * sy
+    if bbox_area <= 0.0:
+        return [body.bounds]
+    fill_ratio = body.area_m2 / bbox_area
+    if not body.inner_rings and (fill_ratio >= 0.72 or max(sx, sy) <= 16.0):
+        return [body.bounds]
+
+    poly = Polygon(body.outer_ring, holes=[h for h in body.inner_rings if len(h) >= 4])
+    if not poly.is_valid:
+        poly = poly.buffer(0)
+    if poly.is_empty:
+        return [body.bounds]
+
+    cell = max(2.5, min(10.0, max(sx, sy) / 32.0))
+    nx = max(1, math.ceil(sx / cell))
+    ny = max(1, math.ceil(sy / cell))
+    xs = min_x + (np.arange(nx, dtype=np.float64) + 0.5) * cell
+    ys = min_y + (np.arange(ny, dtype=np.float64) + 0.5) * cell
+    gx, gy = np.meshgrid(xs, ys)
+    # Slightly buffer curved ponds/oxbows so boundary cells fill up to the sloped
+    # shoreline cleanly without leaving square staircase corners on bare sand.
+    wet_poly = poly.buffer(0.6)
+    wet = shapely.contains_xy(wet_poly, gx.ravel(), gy.ravel()).reshape(ny, nx)
+    if not wet.any():
+        return [body.bounds]
+
+    # Dilate by 1 cell only where polygon boundary intersects? No — keep strictly
+    # interior cells (+0.25m overlap between adjacent tiles) so water never floods
+    # onto dry land outside concave ponds or islands.
+    used = np.zeros((ny, nx), dtype=bool)
+    rects: list[tuple[float, float, float, float]] = []
+    pad = 0.25
+    for r in range(ny):
+        for c in range(nx):
+            if not wet[r, c] or used[r, c]:
+                continue
+            c_end = c + 1
+            while c_end < nx and wet[r, c_end] and not used[r, c_end]:
+                c_end += 1
+            r_end = r + 1
+            while r_end < ny and bool(np.all(wet[r_end, c:c_end] & ~used[r_end, c:c_end])):
+                r_end += 1
+            used[r:r_end, c:c_end] = True
+            rx0 = min_x + c * cell - (pad if c > 0 else 0.0)
+            rx1 = min(max_x, min_x + c_end * cell + (pad if c_end < nx else 0.0))
+            ry0 = min_y + r * cell - (pad if r > 0 else 0.0)
+            ry1 = min(max_y, min_y + r_end * cell + (pad if r_end < ny else 0.0))
+            if rx1 > rx0 and ry1 > ry0:
+                rects.append((rx0, ry0, rx1, ry1))
+    return rects or [body.bounds]
 
 
 def export_water_to_scene(
@@ -220,15 +290,20 @@ def export_water_to_scene(
         count += 1
 
     for body in water_network.water_bodies:
-        obj = build_water_block_object(
-            tree.level_id,
-            body,
-            depth_gradient_tex=depth_gradient_tex,
-            foam_tex=foam_tex,
-            ripple_tex=ripple_tex,
-            parent=parent,
-        )
-        tree.add_object(group_path, obj)
-        count += 1
+        rects = _tile_water_body_bounds(body)
+        for idx, rect in enumerate(rects):
+            suffix = f"_t{idx}" if len(rects) > 1 else ""
+            obj = build_water_block_object(
+                tree.level_id,
+                body,
+                depth_gradient_tex=depth_gradient_tex,
+                foam_tex=foam_tex,
+                ripple_tex=ripple_tex,
+                parent=parent,
+                bounds_override=rect if len(rects) > 1 else None,
+                name_suffix=suffix,
+            )
+            tree.add_object(group_path, obj)
+            count += 1
 
     return count

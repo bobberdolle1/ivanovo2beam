@@ -954,11 +954,14 @@ class TestForestExport:
     def test_scene_objects_emitted(self, tmp_path: Path) -> None:
         build = _MockBuild(size=512)
         areas = self._vegetation_areas()
-        scene_objs, _ = export_vegetation(areas, build, level_id="lvl", level_dir=tmp_path)
+        scene_objs, stats = export_vegetation(
+            areas, build, level_id="lvl", level_dir=tmp_path, beamng_dir=False
+        )
 
-        assert len(scene_objs) == 2
         classes = {o["class"] for o in scene_objs}
-        assert classes == {"Forest", "ForestWindEmitter"}
+        assert classes == {"Forest", "ForestWindEmitter", "GroundCover"}
+        assert stats.groundcover_layers >= 6
+        assert stats.groundcover_max_elements > 0
 
         forest_obj = next(o for o in scene_objs if o["class"] == "Forest")
         assert forest_obj["name"] == "theForest"
@@ -969,6 +972,22 @@ class TestForestExport:
         assert wind_obj["name"] == "windEmitter"
         assert wind_obj["__parent"] == "vegetation"
         assert wind_obj["strength"] > 0
+
+        gc_objs = [o for o in scene_objs if o["class"] == "GroundCover"]
+        assert len(gc_objs) == stats.groundcover_layers
+        assert all(o["__parent"] == "vegetation" for o in gc_objs)
+
+        no_gc_objs, no_gc_stats = export_vegetation(
+            areas,
+            build,
+            level_id="lvl",
+            level_dir=tmp_path / "no_gc",
+            beamng_dir=False,
+            include_groundcover=False,
+        )
+        assert len(no_gc_objs) == 2
+        assert {o["class"] for o in no_gc_objs} == {"Forest", "ForestWindEmitter"}
+        assert no_gc_stats.groundcover_layers == 0
 
     def test_riparian_woodland_frames_water_banks(self, tmp_path: Path) -> None:
         @dataclass
@@ -1031,3 +1050,151 @@ class TestForestExport:
         wc_areas = [a for a in areas if a.name == "WorldCover Canopy"]
         assert wc_areas
         assert all(a.kind == "forest" for a in wc_areas)
+
+
+class TestGroundCoverAndMultiTierForest:
+    def test_groundcover_schema_and_excluded_layer_masking(self, tmp_path: Path) -> None:
+        from ivanovo2beam.vegetation.groundcover import (
+            EXCLUDED_TERRAIN_LAYERS,
+            GROUNDCOVER_MATERIALS,
+            MAX_COVERTYPES,
+            export_groundcover,
+        )
+
+        mats = [
+            "Grass",
+            "Meadow",
+            "DryGrass",
+            "Field",
+            "ForestFloor",
+            "Dirt",
+            "RiverbankSoil",
+            "Asphalt",
+            "Asphalt_worn",
+            "Concrete",
+            "Gravel",
+            "Rock",
+            "Sand",
+            "Pebbles",
+        ]
+        objs, stats = export_groundcover(
+            "lvl",
+            tmp_path,
+            center_pos=(100.0, 200.0, 115.0),
+            terrain_materials=mats,
+            beamng_dir=None,
+        )
+        assert stats.layers == len(objs)
+        assert stats.layers >= 7
+        assert stats.total_max_elements > 100_000
+
+        mat_file = tmp_path / "art" / "shapes" / "groundcover" / "main.materials.json"
+        assert mat_file.is_file()
+        mat_doc = json.loads(mat_file.read_text(encoding="utf-8"))
+        assert set(mat_doc) == set(GROUNDCOVER_MATERIALS)
+        for m in mat_doc.values():
+            assert m["class"] == "Material"
+            assert m["alphaTest"] is True
+            assert m["doubleSided"] is True
+            assert m["subSurface"] is True
+            for val in m["Stages"][0].values():
+                if isinstance(val, str):
+                    assert val.startswith("/assets/materials/foliage/")
+                    assert val.endswith(".dds")
+
+        active_layers: set[str] = set()
+        for obj in objs:
+            assert obj["class"] == "GroundCover"
+            assert obj["__parent"] == "vegetation"
+            assert obj["shapesCastShadows"] is False
+            assert obj["radius"] >= obj["dissolveRadius"] > 0
+            assert obj["maxElements"] > 0
+            assert len(obj["Types"]) == MAX_COVERTYPES
+            assert obj["material"] in mat_doc
+            for t in obj["Types"]:
+                lyr = t.get("layer")
+                if lyr is not None:
+                    assert lyr not in EXCLUDED_TERRAIN_LAYERS
+                    assert lyr in mats
+                    active_layers.add(lyr)
+                    uvs = t.get("billboardUVs")
+                    assert isinstance(uvs, list) and len(uvs) == 4
+
+        assert {"Grass", "Meadow", "DryGrass", "Field", "ForestFloor"}.issubset(active_layers)
+
+    def test_groundcover_links_3d_shapes_when_beamng_present(self, tmp_path: Path) -> None:
+        import zipfile
+        from ivanovo2beam.vegetation.groundcover import LINKED_GROUNDCOVER_SHAPES, export_groundcover
+
+        beamng_root = tmp_path / "BeamNG"
+        levels_dir = beamng_root / "content" / "levels"
+        levels_dir.mkdir(parents=True)
+        with zipfile.ZipFile(levels_dir / "east_coast_usa.zip", "w") as zf:
+            for src in LINKED_GROUNDCOVER_SHAPES.values():
+                zf.writestr(src, "<dae/>")
+                zf.writestr(src[:-4] + ".cdae", "cdae")
+
+        level_dir = tmp_path / "lvl"
+        objs, stats = export_groundcover("lvl", level_dir, beamng_dir=beamng_root)
+        assert stats.linked_shapes == len(LINKED_GROUNDCOVER_SHAPES)
+        gc_3d = next((o for o in objs if o["name"] == "gc_3d_foliage_close"), None)
+        assert gc_3d is not None
+        assert gc_3d["shapeCullRadius"] <= 45.0
+        shape_paths = [t["shapeFilename"] for t in gc_3d["Types"] if t.get("shapeFilename")]
+        assert shape_paths
+        for sp in shape_paths:
+            assert sp.startswith("/levels/lvl/art/shapes/linked/east_coast_usa/")
+            rel = sp.removeprefix("/levels/lvl/") + ".link"
+            assert (level_dir / rel).is_file()
+
+    def test_leaf_type_inferred_from_wood_and_leaf_cycle(self, projection) -> None:
+        shapes = [
+            (rectangle(150.0, 150.0, 0.0, 0.0).tolist(), {"natural": "wood", "wood": "coniferous"}),
+            (rectangle(150.0, 150.0, 300.0, 0.0).tolist(), {"landuse": "forest", "leaf_cycle": "deciduous"}),
+        ]
+        osm = _make_osm(projection, shapes)
+        areas, _ = extract_vegetation(osm, projection)
+        assert areas[0].leaf_type == "needleleaved"
+        assert areas[1].leaf_type == "broadleaved"
+
+    def test_organic_edge_tapering_and_terrain_layer_keepout(self, tmp_path: Path) -> None:
+        class _LayeredBuild(_MockBuild):
+            def __init__(self) -> None:
+                super().__init__(size=512, elevation=100.0)
+                self.materials = ["Grass", "Asphalt", "Sand"]
+                self.layers = np.zeros((512, 512), dtype=np.uint8)
+                # Paint an asphalt strip along y = 250m (rows 120..130 at cell_size=2.0)
+                self.layers[120:130, :] = 1
+                # Paint a sand strip along x = 250m (cols 120..130)
+                self.layers[:, 120:130] = 2
+
+        build = _LayeredBuild()
+        areas = [
+            VegetationArea(
+                osm_id=9101,
+                ring=rectangle(300.0, 300.0, 100.0, 100.0),
+                kind="forest",
+                area_m2=90000.0,
+            )
+        ]
+        _, stats = export_vegetation(
+            areas,
+            build,
+            level_id="lvl",
+            level_dir=tmp_path,
+            beamng_dir=False,
+            target_density_trees_per_ha=200.0,
+        )
+        assert stats.total_trees > 200
+        # Verify multi-tier bushes/saplings are present alongside tall canopy
+        assert any("bush" in k for k in stats.by_species)
+        assert any("small" in k or "sml" in k for k in stats.by_species)
+        # Verify zero trees spawn on Asphalt or Sand terrain layer cells
+        for json_file in (tmp_path / "forest").glob("*.forest4.json"):
+            for line in json_file.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                x, y, _ = json.loads(line)["pos"]
+                col = round((x - build.origin_x) / build.cell_size_m)
+                row = round((y - build.origin_y) / build.cell_size_m)
+                assert int(build.layers[row, col]) == 0

@@ -70,12 +70,12 @@ class BuildingClass:
 BUILDING_CLASSES: dict[str, BuildingClass] = {
     "house": BuildingClass(
         key="house",
-        title="Detached or semi-detached wooden house / izba",
-        levels=1.5,
+        title="Detached or semi-detached wooden house / izba / dacha",
+        levels=1.0,
         level_height_m=3.0,
-        height_m=6.0,
+        height_m=3.6,
         roof="gable",
-        colour=(0.72, 0.66, 0.58),
+        colour=(0.64, 0.56, 0.46),
     ),
     "apartments": BuildingClass(
         key="apartments",
@@ -110,20 +110,20 @@ BUILDING_CLASSES: dict[str, BuildingClass] = {
         key="garage",
         title="Garage or carport",
         levels=1.0,
-        level_height_m=2.6,
-        height_m=2.8,
+        level_height_m=2.5,
+        height_m=2.6,
         roof="flat",
-        colour=(0.62, 0.60, 0.57),
+        colour=(0.58, 0.56, 0.54),
         min_area_m2=10.0,
     ),
     "shed": BuildingClass(
         key="shed",
         title="Shed, barn or outbuilding",
         levels=1.0,
-        level_height_m=3.0,
-        height_m=3.5,
+        level_height_m=2.6,
+        height_m=2.8,
         roof="gable",
-        colour=(0.55, 0.50, 0.44),
+        colour=(0.50, 0.44, 0.38),
         min_area_m2=8.0,
     ),
     "school": BuildingClass(
@@ -158,11 +158,11 @@ BUILDING_CLASSES: dict[str, BuildingClass] = {
     "yes": BuildingClass(
         key="yes",
         title="Building, type untagged",
-        levels=2.0,
-        level_height_m=3.2,
-        height_m=7.0,
+        levels=1.5,
+        level_height_m=2.8,
+        height_m=4.2,
         roof="gable",
-        colour=(0.70, 0.66, 0.60),
+        colour=(0.66, 0.60, 0.52),
     ),
 }
 
@@ -175,6 +175,8 @@ _TAG_TO_CLASS: dict[str, str] = {
     "bungalow": "house",
     "static_caravan": "house",
     "cabin": "house",
+    "dacha": "house",
+    "cottage": "house",
     "shack": "house",
     "allotment_house": "house",
     "farm": "house",
@@ -196,6 +198,7 @@ _TAG_TO_CLASS: dict[str, str] = {
     "supermarket": "commercial",
     "office": "commercial",
     "kiosk": "commercial",
+    "pavilion": "commercial",
     "mall": "commercial",
     "civic": "commercial",
     "public": "commercial",
@@ -209,6 +212,10 @@ _TAG_TO_CLASS: dict[str, str] = {
     "service": "garage",
     "shed": "shed",
     "barn": "shed",
+    "hut": "shed",
+    "outbuilding": "shed",
+    "ruins": "shed",
+    "conservatory": "shed",
     "farm_auxiliary": "shed",
     "greenhouse": "shed",
     "stable": "shed",
@@ -700,6 +707,13 @@ def extract_buildings(
             else:
                 levels = klass.levels
                 height = klass.height_m
+                if klass.key == "yes":
+                    if area < 35.0:
+                        levels = 1.0
+                        height = 2.8
+                    elif area > 350.0:
+                        levels = 2.0
+                        height = 7.0
                 source = "default"
         else:
             levels = parse_levels(way.tags.get("building:levels")) or round(

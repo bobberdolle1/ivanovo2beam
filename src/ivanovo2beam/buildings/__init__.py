@@ -45,6 +45,7 @@ from ivanovo2beam.buildings.mesh import (
     MeshBuilder,
     extrude_footprint,
     mesh_to_dae_xml,
+    normalize_roof_shape,
     roof_height_for,
     write_dae,
 )
@@ -74,6 +75,7 @@ __all__ = [
     "extrude_footprint",
     "footprint_ring_area",
     "mesh_to_dae_xml",
+    "normalize_roof_shape",
     "parse_height_m",
     "parse_levels",
     "parse_min_height_m",

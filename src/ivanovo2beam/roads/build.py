@@ -27,6 +27,7 @@ import numpy as np
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Callable, Sequence
+    from pathlib import Path
 
     from ivanovo2beam.beamng.level import SceneTree
     from ivanovo2beam.config import RoadSettings
@@ -90,33 +91,45 @@ DECAL_ROAD_DETAIL = 0.5
 EDGE_LINE_RENDER_PRIORITY = 1
 CENTER_LINE_RENDER_PRIORITY = 2
 EDGE_GRASS_RENDER_PRIORITY = 9
-AI_INVISIBLE_RENDER_PRIORITY = 20
+AI_INVISIBLE_RENDER_PRIORITY = 25
 
 SURFACE_RENDER_PRIORITY: dict[str, int] = {
-    "motorway": 13,
+    "motorway": 11,
+    "trunk": 12,
     "motorway_link": 13,
-    "trunk": 13,
     "trunk_link": 13,
     "primary": 13,
-    "primary_link": 13,
-    "secondary": 14,
-    "secondary_link": 14,
-    "tertiary": 14,
-    "tertiary_link": 14,
-    "residential": 14,
-    "living_street": 14,
-    "unclassified": 14,
-    "road": 14,
-    "busway": 14,
-    "raceway": 14,
-    "service": 15,
-    "track": 15,
-    "path": 15,
+    "primary_link": 14,
+    "secondary": 15,
+    "secondary_link": 16,
+    "tertiary": 17,
+    "tertiary_link": 18,
+    "unclassified": 19,
+    "road": 19,
+    "busway": 19,
+    "raceway": 19,
+    "residential": 20,
+    "living_street": 21,
+    "service": 22,
+    "track": 23,
+    "path": 24,
 }
-_DEFAULT_SURFACE_RENDER_PRIORITY = 14
+_DEFAULT_SURFACE_RENDER_PRIORITY = 19
 
-_MAJOR_MARKING_HIGHWAYS = frozenset({"motorway", "trunk", "primary"})
-_MAJOR_EDGE_HIGHWAYS = frozenset({"motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link"})
+_MAJOR_MARKING_HIGHWAYS = frozenset(
+    {
+        "motorway",
+        "motorway_link",
+        "trunk",
+        "trunk_link",
+        "primary",
+        "primary_link",
+        "secondary",
+        "secondary_link",
+    }
+)
+_MAJOR_EDGE_HIGHWAYS = _MAJOR_MARKING_HIGHWAYS
+_MINOR_UNCUT_HIGHWAYS = frozenset({"service", "track", "path", "living_street", "footway", "cycleway", "steps"})
 
 _SURFACE_TEXTURE_LENGTH: dict[str, float] = {
     "road_asphalt_2lane": 11.0,
@@ -133,24 +146,24 @@ _EDGE_LINE_INSET_M = 0.3
 
 #: Tiered DecalRoad LOD settings ``(distance_fade, break_angle, detail)`` by highway class.
 _DECAL_LOD_BY_CLASS: dict[str, tuple[tuple[float, float], float, float]] = {
-    "motorway": ((650.0, 150.0), 1.5, DECAL_ROAD_DETAIL),
-    "motorway_link": ((650.0, 150.0), 1.5, DECAL_ROAD_DETAIL),
-    "trunk": ((650.0, 150.0), 1.5, DECAL_ROAD_DETAIL),
-    "trunk_link": ((650.0, 150.0), 1.5, DECAL_ROAD_DETAIL),
-    "primary": ((650.0, 150.0), 1.5, DECAL_ROAD_DETAIL),
-    "primary_link": ((650.0, 150.0), 1.5, DECAL_ROAD_DETAIL),
-    "secondary": ((450.0, 100.0), 2.0, DECAL_ROAD_DETAIL),
-    "secondary_link": ((450.0, 100.0), 2.0, DECAL_ROAD_DETAIL),
-    "tertiary": ((450.0, 100.0), 2.0, DECAL_ROAD_DETAIL),
-    "tertiary_link": ((450.0, 100.0), 2.0, DECAL_ROAD_DETAIL),
-    "residential": ((250.0, 75.0), 2.0, DECAL_ROAD_DETAIL),
-    "unclassified": ((250.0, 75.0), 2.0, DECAL_ROAD_DETAIL),
-    "service": ((120.0, 40.0), 2.0, DECAL_ROAD_DETAIL),
-    "living_street": ((120.0, 40.0), 2.0, DECAL_ROAD_DETAIL),
-    "track": ((120.0, 40.0), 2.0, DECAL_ROAD_DETAIL),
-    "path": ((120.0, 40.0), 2.0, DECAL_ROAD_DETAIL),
+    "motorway": ((750.0, 180.0), 1.5, DECAL_ROAD_DETAIL),
+    "motorway_link": ((750.0, 180.0), 1.5, DECAL_ROAD_DETAIL),
+    "trunk": ((750.0, 180.0), 1.5, DECAL_ROAD_DETAIL),
+    "trunk_link": ((750.0, 180.0), 1.5, DECAL_ROAD_DETAIL),
+    "primary": ((750.0, 180.0), 1.5, DECAL_ROAD_DETAIL),
+    "primary_link": ((750.0, 180.0), 1.5, DECAL_ROAD_DETAIL),
+    "secondary": ((550.0, 120.0), 1.5, DECAL_ROAD_DETAIL),
+    "secondary_link": ((550.0, 120.0), 1.5, DECAL_ROAD_DETAIL),
+    "tertiary": ((550.0, 120.0), 1.5, DECAL_ROAD_DETAIL),
+    "tertiary_link": ((550.0, 120.0), 1.5, DECAL_ROAD_DETAIL),
+    "residential": ((400.0, 100.0), 2.0, DECAL_ROAD_DETAIL),
+    "unclassified": ((400.0, 100.0), 2.0, DECAL_ROAD_DETAIL),
+    "service": ((250.0, 75.0), 2.0, DECAL_ROAD_DETAIL),
+    "living_street": ((250.0, 75.0), 2.0, DECAL_ROAD_DETAIL),
+    "track": ((250.0, 75.0), 2.0, DECAL_ROAD_DETAIL),
+    "path": ((250.0, 75.0), 2.0, DECAL_ROAD_DETAIL),
 }
-_DEFAULT_DECAL_LOD: tuple[tuple[float, float], float, float] = ((120.0, 40.0), 2.0, DECAL_ROAD_DETAIL)
+_DEFAULT_DECAL_LOD: tuple[tuple[float, float], float, float] = ((250.0, 75.0), 2.0, DECAL_ROAD_DETAIL)
 
 
 def surface_render_priority_for(road: Road) -> int:
@@ -516,7 +529,7 @@ def _prepare_road_points_3d(
 
     clean = _sanitize_xyz_points(pts_3d)
     max_seg = min(250.0, max(1.0, max_bbox_span_m * 0.5))
-    simplified = _simplify_3d_z_aware(clean, tol_xy=0.5, tol_z=0.04, max_seg_m=max_seg)
+    simplified = _simplify_3d_z_aware(clean, tol_xy=0.10, tol_z=0.02, max_seg_m=max_seg)
     return _sanitize_xyz_points(simplified)
 
 
@@ -681,6 +694,8 @@ def road_to_decal_object(
     if road.bridge:
         obj["overObjects"] = True
         obj["decalBias"] = 0.002
+    else:
+        obj["decalBias"] = 0.0015
 
     return obj
 
@@ -800,12 +815,13 @@ def _should_generate_markings(road: Road) -> bool:
         return False
     if road.lanes >= 4:
         return True
-    return (
-        not road.oneway
-        and road.lanes == 2
-        and road.highway in _MAJOR_MARKING_HIGHWAYS
-        and road.width_m >= 8.0
-    )
+    if road.highway in _MAJOR_MARKING_HIGHWAYS:
+        if road.oneway:
+            return road.width_m >= 4.5
+        return road.lanes >= 2 and road.width_m >= 6.0
+    if road.highway in {"tertiary", "tertiary_link"}:
+        return (not road.oneway) and road.lanes >= 2 and road.width_m >= 7.0
+    return False
 
 
 def _should_generate_edge_decals(road: Road) -> bool:
@@ -831,6 +847,9 @@ class _IndexedSegment:
     layer: int
     ux: float
     uy: float
+    seg_len: float
+    highway: str = ""
+    render_priority: int = _DEFAULT_SURFACE_RENDER_PRIORITY
 
 
 class CarriagewayIndex:
@@ -852,6 +871,8 @@ class CarriagewayIndex:
         half_width_m: float,
         owner_id: int,
         layer: int = 0,
+        highway: str = "",
+        render_priority: int = _DEFAULT_SURFACE_RENDER_PRIORITY,
     ) -> None:
         """Register every segment of a 2D or 3D polyline in the spatial grid."""
         pts = np.asarray(points, dtype=np.float64)
@@ -890,6 +911,9 @@ class CarriagewayIndex:
                     layer=layer,
                     ux=dx / length,
                     uy=dy / length,
+                    seg_len=length,
+                    highway=highway,
+                    render_priority=render_priority,
                 )
             )
             gx0 = math.floor((min(ax, bx) - pad) / cell)
@@ -914,6 +938,9 @@ class CarriagewayIndex:
         cut_all_angles: bool = False,
         ignored_ids: frozenset[int] | set[int] | None = None,
         parallel_cos: float = 0.85,
+        caller_highway: str = "",
+        skip_minor_crossings: bool = False,
+        end_cap_m: float | None = None,
     ) -> bool:
         """Return whether ``(x, y)`` lies on a crossing (or overlapping) carriageway."""
         cell_key = (math.floor(x / self.cell_size_m), math.floor(y / self.cell_size_m))
@@ -921,16 +948,25 @@ class CarriagewayIndex:
         if not candidates:
             return False
         tx, ty = tangent
+        cap_m = margin_m if end_cap_m is None else end_cap_m
+        caller_is_minor = caller_highway in _MINOR_UNCUT_HIGHWAYS
         for idx in candidates:
             seg = self.segments[idx]
             if seg.owner_id == owner_id or seg.layer != layer:
                 continue
             if ignored_ids is not None and seg.owner_id in ignored_ids:
                 continue
+            if skip_minor_crossings and not caller_is_minor and seg.highway in _MINOR_UNCUT_HIGHWAYS:
+                continue
             dx = seg.bx - seg.ax
             dy = seg.by - seg.ay
             len2 = dx * dx + dy * dy
-            t = max(0.0, min(1.0, ((x - seg.ax) * dx + (y - seg.ay) * dy) / len2)) if len2 > 0.0 else 0.0
+            raw_t = ((x - seg.ax) * dx + (y - seg.ay) * dy) / len2 if len2 > 0.0 else 0.0
+            if (raw_t < 0.0 and -raw_t * seg.seg_len > cap_m) or (
+                raw_t > 1.0 and (raw_t - 1.0) * seg.seg_len > cap_m
+            ):
+                continue
+            t = max(0.0, min(1.0, raw_t))
             ex = seg.ax + t * dx - x
             ey = seg.ay + t * dy - y
             dist2 = ex * ex + ey * ey
@@ -960,12 +996,27 @@ def build_carriageway_index(
     for road in roads:
         if not road.drivable or road.tunnel or not math.isfinite(road.width_m) or road.width_m <= 0.0:
             continue
+        prio = surface_render_priority_for(road)
         polylines = points_by_osm_id.get(road.osm_id) if points_by_osm_id is not None else None
         if polylines:
             for pts in polylines:
-                index.add_polyline(pts, half_width_m=road.half_width_m, owner_id=road.osm_id, layer=road.layer)
+                index.add_polyline(
+                    pts,
+                    half_width_m=road.half_width_m,
+                    owner_id=road.osm_id,
+                    layer=road.layer,
+                    highway=road.highway,
+                    render_priority=prio,
+                )
         else:
-            index.add_polyline(road.points, half_width_m=road.half_width_m, owner_id=road.osm_id, layer=road.layer)
+            index.add_polyline(
+                road.points,
+                half_width_m=road.half_width_m,
+                owner_id=road.osm_id,
+                layer=road.layer,
+                highway=road.highway,
+                render_priority=prio,
+            )
     return index
 
 
@@ -974,7 +1025,7 @@ def cut_polyline_at_crossings(
     blocked_fn: Callable[[float, float, float, float, float], bool],
     *,
     sample_step_m: float = 0.5,
-    min_piece_m: float = 3.0,
+    min_piece_m: float = 1.5,
 ) -> list[np.ndarray]:
     """Split a 3D polyline into contiguous unblocked runs (dropped under ``min_piece_m``).
 
@@ -1102,7 +1153,7 @@ def generate_lane_markings(
     max_segment_length_m: float = MAX_SEGMENT_LENGTH_M,
     max_bbox_span_m: float = MAX_SEGMENT_BBOX_SPAN_M,
     carriageway_index: CarriagewayIndex | None = None,
-    crossing_margin_m: float = 2.0,
+    crossing_margin_m: float = 1.5,
     include_edge_lines: bool | None = None,
     ignored_ids: frozenset[int] | set[int] | None = None,
 ) -> list[dict[str, object]]:
@@ -1177,12 +1228,14 @@ def generate_lane_markings(
         line_specs.append((f"{base_key}_mark_{k}", offset, material, CENTER_LINE_RENDER_PRIORITY))
 
     emit_edges = (road.highway in _MAJOR_MARKING_HIGHWAYS) if include_edge_lines is None else include_edge_lines
-    if emit_edges and road.width_m >= 6.0:
+    if emit_edges and road.width_m >= (4.5 if road.oneway else 6.0):
         edge_offset = max(0.5, road.half_width_m - _EDGE_LINE_INSET_M)
         line_specs.append((f"{base_key}_line_left", -edge_offset, "m_line_white", EDGE_LINE_RENDER_PRIORITY))
         line_specs.append((f"{base_key}_line_right", edge_offset, "m_line_white", EDGE_LINE_RENDER_PRIORITY))
 
     z_delta = 0.002 if road.bridge else 0.01
+    is_link_road = road.highway.endswith("_link")
+    skip_minor = road.highway not in _MINOR_UNCUT_HIGHWAYS
     markings: list[dict[str, object]] = []
     for key_prefix, offset, material, priority in line_specs:
         raw_line = np.column_stack(
@@ -1196,10 +1249,11 @@ def generate_lane_markings(
         if clean_line.shape[0] < 2:
             continue
 
+        is_edge_line = key_prefix.endswith(("_line_left", "_line_right"))
         if carriageway_index is not None:
             piece_runs = cut_polyline_at_crossings(
                 clean_line,
-                lambda x, y, z, tx, ty: carriageway_index.is_blocked(
+                lambda x, y, z, tx, ty, _edge=is_edge_line: carriageway_index.is_blocked(
                     x,
                     y,
                     margin_m=crossing_margin_m,
@@ -1207,9 +1261,13 @@ def generate_lane_markings(
                     owner_id=road.osm_id,
                     layer=road.layer,
                     z=z,
+                    cut_parallel_inside=(_edge or is_link_road),
                     ignored_ids=ignored_ids,
+                    caller_highway=road.highway,
+                    skip_minor_crossings=skip_minor,
+                    end_cap_m=crossing_margin_m,
                 ),
-                min_piece_m=3.0,
+                min_piece_m=1.5,
             )
         else:
             piece_runs = [clean_line]
@@ -1314,8 +1372,10 @@ def generate_edge_decals(
                     z=z,
                     cut_all_angles=True,
                     ignored_ids=ignored_ids,
+                    caller_highway=road.highway,
+                    end_cap_m=margin_m,
                 ),
-                min_piece_m=3.0,
+                min_piece_m=1.5,
             )
         else:
             piece_runs = [clean_strip]
@@ -1346,10 +1406,11 @@ def generate_edge_decals(
                     render_priority=EDGE_GRASS_RENDER_PRIORITY,
                     break_angle=1.0,
                     distance_fade=(200.0, 50.0),
-                    start_end_fade=(2.0, 2.0),
+                    start_end_fade=(0.5, 0.5),
                 )
                 edge_obj["name"] = edge_key
                 edge_obj["detail"] = DECAL_ROAD_DETAIL
+                edge_obj["decalBias"] = 0.0025
                 edge_obj["autoJunction"] = False
                 edge_obj["autoLanes"] = False
                 edges.append(edge_obj)
@@ -1551,13 +1612,15 @@ def pin_junction_elevations(
                     f = 1.0 - float(cum[i]) / eff_ramp
                     if f <= 0.0:
                         break
-                    sz_arr[i] += delta * f
+                    s = f * f * (3.0 - 2.0 * f)
+                    sz_arr[i] += delta * s
             else:
                 for i in range(sz_arr.size - 1, -1, -1):
                     f = 1.0 - float(total - cum[i]) / eff_ramp
                     if f <= 0.0:
                         break
-                    sz_arr[i] += delta * f
+                    s = f * f * (3.0 - 2.0 * f)
+                    sz_arr[i] += delta * s
 
     # Step 2: seat side arms onto through-road decks at 3+ way junctions
     arms_by_key: dict[tuple[int, int], list[tuple[int, bool, float, float]]] = {}
@@ -1648,7 +1711,8 @@ def pin_junction_elevations(
                 f = (1.0 - from_edge / eff_ramp) if eff_ramp > 0.0 else (1.0 if k == edge_idx else 0.0)
                 if f <= 0.0:
                     break
-                sz_arr[k] += delta * f
+                s = f * f * (3.0 - 2.0 * f)
+                sz_arr[k] += delta * s
                 k += step
             k = i0 + step
             while k != edge_idx:
@@ -1761,6 +1825,10 @@ def add_network_to_scene(
     *,
     group_path: Sequence[str] = ("level_objects", "road_network"),
     max_node_spacing_m: float = MAX_DECAL_NODE_SPACING_M,
+    level_dir: Path | None = None,
+    osm_data: object | None = None,
+    projection: object | None = None,
+    include_props: bool = True,
 ) -> dict[str, int]:
     """Add every road in a network to a level scene as layered DecalRoads.
 
@@ -1815,23 +1883,52 @@ def add_network_to_scene(
                     (r.osm_id, at_end, dx / length, dy / length, bool(r.bridge))
                 )
 
-    continuation_partners: dict[int, set[int]] = {}
+    through_partners: dict[int, set[int]] = {}
+    edge_partners: dict[int, set[int]] = {}
     continuous_ends: set[tuple[int, bool]] = set()
+    road_prio_by_id = {r.osm_id: surface_render_priority_for(r) for r in roads}
     for key, arms in endpoint_arms.items():
         if len(arms) < 2:
             continue
+        if len(arms) == 2 and vertex_counts.get(key, 0) == 2:
+            (id_a, end_a, dxa, dya, br_a), (id_b, end_b, dxb, dyb, br_b) = arms
+            if id_a != id_b and dxa * dxb + dya * dyb <= -0.7:
+                through_partners.setdefault(id_a, set()).add(id_b)
+                through_partners.setdefault(id_b, set()).add(id_a)
+                edge_partners.setdefault(id_a, set()).add(id_b)
+                edge_partners.setdefault(id_b, set()).add(id_a)
+                continuous_ends.add((id_a, end_a))
+                continuous_ends.add((id_b, end_b))
+            continue
+
+        # At 3+ way forks/intersections, only link the single best collinear through-pair
+        # (preferring matching road tier) so diverging ramps/branches still cut edge decals
+        # and side edge lines cleanly.
+        best_pair: tuple[float, int, int, bool, bool, bool, bool, float] | None = None
         for i in range(len(arms)):
             id_a, end_a, dxa, dya, br_a = arms[i]
+            pa = road_prio_by_id.get(id_a, _DEFAULT_SURFACE_RENDER_PRIORITY)
             for j in range(i + 1, len(arms)):
                 id_b, end_b, dxb, dyb, br_b = arms[j]
                 if id_a == id_b:
                     continue
-                if dxa * dxb + dya * dyb <= -0.7:
-                    continuation_partners.setdefault(id_a, set()).add(id_b)
-                    continuation_partners.setdefault(id_b, set()).add(id_a)
-                    if (len(arms) == 2 and vertex_counts.get(key, 0) == 2) or (br_a != br_b):
-                        continuous_ends.add((id_a, end_a))
-                        continuous_ends.add((id_b, end_b))
+                dot = dxa * dxb + dya * dyb
+                if dot > -0.7:
+                    continue
+                pb = road_prio_by_id.get(id_b, _DEFAULT_SURFACE_RENDER_PRIORITY)
+                score = abs(pa - pb) * 2.0 + (dot + 1.0)
+                if best_pair is None or score < best_pair[0]:
+                    best_pair = (score, id_a, id_b, end_a, end_b, br_a, br_b, dot)
+        if best_pair is not None:
+            _, id_a, id_b, end_a, end_b, br_a, br_b, dot = best_pair
+            through_partners.setdefault(id_a, set()).add(id_b)
+            through_partners.setdefault(id_b, set()).add(id_a)
+            if dot <= -0.92 and abs(road_prio_by_id.get(id_a, 99) - road_prio_by_id.get(id_b, 99)) <= 1:
+                edge_partners.setdefault(id_a, set()).add(id_b)
+                edge_partners.setdefault(id_b, set()).add(id_a)
+            if br_a != br_b:
+                continuous_ends.add((id_a, end_a))
+                continuous_ends.add((id_b, end_b))
 
     parent_name = group_path[-1] if group_path else "road_network"
     terrain_arg: object | None = build if hasattr(build, "elevations") else None
@@ -1904,7 +2001,8 @@ def add_network_to_scene(
         if not emit_edges and not emit_marks:
             continue
 
-        partners = frozenset(continuation_partners.get(road.osm_id, ()))
+        e_partners = frozenset(edge_partners.get(road.osm_id, ()))
+        m_partners = frozenset(through_partners.get(road.osm_id, ()))
         for seg_idx, obj in enumerate(objs):
             obj_nodes = np.asarray(obj["nodes"], dtype=np.float64)[:, :3]
             base_k = f"way{road.osm_id}_{seg_idx}" if len(objs) > 1 else f"way{road.osm_id}"
@@ -1916,7 +2014,7 @@ def add_network_to_scene(
                     parent_key=base_k,
                     parent=parent_name,
                     carriageway_index=carriageway_index,
-                    ignored_ids=partners,
+                    ignored_ids=e_partners,
                 )
                 for edge_obj in edge_objs:
                     tree.add_object(group_path, edge_obj)
@@ -1943,11 +2041,25 @@ def add_network_to_scene(
                     parent_key=base_k,
                     parent=parent_name,
                     carriageway_index=carriageway_index,
-                    ignored_ids=partners,
+                    ignored_ids=m_partners,
                 )
                 for mark_obj in markings:
                     tree.add_object(group_path, mark_obj)
                     exported += 1
                     nodes += len(mark_obj["nodes"])  # type: ignore[arg-type]
+
+    if include_props:
+        from ivanovo2beam.roads.props import add_roadside_props_to_scene
+
+        prop_counts = add_roadside_props_to_scene(
+            tree,
+            roads,
+            build if hasattr(build, "elevations") else None,
+            level_dir=level_dir,
+            osm_data=osm_data,  # type: ignore[arg-type]
+            projection=projection,  # type: ignore[arg-type]
+            carriageway_index=carriageway_index,
+        )
+        return {"exported": exported, "skipped": skipped, "nodes": nodes, **prop_counts}
 
     return {"exported": exported, "skipped": skipped, "nodes": nodes}

@@ -31,13 +31,13 @@ terrain grading, road markings, coupled 3D bridges, rivers/waterbodies,
 | Coordinate system (1:1 metric plane) | **Done, verified** | Custom Transverse Mercator (`k0 = 1 − W²/4`); Ivanovo→Shuya 29.138 km vs 29.141 km WGS84 geodesic |
 | BeamNG `.ter` terrain format v9 | **Done, verified byte-exactly** | Shipped game terrains round-trip byte-identically |
 | Geodata acquisition (DEM + OSM PBF/Overpass + WorldCover) | **Done, cached** | Copernicus GLO-30 / AWS / SRTM DEM, pure-Python `.osm.pbf` streaming + Overpass, ESA WorldCover 2021 10 m `.npz` cache |
-| Road network, markings & `renderPriority` | **Done** | Z-aware 3D smoothing, junction elevation pinning, crossing-cut centerlines, tiered LOD, 800 m AABB split |
-| Coupled hydrology, split bridges & ramps | **Done** | Under-deck river carving, localized split `_deck`/`_structure` `.dae` meshes, eased bridgehead approach ramps |
-| Summer vegetation (`.link` + `.forest4.json`) | **Done** | WorldCover + OSM woods, corridor/water keepouts, zero-copy `.link` stock summer trees, zoned density |
-| Railways & optional buildings | **Done** | 1520 mm gauge procedural `.dae` tracks; optional OSM building archetypes |
+| Road network, markings & `renderPriority` | **Done** | Z-aware 3D smoothing, junction elevation pinning, crisp T-junction/ramp crossing cuts (`1.5 m` margin), clean feathered shoulders |
+| Coupled hydrology, split bridges & ramps | **Done** | Clamped river channels (no floating water/cliffs), `2 m` Hermite bridge decks, localized split `_deck`/`_structure` `.dae` meshes |
+| Summer vegetation (`.link`, `.forest4.json` & `GroundCover`) | **Done** | 30 zero-copy `.link` species + organic edge tapering, 8 native `GroundCover` 3D grass/wildflower/scrub layers (`322k` max elements) |
+| Roadside infrastructure & buildings | **Done** | GOST speed/priority/bridge/zebra signs, streetlights, poles, OSM bus stops, W-beam guardrails, terrain-clipped 500 m chunked OSM buildings |
 | Structural validator & provenance | **Done** | Validates scene tree, `.ter` (`HOLE=255` safe), base + extra `main.materials.json` files, ODbL/Copernicus notices |
-| Live BeamNG.drive 0.40+ verification | **Verified (1080p Ultra)** | 133.1–139.3 FPS avg / 114.4–118.4 FPS 1% low at `1920×1080`; `2560×1440` `NOT_TESTED` (monitor cap `1920×1080`) |
-| Whole-oblast tiled terrain (220 × 145 km) | **Planned** | Requires tiled multi-TerrainBlock streaming (milestone M5/M6) |
+| Live BeamNG.drive 0.40+ V2 verification | **Verified (1080p Ultra)** | `133.39–134.39 FPS` avg / `106.03–108.70 FPS` 1% low at `1920×1080`, `damageSum = 0` up to `178.6 km/h`; `2560×1440` `NOT_TESTED` |
+| Multi-`TerrainBlock` P2 experiment (`ivanovo_dual_terrain_exp`) | **Tested, engine-limited** | Adjacent blocks match to `0.000 m`, but BeamNG 0.40 binds physics raycasts/`GroundCover`/`DecalRoad`s to block 0 (see [`docs/p2_multiblock_experiment.md`](docs/p2_multiblock_experiment.md)) |
 
 ---
 
@@ -49,17 +49,17 @@ terrain grading, road markings, coupled 3D bridges, rivers/waterbodies,
 | `configs/ivanovo_shuya.yaml` | `ivanovo_shuya` | `4096 × 4096 @ 8.0 m` (`32.760 × 32.760 km`) | Full Ivanovo → Shuya intercity corridor (~29 km straight line) |
 | `configs/ivanovo_mvp.yaml` | `ivanovo_mvp` | `4096 × 4096 @ 1.25 m` (`5.118 × 5.118 km`) | Central Ivanovo road-network stress test |
 
-### Live D3D12 benchmark summary (`ivanovo_golden_sector`)
+### Live D3D12 benchmark summary (`ivanovo_golden_sector` V2)
 
 Measured on Ryzen 5 7500F / RTX 3080 10 GB / BeamNG 0.40.6.0 D3D12 at
-`1920×1080 Borderless, Overall: Ultra` (`2560×1440`: **`NOT_TESTED`** — active
-monitor caps at `1920×1080 @ 143 Hz`):
+`1920×1080 Borderless, Overall: Ultra` (DLSS; `2560×1440`: **`NOT_TESTED`** — active
+monitor caps at `1920×1080 @ 144 Hz`):
 
-- **Load time (cold / warm)**: `26.59 s` cold (`worldReadyState=1`, caches wiped) / `21.50–21.60 s` warm
-- **FPS (avg / 1% low)**: `133.09 / 114.42 FPS` (DLSS) · `139.25 / 118.44 FPS` (`render_scale=1.0`)
-- **VRAM / Process RAM**: `3,965–3,999 MiB` GPU VRAM peak (`nvidia-smi`) · `3,809–3,825 MiB` WorkingSet peak
-- **Drive & bridge smoothness**: Both-ways AI crossing over `way/274102985` (`damage_max = 0`, `bridge_vz_abs_max = 0.65 m/s`)
-- **Level errors**: `0` `SceneStaticDecalRoadManager`, `MaterialList`, `TerrainCellMaterial`, `ForestData`, `WaterBlock`, or collision errors in `beamng.log` (see [Performance & budgets](docs/performance.md))
+- **Load time (cold / warm)**: `27.89 s` cold (caches wiped) / `21.82 s` warm (`worldReadyState`)
+- **FPS (avg / 1% low)**: `133.39 / 106.03 FPS` (cold) · `134.39 / 108.70 FPS` (warm)
+- **VRAM / Process RAM**: `4,666–4,729 MiB` GPU VRAM peak (`nvidia-smi`) · `3,971–4,057 MiB` WorkingSet peak
+- **High-speed Р152 & bridge passability**: Both-ways `etk800` AI drive reached `176.19 km/h` East / `178.60 km/h` West (`151.48–173.04 km/h` across `way/274102985` bridge) with `damageSum = 0`
+- **Level errors**: `0` `GroundCover`, `ForestData`, `WaterBlock`, `buildings`, `road_props`, `bridge`, or `WarningMaterial` errors in `beamng.log` (see [Performance & budgets](docs/performance.md))
 
 ## How it works
 
@@ -134,28 +134,28 @@ changed. Add `--json` for machine-readable output.
 src/ivanovo2beam/
   gis/         projection, geodesy, metric world plane
   osm/         Overpass fetch, streaming XML + .osm.pbf, tile merge
-  terrain/     DEM sources (Copernicus/SRTM/Terrain Tiles), corridor grading, water carve, landcover
-  roads/       road network, DecalRoads, markings/cuts, coupled 3D bridges, 1520 mm railways
-  water/       OSM waterways/waterbodies → River splines & WaterBlock export
-  vegetation/  ESA WorldCover 2021 + OSM woods → .link summer species + .forest4.json
-  buildings/   optional OSM footprints & procedural Collada meshes
-  beamng/      .ter v9 codec, scene tree writer, 12-surface terrain PBR library
-  sectors/     spatial grid
+  terrain/     DEM sources (Copernicus/SRTM/Terrain Tiles), corridor grading, water carve, landcover + breakup
+  roads/       road network, DecalRoads, markings/cuts, coupled 3D bridges, 1520 mm rail, GOST props & guardrails
+  water/       OSM waterways/waterbodies → clamped River splines & curved WaterBlock tiling
+  vegetation/  ESA WorldCover 2021 + OSM woods → .link summer species, .forest4.json & GroundCover
+  buildings/   optional OSM footprints & 500 m chunked Collada blocks with slope skirts
+  beamng/      .ter v9 codec, scene tree writer, 14-surface terrain PBR library
+  sectors/     spatial grid & P2 multi-TerrainBlock harness
   validation/  structural & material validation of built levels
   provenance.py SHA-256 input manifests & ODbL/Copernicus attribution notices
   config.py    config loading and validation
   build.py     pipeline orchestration
   cli.py       command line interface
-configs/       golden_sector.yaml, ivanovo_shuya.yaml, ivanovo_mvp.yaml, etc.
-docs/          architecture, performance, coordinates, data sources, research
-scripts/       live BeamNG MCP benchmark & deployment helpers
-tests/         744 tests total; 741 offline (`-m "not network"`), 3 live-network
+configs/       golden_sector.yaml, experiment_dual_terrain.yaml, ivanovo_shuya.yaml, ivanovo_mvp.yaml
+docs/          architecture, performance, status, p2_multiblock_experiment, coordinates, data sources, research
+scripts/       live BeamNG MCP benchmark, host bridge & dual-TerrainBlock experiment helpers
+tests/         780 tests total; 777 offline (`-m "not network"`), 3 live-network
 ```
 
 ## Testing
 
 ```bash
-pytest -m "not network"                # 741 offline tests, everything CI runs
+pytest -m "not network"                # 777 offline tests, everything CI runs
 pytest -m network                        # 3 live Overpass / DEM fetch tests
 pytest -m beamng                         # tests needing a BeamNG install
 ```

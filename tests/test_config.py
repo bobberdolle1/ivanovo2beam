@@ -296,7 +296,7 @@ class TestProjectConfig:
         assert config.level.center_lat == pytest.approx(56.91500)
         assert config.level.spawn_lon == pytest.approx(41.10000)
         assert config.level.spawn_lat == pytest.approx(56.92700)
-        assert config.buildings_enabled is False
+        assert config.buildings_enabled is True
         assert config.vegetation_enabled is True
         assert config.water_enabled is True
         assert config.bridges_enabled is True

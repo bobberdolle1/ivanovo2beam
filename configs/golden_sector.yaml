@@ -50,7 +50,7 @@ level:
   axis_tilt: 23.44
 
 buildings:
-  enabled: false
+  enabled: true
 
 vegetation:
   enabled: true

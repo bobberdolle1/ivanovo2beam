@@ -63,13 +63,13 @@ Each stage is a separate module, cacheable on disk, and callable from the CLI.
 |---|---|---|
 | `gis/` (`projection.py`, `_wgs84.py`) | WGS84 ↔ metric Transverse Mercator (`k0 = 1 − W²/4`), geodesic scale error | `pyproj` |
 | `osm/` (`pbf.py`, `fetch.py`, `parse.py`, `merge.py`, `types.py`) | Streaming pure-Python `.osm.pbf` (plus optional `osmium` fast path) & tiled Overpass fetch/merge | stdlib (optional `osmium`) |
-| `terrain/` (`dem.py`, `_geotiff.py`, `builder.py`) | DEM acquisition, row-by-row sampling, road grading, coupled water carving, landcover painting | `numpy`, `shapely`, optional `rasterio`/`scipy` |
-| `roads/` (`network.py`, `build.py`, `materials.py`, `bridges.py`, `railways.py`) | Road extraction, Z-aware DecalRoad export, crossing cuts, `renderPriority`, split bridges, 1520 mm rail | `numpy`, `shapely` |
-| `water/` (`extract.py`, `export.py`) | Waterways & waterbodies → BeamNG `River` splines & adaptive-grid `WaterBlock`s | `numpy`, `shapely` |
-| `vegetation/` (`worldcover.py`, `extract.py`, `forest.py`) | ESA WorldCover 2021 + OSM woods → keepout masks, density zones, `.link` stock assets, `.forest4.json` | `numpy`, `shapely`, `Pillow` |
-| `buildings/` (`footprints.py`, `mesh.py`, `export.py`) | Optional OSM building footprints, procedural Collada blocks, materials (disabled in highway configs) | `numpy`, `shapely` |
-| `beamng/` (`ter.py`, `level.py`, `materials.py`, `preview.py`) | `.ter` v9 codec, `SceneTree` writer, `LevelInfo` (`decalBias`), 12-surface terrain PBR library | `numpy` |
-| `sectors/grid.py` | World ↔ signed square sector grid mapping | stdlib |
+| `terrain/` (`dem.py`, `_geotiff.py`, `builder.py`) | DEM acquisition, row-by-row sampling, road grading, coupled water carving, landcover + natural variation painting | `numpy`, `shapely`, optional `rasterio`/`scipy` |
+| `roads/` (`network.py`, `build.py`, `materials.py`, `bridges.py`, `railways.py`, `props.py`) | Road extraction, Z-aware DecalRoad export, crossing cuts, `renderPriority`, split bridges, 1520 mm rail, GOST roadside props & guardrails | `numpy`, `shapely` |
+| `water/` (`extract.py`, `export.py`) | Waterways & waterbodies → elevation-clamped `River` splines & buffered curved `WaterBlock` tiling | `numpy`, `shapely` |
+| `vegetation/` (`worldcover.py`, `extract.py`, `forest.py`, `groundcover.py`) | ESA WorldCover 2021 + OSM woods → keepout masks, organic tapered `.link`/`.forest4.json` trees, native 8-layer `GroundCover` | `numpy`, `shapely`, `Pillow` |
+| `buildings/` (`footprints.py`, `mesh.py`, `export.py`) | Optional OSM footprints, terrain-bounds clipping, 500 m chunked Collada blocks with slope skirts & PBR materials | `numpy`, `shapely` |
+| `beamng/` (`ter.py`, `level.py`, `materials.py`, `preview.py`) | `.ter` v9 codec, `SceneTree` writer, `LevelInfo` (`decalBias`), 14-surface terrain PBR library + isotropic FBM base maps | `numpy` |
+| `sectors/` (`grid.py`, `multiblock.py`) | World ↔ signed square sector grid mapping & P2 adjacent multi-`TerrainBlock` test harness | `numpy`, `shapely` |
 | `validation/level.py` | Structural checks: scene tree, `.ter`/`.terrain.json` (`HOLE=255` safe), scale, base + extra materials | `numpy` |
 | `provenance.py` | SHA-256 input manifests and ODbL / Copernicus attribution notices | stdlib |
 | `build.py` & `cli.py` | End-to-end orchestration (`info`, `download`, `build`, `package`, `install`, `validate`) | all of the above |

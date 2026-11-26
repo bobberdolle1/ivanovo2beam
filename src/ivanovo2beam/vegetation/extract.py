@@ -109,6 +109,26 @@ class VegetationStats:
         }
 
 
+def _infer_leaf_type(tags: dict[str, str]) -> str | None:
+    """Infer 'broadleaved', 'needleleaved', or 'mixed' from OSM vegetation tags."""
+    lt = tags.get("leaf_type", "").strip().lower()
+    if lt in {"broadleaved", "needleleaved", "mixed"}:
+        return lt
+    wood = tags.get("wood", "").strip().lower()
+    if wood in {"coniferous", "conifers"}:
+        return "needleleaved"
+    if wood in {"deciduous", "broadleaved"}:
+        return "broadleaved"
+    if wood == "mixed":
+        return "mixed"
+    cycle = tags.get("leaf_cycle", "").strip().lower()
+    if cycle == "evergreen":
+        return "needleleaved"
+    if cycle == "deciduous":
+        return "broadleaved"
+    return None
+
+
 def _classify_vegetation(tags: dict[str, str]) -> str | None:
     """Classify OSM tags into 'forest', 'scrub', 'meadow', or 'farmland'."""
     nat = tags.get("natural", "").strip().lower()
@@ -440,7 +460,7 @@ def extract_vegetation(
             min_area_m2=min_area_m2,
             osm_id_base=relation.id,
             kind=kind,
-            leaf_type=relation.tags.get("leaf_type"),
+            leaf_type=_infer_leaf_type(dict(relation.tags)),
             name=relation.tags.get("name", ""),
             areas=areas,
             stats=stats,
@@ -490,7 +510,7 @@ def extract_vegetation(
             min_area_m2=min_area_m2,
             osm_id_base=way.id,
             kind=kind,
-            leaf_type=way.tags.get("leaf_type"),
+            leaf_type=_infer_leaf_type(dict(way.tags)),
             name=way.tags.get("name", ""),
             areas=areas,
             stats=stats,

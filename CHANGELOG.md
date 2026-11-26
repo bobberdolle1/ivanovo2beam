@@ -12,37 +12,21 @@ release at all.
 ## [Unreleased]
 
 ### Added
-- **Golden Sector benchmark target**: `configs/golden_sector.yaml`
-  (`ivanovo_golden_sector`, `4096 × 4096 @ 1.0 m` over Kokhma SE / Р152 Uvod
-  river crossing) preserving the Ivanovo Oblast Transverse Mercator origin.
-- **Ivanovo → Shuya corridor**: `configs/ivanovo_shuya.yaml` (`4096 × 4096 @ 8.0 m`,
-  `32.760 km` square) plus primary-highway `_choose_spawn` preference and
-  `level.spawn` / `level.center` fallback for custom levels.
-- **OSM PBF streaming (`osm/pbf.py`)**: Two-pass pure-Python `.osm.pbf` bbox
-  reader (with optional `osmium` fast path and round-trip encoder) for regional
-  Geofabrik extracts in `< 250 MB` RAM.
-- **ESA WorldCover 2021 + Summer Vegetation (`vegetation/worldcover.py`, `vegetation/forest.py`)**:
-  Cached `.npz`/`.json` 10 m tree-canopy lookup merged with OSM woods, keepout
-  rasterization, roadside/core/backdrop density zoning, zero-copy `.link`
-  pointers to stock summer species (`east_coast_usa`/`italy`), and native
-  `.forest4.json` instancing.
-- **Coupled hydrology & split 3D bridges (`water/`, `roads/bridges.py`, `terrain/builder.py`)**:
-  Water extraction ahead of terrain grading, `carve_water` / `carve_water_under_decks`
-  / `level_under_decks`, coupled vertical bridge solver (`solve_coupled_bridge_profile`),
-  split `_deck`/`_structure` Collada meshes, and eased bridgehead approach ramps.
-- **Railways & optional buildings (`roads/railways.py`, `buildings/`)**:
-  1520 mm gauge tracks with road-crossing awareness and optional Collada building
-  archetypes.
-- **Road markings, crossing cuts & LOD (`roads/build.py`, `roads/materials.py`)**:
-  `EDGE_LINE_RENDER_PRIORITY = 1`, `CENTER_LINE_RENDER_PRIORITY = 2`,
-  `EDGE_GRASS_RENDER_PRIORITY = 9`, `SURFACE_RENDER_PRIORITY` `13..15`,
-  `build_carriageway_index` / `cut_polyline_at_crossings`, 3D Z-aware
-  simplification, hairline reversal removal, and 800 m AABB segment splitting.
-- **Provenance & runtime benchmarking (`provenance.py`, `scripts/benchmark_level.py`, `docs/performance.md`)**:
-  SHA-256 input manifests, ODbL/Copernicus notices in `info.json`, and automated
-  BeamNG HTTP MCP telemetry collection (`$fps::instantaneous`, `$fps::p99`, VRAM,
-  `beamng.log` scan).
-- **Test & live verification status**: `741 passed, 3 deselected` (`pytest tests/ -m "not network"`), `uvx ruff check src tests` clean, and `ivanovo2beam validate` `9 passed, 0 failed, 0 warnings`. Live D3D12 verification on `ivanovo_golden_sector` (`1920×1080 Borderless, Overall: Ultra`) measured `133.09 FPS` avg / `114.42 FPS` 1% low (DLSS) and `139.25 FPS` avg / `118.44 FPS` 1% low (`render_scale=1.0`), `3,965–3,999 MiB` VRAM peak, `26.59 s` cold / `21.50–21.60 s` warm load, `damage_max = 0` both-ways bridge crossing, and `0` `SceneStaticDecalRoadManager` / level errors (`2560×1440`: `NOT_TESTED` due to `1920×1080` display cap).
+- **Golden Sector V2 Visuals, GroundCover, Roadside Props & Buildings**:
+  - **14-surface Central Russian summer terrain PBR (`beamng/materials.py`, `terrain/builder.py`)**: Muted `east_coast_usa`-inspired palette, added `Meadow` and `DryGrass` materials, isotropic 512 px FBM base maps (eliminating directional banding), multi-scale organic landcover dithering/breakup, feathered canopy-strip transitions, and narrowed `Gravel` road shoulder trim so grass billboards never poke onto asphalt edges or bridge decks.
+  - **Native `GroundCover` (`vegetation/groundcover.py`)**: 8 distance-dissolved `GroundCover` layers (`322,000` maxElements, `.link` 3D foliage shapes + stock billboards) masked strictly to meadow/grass/field/forest soils.
+  - **Denser organic summer forests (`vegetation/forest.py`)**: Expanded from 26 to 30 zero-copy `.link` species with 14 m noise-feathered edge tapering.
+  - **Russian roadside infrastructure (`roads/props.py`)**: 604 scene objects (`TSStatic` signs for speed/priority/give-way/crosswalk/bridge/bend, streetlights, wooden utility poles, OSM bus stops, and localized W-beam steel guardrails on bridge approaches & steep curves).
+  - **Regional OSM buildings in Golden Sector (`configs/golden_sector.yaml`, `buildings/`)**: Enabled 500 m spatial chunked houses, dachas, sheds, apartments, and industrial buildings (`1,426` placed inside terrain bounds across `34` `.dae` chunks with slope skirts and pitched/skillion roofs; out-of-bounds footprints clipped).
+- **P2 Multi-`TerrainBlock` Experiment (`sectors/multiblock.py`, `configs/experiment_dual_terrain.yaml`, `scripts/experiment_dual_terrain.py`, `docs/p2_multiblock_experiment.md`)**: Isolated 2×1 `2048×2048 @ 1.0 m` dual-block level (`0.000 m` seam ΔZ) with live BeamNG 0.40 proof of single-`TerrainBlock` bindings for `castRayStatic`, `core_terrain`, `GroundCover`, and cross-seam `DecalRoad` projection, plus hybrid scaling recommendation.
+- **Localhost BeamNG Host Bridge (`scripts/beamng_host_bridge.py`, `scripts/benchmark_level.py`)**: Allowlisted HTTP bridge (`127.0.0.1:29300`, token-authenticated) bypassing Windows Low-IL sandbox isolation (`antigravity-cli#1575`) for autonomous level install, cache clearing, start/stop, MCP forwarding, and log inspection.
+- **Test & V2 live verification status**: `777 passed, 3 deselected` (`pytest tests/ -m "not network"`), `ivanovo2beam validate` `9 passed, 0 failed, 0 warnings`. Live D3D12 verification on `ivanovo_golden_sector` V2 (`1920×1080 Borderless, Overall: Ultra`) measured `133.39 FPS` avg / `106.03 FPS` 1% low (`4,729 MiB` VRAM, `27.89 s` cold load) and `134.39 FPS` avg / `108.70 FPS` 1% low (`4,666 MiB` VRAM, `21.82 s` warm load), high-speed `etk800` Р152 crossings up to `176.19` / `178.60 km/h` (`151.48–173.04 km/h` over `way/274102985` bridge) with `damageSum = 0`, and `0` level/material/GroundCover errors in `beamng.log` (`2560×1440`: `NOT_TESTED` due to `1920×1080` monitor cap).
+
+### Changed
+- Tightened `roads/build.py` `CarriagewayIndex.is_blocked` circular endpoint balloons and T-junction fork partner logic (`crossing_margin_m = 1.5`, `min_piece_m = 1.5`), switched `m_road_asphalt_edge_grass` to `t_eca_asphalt_dirt_grass_edge_*.dds` without sawtooth alpha artifacts, and added `decalBias` (`0.0015..0.0025`).
+- Upgraded `water/extract.py` and `terrain/builder.py` with transverse + longitudinal bank clamping (eliminating floating rivers and stepped vertical cliffs) and buffered curved `WaterBlock` tiling (`water/export.py`).
+- Upgraded `roads/bridges.py` to `DECK_STEP_M = 2.0` C1 cubic Hermite profiles with textured concrete/steel parapets.
+- Previously added: Golden Sector benchmark target (`configs/golden_sector.yaml`), Ivanovo–Shuya (`configs/ivanovo_shuya.yaml`), `.osm.pbf` streaming (`osm/pbf.py`), WorldCover 2021 (`vegetation/worldcover.py`), coupled hydrology & split bridges, railways, crossing cuts/LOD, provenance, and `benchmark_level.py`.
 
 ### Changed
 - Reduced default terrain base texture resolution (`DEFAULT_BASE_TEX_SIZE = 512`)

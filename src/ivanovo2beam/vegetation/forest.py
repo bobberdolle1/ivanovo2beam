@@ -50,7 +50,12 @@ except (ImportError, OSError, Exception):
     _HAS_RASTERIO = False
 
 from ivanovo2beam.beamng.level import stable_uuid
+from ivanovo2beam.beamng.materials import DEFAULT_MATERIAL_ORDER
 from ivanovo2beam.vegetation.extract import VegetationArea
+from ivanovo2beam.vegetation.groundcover import (
+    EXCLUDED_TERRAIN_LAYERS,
+    export_groundcover,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Sequence
@@ -74,13 +79,16 @@ _CORRIDOR_BUCKET_M = 250.0
 #: Spatial density zoning distances and target densities (stems / ha).
 _ROADSIDE_ZONE_M = 60.0
 _FOREST_EDGE_BUFFER_M = 35.0
+_EDGE_TAPER_WIDTH_M = 14.0
 _BACKDROP_DISTANCE_M = 400.0
-_DEFAULT_ROADSIDE_DENSITY_PER_HA = 200.0
-_DEFAULT_CORE_DENSITY_PER_HA = 125.0
-_DEFAULT_BACKDROP_DENSITY_PER_HA = 50.0
-_DEFAULT_EDGE_UNDERGROWTH_PER_HA = 100.0
-_DEFAULT_CORE_FERN_PER_HA = 120.0
-_DEFAULT_CORE_BUSH_FALLBACK_PER_HA = 20.0
+_DEFAULT_ROADSIDE_DENSITY_PER_HA = 240.0
+_DEFAULT_CORE_DENSITY_PER_HA = 175.0
+_DEFAULT_BACKDROP_DENSITY_PER_HA = 65.0
+_DEFAULT_SAPLING_ROADSIDE_PER_HA = 95.0
+_DEFAULT_SAPLING_CORE_PER_HA = 65.0
+_DEFAULT_EDGE_UNDERGROWTH_PER_HA = 150.0
+_DEFAULT_CORE_FERN_PER_HA = 18.0
+_DEFAULT_CORE_BUSH_FALLBACK_PER_HA = 75.0
 
 #: Minimum groundcover fern spacing (m) and minimum clearance from woody trunks (m).
 _FERN_SPACING_M = 0.9
@@ -376,6 +384,147 @@ LINKED_SPECIES_DATA: dict[str, dict[str, Any]] = {
         "lodReflectScalar": 0.0,
         "category": "fern",
     },
+    # Additional multi-tier saplings, clumps, and edge bushes from east_coast_usa
+    "tree_aspen_large_b": {
+        "class": "TSForestItemData",
+        "sourceShape": "levels/east_coast_usa/art/shapes/trees/trees_aspen/tree_aspen_large_b.dae",
+        "radius": 0.35,
+        "mass": 50.0,
+        "windScale": 0.4,
+        "lodReflectScalar": 0.0,
+        "category": "birch",
+    },
+    "tree_aspen_small_b": {
+        "class": "TSForestItemData",
+        "sourceShape": "levels/east_coast_usa/art/shapes/trees/trees_aspen/tree_aspen_small_b.dae",
+        "radius": 0.28,
+        "mass": 12.0,
+        "windScale": 0.4,
+        "lodReflectScalar": 0.0,
+        "category": "birch",
+    },
+    "tree_aspen_forest_group": {
+        "class": "TSForestItemData",
+        "sourceShape": "levels/east_coast_usa/art/shapes/trees/trees_aspen/tree_aspen_forest_group.dae",
+        "radius": 0.45,
+        "mass": 65.0,
+        "windScale": 0.35,
+        "lodReflectScalar": 0.0,
+        "category": "birch",
+    },
+    "tree_aspen_bush_a": {
+        "class": "TSForestItemData",
+        "sourceShape": "levels/east_coast_usa/art/shapes/trees/trees_aspen/tree_aspen_bush_a.dae",
+        "radius": 0.28,
+        "mass": 2.0,
+        "windScale": 0.4,
+        "snapRotationToTerrain": True,
+        "lodReflectScalar": 0.0,
+        "category": "bush",
+    },
+    "tree_aspen_bush_b": {
+        "class": "TSForestItemData",
+        "sourceShape": "levels/east_coast_usa/art/shapes/trees/trees_aspen/tree_aspen_bush_b.dae",
+        "radius": 0.28,
+        "mass": 2.0,
+        "windScale": 0.4,
+        "snapRotationToTerrain": True,
+        "lodReflectScalar": 0.0,
+        "category": "bush",
+    },
+    "tree_beech_small_c": {
+        "class": "TSForestItemData",
+        "sourceShape": "levels/east_coast_usa/art/shapes/trees/trees_beech/tree_beech_small_c.dae",
+        "radius": 0.30,
+        "mass": 10.0,
+        "windScale": 0.4,
+        "lodReflectScalar": 0.0,
+        "category": "beech",
+    },
+    "tree_beech_forest_group": {
+        "class": "TSForestItemData",
+        "sourceShape": "levels/east_coast_usa/art/shapes/trees/trees_beech/tree_beech_forest_group.dae",
+        "radius": 0.50,
+        "mass": 60.0,
+        "windScale": 0.35,
+        "lodReflectScalar": 0.0,
+        "category": "beech",
+    },
+    "tree_beech_bush_b": {
+        "class": "TSForestItemData",
+        "sourceShape": "levels/east_coast_usa/art/shapes/trees/trees_beech/tree_beech_bush_b.dae",
+        "radius": 0.30,
+        "mass": 2.0,
+        "windScale": 0.4,
+        "snapRotationToTerrain": True,
+        "lodReflectScalar": 0.0,
+        "category": "bush",
+    },
+    "tree_beech_bush_c": {
+        "class": "TSForestItemData",
+        "sourceShape": "levels/east_coast_usa/art/shapes/trees/trees_beech/tree_beech_bush_c.dae",
+        "radius": 0.30,
+        "mass": 2.0,
+        "windScale": 0.4,
+        "snapRotationToTerrain": True,
+        "lodReflectScalar": 0.0,
+        "category": "bush",
+    },
+    "tree_oak_sml_b": {
+        "class": "TSForestItemData",
+        "sourceShape": "levels/east_coast_usa/art/shapes/trees/trees_oak/tree_oak_sml_b.dae",
+        "radius": 0.32,
+        "mass": 18.0,
+        "windScale": 0.4,
+        "lodReflectScalar": 0.0,
+        "category": "oak",
+    },
+    "tree_oak_bush_b": {
+        "class": "TSForestItemData",
+        "sourceShape": "levels/east_coast_usa/art/shapes/trees/trees_oak/tree_oak_bush_b.dae",
+        "radius": 0.30,
+        "mass": 2.0,
+        "windScale": 0.4,
+        "snapRotationToTerrain": True,
+        "lodReflectScalar": 0.0,
+        "category": "bush",
+    },
+    "tree_douglasfir_large_b": {
+        "class": "TSForestItemData",
+        "sourceShape": "levels/east_coast_usa/art/shapes/trees/trees_douglasfir/tree_douglasfir_large_b.dae",
+        "radius": 0.50,
+        "mass": 70.0,
+        "windScale": 0.4,
+        "lodReflectScalar": 0.0,
+        "category": "conifer",
+    },
+    "tree_douglasfir_small_c": {
+        "class": "TSForestItemData",
+        "sourceShape": "levels/east_coast_usa/art/shapes/trees/trees_douglasfir/tree_douglasfir_small_c.dae",
+        "radius": 0.32,
+        "mass": 12.0,
+        "windScale": 0.4,
+        "lodReflectScalar": 0.0,
+        "category": "conifer",
+    },
+    "tree_douglasfir_group": {
+        "class": "TSForestItemData",
+        "sourceShape": "levels/east_coast_usa/art/shapes/trees/trees_douglasfir/tree_douglasfir_group.dae",
+        "radius": 0.60,
+        "mass": 90.0,
+        "windScale": 0.35,
+        "lodReflectScalar": 0.0,
+        "category": "conifer",
+    },
+    "tree_douglasfir_bush_b": {
+        "class": "TSForestItemData",
+        "sourceShape": "levels/east_coast_usa/art/shapes/trees/trees_douglasfir/tree_douglasfir_bush_b.dae",
+        "radius": 0.25,
+        "mass": 2.0,
+        "windScale": 0.5,
+        "lodReflectScalar": 0.0,
+        "category": "conifer_bush",
+    },
 }
 
 #: Category weights in offline broadleaved forests (birch 58%, beech 24%, oak 18%).
@@ -392,43 +541,84 @@ FOREST_SPECIES_DISTRIBUTION: list[tuple[str, float]] = [
 
 #: Central Russian mixed summer canopy when linked conifers are active.
 FOREST_MIXED_CONIFER_DISTRIBUTION: list[tuple[str, float]] = [
-    ("tree_aspen_large_a", 0.13),
-    ("tree_aspen_forest_a", 0.12),
-    ("tree_aspen_forest_b", 0.10),
-    ("tree_aspen_small_a", 0.09),
-    ("tree_beech_forest_a", 0.10),
-    ("tree_beech_small_b", 0.07),
-    ("tree_oak_forest_a", 0.07),
-    ("tree_oak_sml_a", 0.05),
-    ("tree_douglasfir_large_a", 0.08),
-    ("tree_douglasfir_small_a", 0.06),
-    ("tree_douglasfir_small_b", 0.06),
-    ("scots_pine_tree", 0.07),
+    ("tree_aspen_large_a", 0.10),
+    ("tree_aspen_large_b", 0.06),
+    ("tree_aspen_forest_a", 0.10),
+    ("tree_aspen_forest_b", 0.08),
+    ("tree_aspen_forest_group", 0.06),
+    ("tree_aspen_small_a", 0.05),
+    ("tree_beech_forest_a", 0.08),
+    ("tree_beech_forest_group", 0.05),
+    ("tree_beech_small_b", 0.05),
+    ("tree_oak_forest_a", 0.06),
+    ("tree_oak_sml_a", 0.04),
+    ("tree_douglasfir_large_a", 0.07),
+    ("tree_douglasfir_large_b", 0.04),
+    ("tree_douglasfir_group", 0.04),
+    ("tree_douglasfir_small_a", 0.04),
+    ("tree_douglasfir_small_b", 0.03),
+    ("scots_pine_tree", 0.05),
 ]
 
 #: Needle-leaved forest weights when OSM ``leaf_type=needleleaved`` and conifers exist.
 FOREST_NEEDLE_DISTRIBUTION: list[tuple[str, float]] = [
-    ("tree_douglasfir_large_a", 0.26),
-    ("tree_douglasfir_small_a", 0.18),
-    ("tree_douglasfir_small_b", 0.16),
-    ("scots_pine_tree", 0.22),
-    ("tree_aspen_forest_a", 0.10),
-    ("tree_aspen_small_a", 0.08),
+    ("tree_douglasfir_large_a", 0.18),
+    ("tree_douglasfir_large_b", 0.12),
+    ("tree_douglasfir_group", 0.08),
+    ("tree_douglasfir_small_a", 0.12),
+    ("tree_douglasfir_small_b", 0.10),
+    ("tree_douglasfir_small_c", 0.08),
+    ("scots_pine_tree", 0.20),
+    ("tree_aspen_forest_a", 0.07),
+    ("tree_aspen_small_a", 0.05),
+]
+
+#: Mid-story sapling distribution for multi-tier forest structure.
+FOREST_SAPLING_DISTRIBUTION: list[tuple[str, float]] = [
+    ("tree_aspen_small_a", 0.35),
+    ("tree_aspen_small_b", 0.20),
+    ("tree_beech_small_b", 0.18),
+    ("tree_beech_small_c", 0.12),
+    ("tree_oak_sml_a", 0.09),
+    ("tree_oak_sml_b", 0.06),
+]
+
+FOREST_SAPLING_WITH_CONIFER_DISTRIBUTION: list[tuple[str, float]] = [
+    ("tree_aspen_small_a", 0.24),
+    ("tree_aspen_small_b", 0.15),
+    ("tree_beech_small_b", 0.14),
+    ("tree_beech_small_c", 0.10),
+    ("tree_oak_sml_a", 0.08),
+    ("tree_oak_sml_b", 0.05),
+    ("tree_douglasfir_small_a", 0.09),
+    ("tree_douglasfir_small_b", 0.08),
+    ("tree_douglasfir_small_c", 0.07),
 ]
 
 SCRUB_SPECIES_DISTRIBUTION: list[tuple[str, float]] = [
-    ("tree_beech_bush_a", 0.50),
-    ("tree_oak_bush_a", 0.25),
-    ("tree_aspen_small_a", 0.15),
-    ("tree_beech_small_b", 0.10),
+    ("tree_beech_bush_a", 0.26),
+    ("tree_beech_bush_b", 0.14),
+    ("tree_beech_bush_c", 0.10),
+    ("tree_oak_bush_a", 0.16),
+    ("tree_oak_bush_b", 0.09),
+    ("tree_aspen_bush_a", 0.10),
+    ("tree_aspen_bush_b", 0.05),
+    ("tree_aspen_small_a", 0.06),
+    ("tree_beech_small_b", 0.04),
 ]
 
 SCRUB_WITH_CONIFER_DISTRIBUTION: list[tuple[str, float]] = [
-    ("tree_beech_bush_a", 0.40),
-    ("tree_oak_bush_a", 0.22),
-    ("tree_douglasfir_bush_a", 0.20),
-    ("tree_aspen_small_a", 0.10),
-    ("tree_beech_small_b", 0.08),
+    ("tree_beech_bush_a", 0.20),
+    ("tree_beech_bush_b", 0.12),
+    ("tree_beech_bush_c", 0.08),
+    ("tree_oak_bush_a", 0.12),
+    ("tree_oak_bush_b", 0.08),
+    ("tree_aspen_bush_a", 0.10),
+    ("tree_aspen_bush_b", 0.05),
+    ("tree_douglasfir_bush_a", 0.11),
+    ("tree_douglasfir_bush_b", 0.07),
+    ("tree_aspen_small_a", 0.04),
+    ("tree_beech_small_b", 0.03),
 ]
 
 FERN_SPECIES_DISTRIBUTION: list[tuple[str, float]] = [
@@ -880,6 +1070,8 @@ class VegetationExportStats:
     total_trees: int = 0
     by_species: dict[str, int] = field(default_factory=dict)
     species_types: int = 0
+    groundcover_layers: int = 0
+    groundcover_max_elements: int = 0
     files_written: int = 0
     bytes_written: int = 0
 
@@ -889,6 +1081,8 @@ class VegetationExportStats:
             "total_trees": self.total_trees,
             "species_types": self.species_types,
             "by_species": dict(sorted(self.by_species.items(), key=lambda kv: -kv[1])),
+            "groundcover_layers": self.groundcover_layers,
+            "groundcover_max_elements": self.groundcover_max_elements,
             "files_written": self.files_written,
             "bytes_written": self.bytes_written,
         }
@@ -1089,7 +1283,8 @@ def _collect_keepout_shapes(
             if pts is None or len(pts) < 2:
                 continue
             width_m = float(getattr(road, "width_m", 6.0) or 6.0)
-            half_w = (width_m + 6.0) / 2.0
+            extra = 8.0 if getattr(road, "bridge", False) else 6.0
+            half_w = (width_m + extra) / 2.0
             geom = LineString([(float(p[0]), float(p[1])) for p in pts]).buffer(half_w)
             if not geom.is_empty:
                 shapes.append(geom)
@@ -1173,17 +1368,20 @@ def build_keepout_mask(
     if not _HAS_PIL and _HAS_RASTERIO and _rio_rasterize is not None and Affine is not None:
         shapes = _collect_keepout_shapes(roads, buildings, water, railways)
         if not shapes:
-            return np.zeros((sz, sz), dtype=bool), ox, oy, cell
-        transform = Affine(cell, 0.0, ox - 0.5 * cell, 0.0, cell, oy - 0.5 * cell)
-        burned = _rio_rasterize(
-            [(g, 1) for g in shapes],
-            out_shape=(sz, sz),
-            transform=transform,
-            fill=0,
-            dtype=np.uint8,
-            all_touched=True,
-        )
-        return burned.astype(bool), ox, oy, cell
+            mask = np.zeros((sz, sz), dtype=bool)
+        else:
+            transform = Affine(cell, 0.0, ox - 0.5 * cell, 0.0, cell, oy - 0.5 * cell)
+            burned = _rio_rasterize(
+                [(g, 1) for g in shapes],
+                out_shape=(sz, sz),
+                transform=transform,
+                fill=0,
+                dtype=np.uint8,
+                all_touched=True,
+            )
+            mask = burned.astype(bool)
+        _mask_excluded_terrain_layers(mask, build)
+        return mask, ox, oy, cell
 
     canvas = _RasterCanvas(sz)
 
@@ -1201,7 +1399,8 @@ def build_keepout_mask(
             if pts is None or len(pts) < 2:
                 continue
             width_m = float(getattr(road, "width_m", 6.0) or 6.0)
-            clearance_m = width_m + 6.0  # includes shoulders
+            extra = 8.0 if getattr(road, "bridge", False) else 6.0
+            clearance_m = width_m + extra  # includes shoulders and bridge margins
             width_px = max(1, round(clearance_m / cell))
             pix_pts = [to_pixel(float(p[0]), float(p[1])) for p in pts]
             canvas.line(pix_pts, width=width_px)
@@ -1246,7 +1445,21 @@ def build_keepout_mask(
                 canvas.line(pix_pts, width=width_px)
 
     mask = canvas.to_mask()
+    _mask_excluded_terrain_layers(mask, build)
     return mask, ox, oy, cell
+
+
+def _mask_excluded_terrain_layers(mask: np.ndarray, build: Any) -> None:
+    """Burn non-vegetated terrain materials (roads, concrete, sand, pebbles) into ``mask``."""
+    layers = getattr(build, "layers", None) if build is not None else None
+    materials = getattr(build, "materials", None) if build is not None else None
+    if layers is None or materials is None or getattr(layers, "shape", None) != mask.shape:
+        return
+    excluded_indices = [
+        idx for idx, name in enumerate(materials) if str(name) in EXCLUDED_TERRAIN_LAYERS
+    ]
+    if excluded_indices:
+        mask |= np.isin(layers, excluded_indices)
 
 
 def discover_beamng_dir(beamng_dir: str | Path | bool | None = None) -> Path | None:
@@ -1650,20 +1863,33 @@ def _select_forest_canopy_mix(
     return _normalize_distribution(FOREST_SPECIES_DISTRIBUTION, active_species)
 
 
+def _select_sapling_mix(
+    leaf_type: str | None,
+    active_species: dict[str, dict[str, Any]],
+) -> tuple[list[str], np.ndarray]:
+    """Select mid-story sapling species mix."""
+    has_conifers = any(k in active_species for k in ("tree_douglasfir_small_a", "tree_douglasfir_small_b"))
+    lt = (leaf_type or "").strip().lower()
+    if has_conifers and lt != "broadleaved":
+        return _normalize_distribution(FOREST_SAPLING_WITH_CONIFER_DISTRIBUTION, active_species)
+    return _normalize_distribution(FOREST_SAPLING_DISTRIBUTION, active_species)
+
+
 def _select_undergrowth_mix(
     active_species: dict[str, dict[str, Any]],
     *,
     prefer_ferns: bool = False,
+    woody_only: bool = False,
 ) -> tuple[list[str], np.ndarray]:
     """Select shrub/fern undergrowth mix according to available species."""
     has_ferns = any(k in active_species for k in ("lush_ferns_01_a", "lush_ferns_02_a"))
     has_conifer_bush = "tree_douglasfir_bush_a" in active_species
-    if prefer_ferns and has_ferns:
+    if prefer_ferns and has_ferns and not woody_only:
         return _normalize_distribution(FERN_SPECIES_DISTRIBUTION, active_species)
     scrub_dist = SCRUB_WITH_CONIFER_DISTRIBUTION if has_conifer_bush else SCRUB_SPECIES_DISTRIBUTION
-    if has_ferns:
-        combined = [(k, w * 0.55) for k, w in scrub_dist] + [
-            (k, w * 0.45) for k, w in FERN_SPECIES_DISTRIBUTION
+    if has_ferns and not woody_only:
+        combined = [(k, w * 0.72) for k, w in scrub_dist] + [
+            (k, w * 0.28) for k, w in FERN_SPECIES_DISTRIBUTION
         ]
         return _normalize_distribution(combined, active_species)
     return _normalize_distribution(scrub_dist, active_species)
@@ -1712,6 +1938,10 @@ def _populate_polygon(
     corridor_tree: STRtree | None = None,
     corridor_arr: np.ndarray | None = None,
     road_dist_range: tuple[float, float] | None = None,
+    scale_range: tuple[float, float] = (0.85, 1.25),
+    taper_boundary: Any = None,
+    edge_taper_m: float = 0.0,
+    taper_mode: str = "none",
 ) -> int:
     """Place up to ``n_target`` deterministic instances inside ``poly``."""
     if n_target <= 0 or not species_keys:
@@ -1766,6 +1996,27 @@ def _populate_polygon(
             cand_xs = cand_xs[in_band]
             cand_ys = cand_ys[in_band]
 
+        if edge_taper_m > 0 and taper_boundary is not None and taper_mode != "none":
+            pts_edge = shapely_points(cand_xs, cand_ys)
+            d_edge = np.asarray(shapely_distance(pts_edge, taper_boundary), dtype=np.float64)
+            clump = 0.5 + 0.5 * np.sin(cand_xs * 0.17 + cand_ys * 0.13) * np.cos(
+                cand_xs * 0.09 - cand_ys * 0.19
+            )
+            if taper_mode == "canopy":
+                keep_prob = np.clip((d_edge - 2.0) / edge_taper_m, 0.06, 1.0) * (
+                    0.65 + 0.35 * clump
+                )
+            else:  # "edge_shrub" — dense along 0..18m boundary, fading slightly at outermost 0..3m
+                keep_prob = np.clip(0.30 + 0.70 * (d_edge / 4.0), 0.25, 1.0) * (
+                    0.60 + 0.40 * clump
+                )
+            keep_mask = rng.random(cand_xs.size) < keep_prob
+            if not np.any(keep_mask):
+                continue
+            cand_xs = cand_xs[keep_mask]
+            cand_ys = cand_ys[keep_mask]
+
+        s_min, s_max = scale_range
         for cx_f, cy_f in zip(cand_xs.tolist(), cand_ys.tolist(), strict=True):
             if _too_close_in_grid(cx_f, cy_f, spacing_cells, min_spacing_m, min_spacing_sq):
                 continue
@@ -1785,7 +2036,7 @@ def _populate_polygon(
             yaw = float(rng.uniform(0.0, 2 * math.pi))
             cos_y = math.cos(yaw)
             sin_y = math.sin(yaw)
-            scale = float(round(rng.uniform(0.85, 1.25), 4))
+            scale = float(round(rng.uniform(s_min, s_max), 4))
 
             rot_mat = [
                 round(cos_y, 6),
@@ -1829,6 +2080,10 @@ class _PlacementJob:
     species_weights: np.ndarray
     is_fern: bool = False
     road_dist_range: tuple[float, float] | None = None
+    scale_range: tuple[float, float] = (0.85, 1.25)
+    taper_boundary: Any = None
+    edge_taper_m: float = 0.0
+    taper_mode: str = "none"
 
 
 def _build_forest_zone_jobs(
@@ -1840,11 +2095,12 @@ def _build_forest_zone_jobs(
     corridor_tree: STRtree | None,
     corridor_arr: np.ndarray | None,
 ) -> list[_PlacementJob]:
-    """Split a forest polygon into edge/roadside, core, and far-backdrop jobs."""
+    """Split a forest polygon into multi-tier canopy, sapling, edge-shrub, and backdrop jobs."""
     canopy_keys, canopy_weights = _select_forest_canopy_mix(area.leaf_type, active_species)
-    edge_under_keys, edge_under_weights = _select_undergrowth_mix(active_species, prefer_ferns=False)
+    sapling_keys, sapling_weights = _select_sapling_mix(area.leaf_type, active_species)
+    bush_keys, bush_weights = _select_undergrowth_mix(active_species, woody_only=True)
     has_ferns = any(k in active_species for k in ("lush_ferns_01_a", "lush_ferns_02_a"))
-    core_under_keys, core_under_weights = _select_undergrowth_mix(
+    fern_keys, fern_weights = _select_undergrowth_mix(
         active_species, prefer_ferns=has_ferns
     )
 
@@ -1861,30 +2117,63 @@ def _build_forest_zone_jobs(
             edge_geom = make_valid(edge_geom)
         edge_polys = _geom_to_polygons(edge_geom)
 
+    outer_boundary = poly.boundary
     jobs: list[_PlacementJob] = []
 
-    # 1. Edge perimeter band (<=35m from forest boundary / clearings): dense 200/ha + undergrowth
+    # 1. Edge perimeter band (<=35m from forest boundary / clearings):
+    #    organic tapering tall canopy + mid-story saplings + dense woody edge shrubs
     for ep in edge_polys:
         ep_ha = ep.area / 10000.0
-        n_canopy = max(1 if ep.area >= 200.0 else 0, round(ep_ha * _DEFAULT_ROADSIDE_DENSITY_PER_HA * density_scale))
+        n_canopy = max(
+            1 if ep.area >= 200.0 else 0,
+            round(ep_ha * _DEFAULT_ROADSIDE_DENSITY_PER_HA * density_scale),
+        )
         if n_canopy > 0:
             jobs.append(
-                _PlacementJob(ep, n_canopy, rng, canopy_keys, canopy_weights, is_fern=False)
+                _PlacementJob(
+                    ep,
+                    n_canopy,
+                    rng,
+                    canopy_keys,
+                    canopy_weights,
+                    scale_range=(0.88, 1.32),
+                    taper_boundary=outer_boundary,
+                    edge_taper_m=_EDGE_TAPER_WIDTH_M,
+                    taper_mode="canopy",
+                )
+            )
+        n_saplings = round(ep_ha * _DEFAULT_SAPLING_ROADSIDE_PER_HA * density_scale)
+        if n_saplings > 0 and sapling_keys:
+            jobs.append(
+                _PlacementJob(
+                    ep,
+                    n_saplings,
+                    rng,
+                    sapling_keys,
+                    sapling_weights,
+                    scale_range=(0.68, 0.98),
+                    taper_boundary=outer_boundary,
+                    edge_taper_m=_EDGE_TAPER_WIDTH_M,
+                    taper_mode="edge_shrub",
+                )
             )
         n_edge_under = round(ep_ha * _DEFAULT_EDGE_UNDERGROWTH_PER_HA * density_scale)
-        if n_edge_under > 0 and edge_under_keys:
+        if n_edge_under > 0 and bush_keys:
             jobs.append(
                 _PlacementJob(
                     ep,
                     n_edge_under,
                     rng,
-                    edge_under_keys,
-                    edge_under_weights,
-                    is_fern=has_ferns and any("fern" in k for k in edge_under_keys),
+                    bush_keys,
+                    bush_weights,
+                    scale_range=(0.75, 1.25),
+                    taper_boundary=outer_boundary,
+                    edge_taper_m=_EDGE_TAPER_WIDTH_M,
+                    taper_mode="edge_shrub",
                 )
             )
 
-    # 2. Core interior: roadside core (<=60m), near core (60..400m), backdrop (>400m)
+    # 2. Core interior: multi-tier canopy + mid-story saplings + woody understory + fern accents
     for cp in core_polys:
         cp_ha = cp.area / 10000.0
         f_near, f_mid, f_far = _estimate_road_zone_fractions(cp, corridor_tree, corridor_arr)
@@ -1902,19 +2191,33 @@ def _build_forest_zone_jobs(
                         canopy_keys,
                         canopy_weights,
                         road_dist_range=(0.0, _ROADSIDE_ZONE_M),
+                        scale_range=(0.90, 1.35),
+                    )
+                )
+            n_near_sap = round(near_ha * _DEFAULT_SAPLING_ROADSIDE_PER_HA * density_scale)
+            if n_near_sap > 0 and sapling_keys:
+                jobs.append(
+                    _PlacementJob(
+                        cp,
+                        n_near_sap,
+                        rng,
+                        sapling_keys,
+                        sapling_weights,
+                        road_dist_range=(0.0, _ROADSIDE_ZONE_M),
+                        scale_range=(0.65, 0.95),
                     )
                 )
             n_near_u = round(near_ha * _DEFAULT_EDGE_UNDERGROWTH_PER_HA * density_scale)
-            if n_near_u > 0 and edge_under_keys:
+            if n_near_u > 0 and bush_keys:
                 jobs.append(
                     _PlacementJob(
                         cp,
                         n_near_u,
                         rng,
-                        edge_under_keys,
-                        edge_under_weights,
-                        is_fern=has_ferns and any("fern" in k for k in edge_under_keys),
+                        bush_keys,
+                        bush_weights,
                         road_dist_range=(0.0, _ROADSIDE_ZONE_M),
+                        scale_range=(0.75, 1.20),
                     )
                 )
 
@@ -1925,25 +2228,56 @@ def _build_forest_zone_jobs(
             if n_mid > 0:
                 jobs.append(
                     _PlacementJob(
-                        cp, n_mid, rng, canopy_keys, canopy_weights, road_dist_range=mid_range
+                        cp,
+                        n_mid,
+                        rng,
+                        canopy_keys,
+                        canopy_weights,
+                        road_dist_range=mid_range,
+                        scale_range=(0.90, 1.35),
                     )
                 )
-            core_u_rate = (
-                _DEFAULT_CORE_FERN_PER_HA if has_ferns else _DEFAULT_CORE_BUSH_FALLBACK_PER_HA
-            )
-            n_mid_u = round(mid_ha * core_u_rate * density_scale)
-            if n_mid_u > 0 and core_under_keys:
+            n_mid_sap = round(mid_ha * _DEFAULT_SAPLING_CORE_PER_HA * density_scale)
+            if n_mid_sap > 0 and sapling_keys:
                 jobs.append(
                     _PlacementJob(
                         cp,
-                        n_mid_u,
+                        n_mid_sap,
                         rng,
-                        core_under_keys,
-                        core_under_weights,
-                        is_fern=has_ferns,
+                        sapling_keys,
+                        sapling_weights,
                         road_dist_range=mid_range,
+                        scale_range=(0.65, 0.95),
                     )
                 )
+            n_mid_bush = round(mid_ha * _DEFAULT_CORE_BUSH_FALLBACK_PER_HA * density_scale)
+            if n_mid_bush > 0 and bush_keys:
+                jobs.append(
+                    _PlacementJob(
+                        cp,
+                        n_mid_bush,
+                        rng,
+                        bush_keys,
+                        bush_weights,
+                        road_dist_range=mid_range,
+                        scale_range=(0.75, 1.15),
+                    )
+                )
+            if has_ferns and fern_keys:
+                n_mid_fern = round(mid_ha * _DEFAULT_CORE_FERN_PER_HA * density_scale)
+                if n_mid_fern > 0:
+                    jobs.append(
+                        _PlacementJob(
+                            cp,
+                            n_mid_fern,
+                            rng,
+                            fern_keys,
+                            fern_weights,
+                            is_fern=True,
+                            road_dist_range=mid_range,
+                            scale_range=(0.85, 1.30),
+                        )
+                    )
 
         if f_far > 0 and has_roads:
             far_ha = cp_ha * f_far
@@ -1957,6 +2291,7 @@ def _build_forest_zone_jobs(
                         canopy_keys,
                         canopy_weights,
                         road_dist_range=(_BACKDROP_DISTANCE_M, math.inf),
+                        scale_range=(0.92, 1.32),
                     )
                 )
 
@@ -2063,6 +2398,8 @@ def export_vegetation(
     max_trees: int = 45000,
     target_density_trees_per_ha: float = _DEFAULT_CORE_DENSITY_PER_HA,
     beamng_dir: str | Path | bool | None = None,
+    include_groundcover: bool = True,
+    terrain_materials: Sequence[str] | None = None,
 ) -> tuple[list[dict[str, Any]], VegetationExportStats]:
     """Generate BeamNG .forest4.json, managedItemData.json, materials, and scene objects.
 
@@ -2173,6 +2510,10 @@ def export_vegetation(
                 corridor_tree=corridor_tree,
                 corridor_arr=corridor_arr,
                 road_dist_range=job.road_dist_range,
+                scale_range=job.scale_range,
+                taper_boundary=job.taper_boundary,
+                edge_taper_m=job.edge_taper_m,
+                taper_mode=job.taper_mode,
             )
         return _populate_polygon(
             job.poly,
@@ -2195,6 +2536,10 @@ def export_vegetation(
             corridor_tree=corridor_tree,
             corridor_arr=corridor_arr,
             road_dist_range=job.road_dist_range,
+            scale_range=job.scale_range,
+            taper_boundary=job.taper_boundary,
+            edge_taper_m=job.edge_taper_m,
+            taper_mode=job.taper_mode,
         )
 
     for tier in sorted(areas_by_tier):
@@ -2268,6 +2613,10 @@ def export_vegetation(
                                 job.species_weights,
                                 is_fern=job.is_fern,
                                 road_dist_range=job.road_dist_range,
+                                scale_range=job.scale_range,
+                                taper_boundary=job.taper_boundary,
+                                edge_taper_m=job.edge_taper_m,
+                                taper_mode=job.taper_mode,
                             )
                         )
 
@@ -2295,6 +2644,9 @@ def export_vegetation(
     # 6. Emit scene objects for level SceneTree
     # BeamNG 0.39+ auto-discovers levels/<level_id>/forest/*.forest4.json;
     # official levels (e.g. east_coast_usa) omit dataFile on theForest.
+    center_x = round(ox + cell * (n_mask / 2.0), 4)
+    center_y = round(oy + cell * (n_mask / 2.0), 4)
+    center_z = round(_sample_ground(build, center_x, center_y), 4)
     scene_objects: list[dict[str, Any]] = [
         {
             "class": "Forest",
@@ -2308,10 +2660,28 @@ def export_vegetation(
             "name": "windEmitter",
             "persistentId": stable_uuid(level_id, "forest", "windEmitter"),
             "__parent": "vegetation",
-            "position": [round(ox + cell * (n_mask / 2.0), 4), round(oy + cell * (n_mask / 2.0), 4), 100.0],
+            "position": [center_x, center_y, 100.0],
             "strength": 0.15,
             "gustYawFrequency": 0.1,
         },
     ]
+
+    if include_groundcover:
+        active_mats = terrain_materials
+        if active_mats is None:
+            active_mats = getattr(build, "materials", None) or DEFAULT_MATERIAL_ORDER
+        gc_objects, gc_stats = export_groundcover(
+            level_id,
+            level_dir,
+            center_pos=(center_x, center_y, center_z),
+            terrain_materials=active_mats,
+            beamng_dir=resolved_beamng,
+            parent="vegetation",
+        )
+        scene_objects.extend(gc_objects)
+        stats.groundcover_layers = gc_stats.layers
+        stats.groundcover_max_elements = gc_stats.total_max_elements
+        stats.files_written += gc_stats.files_written
+        stats.bytes_written += gc_stats.bytes_written
 
     return scene_objects, stats

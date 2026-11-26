@@ -407,6 +407,68 @@ class TestBridgeDeckAndGeometry:
         ]
         assert end_lip_pts and max(end_lip_pts) <= 104.0 - 0.049
 
+    def test_c1_hermite_bridgehead_ramps_match_portal_slope_and_multi_material_dae(self, tmp_path: Path) -> None:
+        from ivanovo2beam.roads.bridges import (
+            BRIDGE_PARAPET_MATERIAL,
+            BRIDGE_STEEL_MATERIAL,
+        )
+
+        pts = np.array([[0.0, 0.0], [30.0, 0.0], [60.0, 0.0]])
+        road = Road(
+            osm_id=274109999,
+            highway="primary",
+            points=pts,
+            width_m=10.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=False,
+            bridge=True,
+            tunnel=False,
+            layer=1,
+            name="Smooth Bridge",
+            maxspeed_kph=90.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        # Rising portal at 3% grade into deck crest
+        deck_z = np.array([100.0, 100.9, 100.2])
+        ramps = create_bridgehead_ramps(
+            road,
+            RoadSettings(),
+            deck_z,
+            ground_sampler=lambda _x, _y: 98.5,
+            ramp_length_m=60.0,
+        )
+        assert len(ramps) == 2
+        start_ramp, end_ramp = ramps
+        assert start_ramp.surface_z is not None and end_ramp.surface_z is not None
+        # Check slope right into start portal matches +3% deck slope (no flat cosine kink)
+        ds_in = float(np.hypot(*(start_ramp.points[-1] - start_ramp.points[-2])))
+        ramp_portal_slope = (float(start_ramp.surface_z[-1]) - float(start_ramp.surface_z[-2])) / ds_in
+        assert ramp_portal_slope == pytest.approx(0.03, abs=0.004)
+        # No sudden jump > 0.01 grade change between adjacent ramp segments
+        for r in (start_ramp, end_ramp):
+            dxy = np.hypot(np.diff(r.points[:, 0]), np.diff(r.points[:, 1]))
+            slopes = np.diff(r.surface_z) / dxy  # type: ignore[arg-type]
+            assert float(np.max(np.abs(np.diff(slopes)))) < 0.01
+
+        # Multi-material COLLADA & main.materials.json include deck, concrete parapet, and galvanized steel rails
+        mat_path = emit_bridges_materials(tmp_path, "test_level")
+        mats = json.loads(mat_path.read_text(encoding="utf-8"))
+        assert {BRIDGE_DECAL_MATERIAL, BRIDGE_PARAPET_MATERIAL, BRIDGE_STEEL_MATERIAL} <= set(mats)
+
+        _, struct_geom = build_bridge_split_geometry(road, deck_z, ground_sampler=lambda _x, _y: 95.0, localize=True)
+        dae = tmp_path / "bridge_way274109999.dae"
+        export_bridge_dae(dae, struct_geom, "bridge_way274109999")
+        root = ET.parse(dae).getroot()
+        ns = {"c": "http://www.collada.org/2005/11/COLLADASchema"}
+        mat_ids = [m.attrib.get("id") for m in root.findall(".//c:material", ns)]
+        assert mat_ids[0] == BRIDGE_DECAL_MATERIAL
+        assert BRIDGE_PARAPET_MATERIAL in mat_ids
+        assert BRIDGE_STEEL_MATERIAL in mat_ids
+
 
 # ===========================================================================
 # Railways & Trams Subsystem Tests
