@@ -1,0 +1,992 @@
+{
+  "timestamp_utc": "2026-11-26T17:35:28.203385+00:00",
+  "level_id": "ivanovo_hybrid_corridor",
+  "mode": "p1",
+  "vehicle": "etk800",
+  "cold_cache": false,
+  "wall_load_to_ready_s": 38.17,
+  "fps_limit_reason": "{\"backgroundCap\":240,\"backgroundActive\":false,\"fpsCap\":0,\"windowFocused\":false,\"vr\":false,\"foregroundCap\":60,\"foregroundActive\":false,\"vsync\":false}",
+  "settings": {
+    "settings_path": "<BEAMNG_USER_DIR>\\settings\\settings.json",
+    "GraphicDisplayResolutions": "1920 1080",
+    "GraphicDisplayModes": "Borderless",
+    "GraphicDisplayRefreshRates": 144,
+    "GraphicAntialiasType": "dlss",
+    "GraphicAntialias": 4,
+    "GraphicOverallQuality": "Ultra",
+    "GraphicTerrainQuality": "High",
+    "GraphicTextureQuality": "Normal",
+    "GraphicMeshQuality": "Ultra",
+    "GraphicShadowsQuality": "High",
+    "GraphicLightingQuality": "Ultra",
+    "GraphicDynReflectionEnabled": true,
+    "GraphicDynReflectionDistance": 250,
+    "GraphicDynMirrorsDistance": 500,
+    "enableMcp": true,
+    "pref_Terrain": {
+      "lodScale": 0.75,
+      "detailScale": 1.5
+    },
+    "pref_TS": {
+      "maxDecalCount": 8000,
+      "detailAdjust": 2,
+      "skipRenderDLs": 0
+    },
+    "pref_Video_displayDevice": "D3D12",
+    "pref_Video_gpu": "NVIDIA GeForce RTX 3080",
+    "resolution_warning": "Active resolution is '1920 1080', not '2560 1440' (1440p target). Set 2560x1440 in BeamNG Display settings before final benchmark."
+  },
+  "nvidia_smi_baseline": {
+    "gpu_name": "NVIDIA GeForce RTX 3080",
+    "vram_used_mib": 1617.0,
+    "vram_total_mib": 10240.0,
+    "gpu_util_pct": 9.0,
+    "gpu_clock_mhz": 210.0
+  },
+  "static_budget": {
+    "level_id": "ivanovo_hybrid_corridor",
+    "level_dir": "<REPO_ROOT>\\build\\levels\\ivanovo_hybrid_corridor",
+    "zip_path": null,
+    "zip_bytes": 0,
+    "zip_mib": 0.0,
+    "ter_bytes": 50331771,
+    "ter_mib": 48.0,
+    "terrain_grid_size": 4096,
+    "terrain_square_size_m": 4.0,
+    "decal_roads": 11627,
+    "decal_nodes": 134951,
+    "mesh_roads": 0,
+    "forest_items": 45000,
+    "forest_types": 30,
+    "water_blocks": 2361,
+    "rivers": 55,
+    "ts_statics": 4586,
+    "dae_files": 522,
+    "dae_bytes": 162633361
+  },
+  "extended_static": {
+    "terrain_blocks": 1,
+    "ground_covers": 8,
+    "decal_roads_over_objects_true": 2527,
+    "decal_roads_over_objects_false": 9100,
+    "ground_mesh_statics": 522
+  },
+  "scene_probe": {
+    "decal_roads_over_objects_true": 2527,
+    "spawn_pos": [
+      7605.064453125,
+      -8258.873046875,
+      104.10000610352
+    ],
+    "decal_roads_missing_material": 0,
+    "road_props_count": 4158,
+    "water_block_count": 2361,
+    "terrain_blocks": [
+      {
+        "min": [
+          3707.4306640625,
+          -16599.427734375,
+          88.73583984375
+        ],
+        "name": "theTerrain",
+        "squareSize": 4,
+        "pos": [
+          3707.4306640625,
+          -16599.427734375,
+          80.736267089844
+        ],
+        "max": [
+          20091.4296875,
+          -215.427734375,
+          161.13372802734
+        ]
+      }
+    ],
+    "river_count": 55,
+    "ts_static_count": 4597,
+    "groundcovers": [
+      {
+        "name": "gc_meadow_grass_close",
+        "maxElements": 48000
+      },
+      {
+        "name": "gc_meadow_grass_distant",
+        "maxElements": 72000
+      },
+      {
+        "name": "gc_tall_roadside_grass",
+        "maxElements": 48000
+      },
+      {
+        "name": "gc_field_grass",
+        "maxElements": 44000
+      },
+      {
+        "name": "gc_wildflowers",
+        "maxElements": 28000
+      },
+      {
+        "name": "gc_forest_undergrowth",
+        "maxElements": 48000
+      },
+      {
+        "name": "gc_low_scrub",
+        "maxElements": 18000
+      },
+      {
+        "name": "gc_3d_foliage_close",
+        "maxElements": 16000
+      }
+    ],
+    "decal_roads_total": 11627,
+    "decal_roads_over_objects_false": 9100,
+    "buildings_count": 226,
+    "ground_mesh_sample_boxes": [
+      {
+        "min": [
+          3935.4304199219,
+          -5205.4267578125,
+          121.98970031738
+        ],
+        "name": "corridor_0_22",
+        "max": [
+          4219.4306640625,
+          -4823.4267578125,
+          128.42399597168
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_0_22.dae"
+      },
+      {
+        "min": [
+          3707.4304199219,
+          -4823.4267578125,
+          123.55820465088
+        ],
+        "name": "corridor_0_23",
+        "max": [
+          3994.4304199219,
+          -4570.4267578125,
+          128.60180664062
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_0_23.dae"
+      },
+      {
+        "min": [
+          3707.4304199219,
+          -4039.4267578125,
+          100.0265045166
+        ],
+        "name": "corridor_0_24",
+        "max": [
+          4151.4306640625,
+          -3799.4267578125,
+          123.68180084229
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_0_24.dae"
+      },
+      {
+        "min": [
+          4032.4304199219,
+          -3799.4267578125,
+          103.00610351562
+        ],
+        "name": "corridor_0_25",
+        "max": [
+          4219.4306640625,
+          -3719.4267578125,
+          114.36569976807
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_0_25.dae"
+      },
+      {
+        "min": [
+          3707.4304199219,
+          -2251.4267578125,
+          123.82369995117
+        ],
+        "name": "corridor_0_28",
+        "max": [
+          4219.4306640625,
+          -1854.4267578125,
+          131.63619995117
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_0_28.dae"
+      },
+      {
+        "min": [
+          4310.4306640625,
+          -5779.4267578125,
+          121.34750366211
+        ],
+        "name": "corridor_1_21",
+        "max": [
+          4731.4306640625,
+          -5335.4267578125,
+          128.01860046387
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_1_21.dae"
+      },
+      {
+        "min": [
+          4219.4306640625,
+          -5335.4267578125,
+          123.25309753418
+        ],
+        "name": "corridor_1_22",
+        "max": [
+          4375.4306640625,
+          -5128.4267578125,
+          130.88569641113
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_1_22.dae"
+      },
+      {
+        "min": [
+          4219.4306640625,
+          -3773.4267578125,
+          111.82640075684
+        ],
+        "name": "corridor_1_25",
+        "max": [
+          4731.4306640625,
+          -3287.4267578125,
+          127.34280395508
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_1_25.dae"
+      },
+      {
+        "min": [
+          4311.4306640625,
+          -3287.4267578125,
+          124.00969696045
+        ],
+        "name": "corridor_1_26",
+        "max": [
+          4731.4306640625,
+          -2775.4267578125,
+          132.59120178223
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_1_26.dae"
+      },
+      {
+        "min": [
+          4239.4306640625,
+          -2775.4267578125,
+          125.12529754639
+        ],
+        "name": "corridor_1_27",
+        "max": [
+          4638.4306640625,
+          -2263.4267578125,
+          131.66079711914
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_1_27.dae"
+      },
+      {
+        "min": [
+          4219.4306640625,
+          -2263.4267578125,
+          124.59790039062
+        ],
+        "name": "corridor_1_28",
+        "max": [
+          4318.4306640625,
+          -2202.4267578125,
+          126.68870544434
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_1_28.dae"
+      },
+      {
+        "min": [
+          5152.4306640625,
+          -6471.4267578125,
+          120.49179840088
+        ],
+        "name": "corridor_2_19",
+        "max": [
+          5243.4306640625,
+          -6359.4267578125,
+          125.94409942627
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_2_19.dae"
+      },
+      {
+        "min": [
+          4802.4306640625,
+          -6359.4267578125,
+          119.9600982666
+        ],
+        "name": "corridor_2_20",
+        "max": [
+          5209.4306640625,
+          -5847.4267578125,
+          124.80269622803
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_2_20.dae"
+      },
+      {
+        "min": [
+          4731.4306640625,
+          -5847.4267578125,
+          121.26959991455
+        ],
+        "name": "corridor_2_21",
+        "max": [
+          4867.4306640625,
+          -5708.4267578125,
+          123.50580596924
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_2_21.dae"
+      },
+      {
+        "min": [
+          5173.4306640625,
+          -3854.4267578125,
+          118.18930053711
+        ],
+        "name": "corridor_2_24",
+        "max": [
+          5243.4306640625,
+          -3799.4267578125,
+          120.88310241699
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_2_24.dae"
+      },
+      {
+        "min": [
+          4731.4306640625,
+          -3799.4267578125,
+          119.83499908447
+        ],
+        "name": "corridor_2_25",
+        "max": [
+          5243.4306640625,
+          -3287.4267578125,
+          132.03639221191
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_2_25.dae"
+      },
+      {
+        "min": [
+          4731.4306640625,
+          -3287.4267578125,
+          123.92350006104
+        ],
+        "name": "corridor_2_26",
+        "max": [
+          4910.4306640625,
+          -2849.4267578125,
+          136.1475982666
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_2_26.dae"
+      },
+      {
+        "min": [
+          5585.4306640625,
+          -7070.4267578125,
+          114.97239685059
+        ],
+        "name": "corridor_3_18",
+        "max": [
+          5755.4306640625,
+          -6871.4267578125,
+          122.64739990234
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_3_18.dae"
+      },
+      {
+        "min": [
+          5243.4306640625,
+          -6871.4267578125,
+          118.51899719238
+        ],
+        "name": "corridor_3_19",
+        "max": [
+          5646.4306640625,
+          -6400.4267578125,
+          125.99240112305
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_3_19.dae"
+      },
+      {
+        "min": [
+          5243.4306640625,
+          -3856.4267578125,
+          107.23090362549
+        ],
+        "name": "corridor_3_24",
+        "max": [
+          5488.4306640625,
+          -3799.4267578125,
+          122.19820404053
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_3_24.dae"
+      },
+      {
+        "min": [
+          5243.4306640625,
+          -3799.4267578125,
+          110.32929992676
+        ],
+        "name": "corridor_3_25",
+        "max": [
+          5755.4306640625,
+          -3456.4267578125,
+          129.07879638672
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_3_25.dae"
+      },
+      {
+        "min": [
+          5962.4306640625,
+          -14744.426757812,
+          99.444396972656
+        ],
+        "name": "corridor_4_3",
+        "max": [
+          6056.4306640625,
+          -14551.426757812,
+          103.73280334473
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_4_3.dae"
+      },
+      {
+        "min": [
+          6013.4306640625,
+          -14551.426757812,
+          98.472702026367
+        ],
+        "name": "corridor_4_4",
+        "max": [
+          6267.4306640625,
+          -14039.426757812,
+          107.23000335693
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_4_4.dae"
+      },
+      {
+        "min": [
+          6223.4306640625,
+          -14039.426757812,
+          106.16229248047
+        ],
+        "name": "corridor_4_5",
+        "max": [
+          6267.4306640625,
+          -13957.426757812,
+          111.02479553223
+        ],
+        "shape": "/levels/ivanovo_hybrid_corridor/art/shapes/corridor/corridor_4_5.dae"
+      }
+    ],
+    "groundcover_count": 8
+  },
+  "zfighting_and_materials": {
+    "decal_road_count": 11627,
+    "decal_bias_max": 0.0049999998882413,
+    "decal_bias_min": 0.0015000000130385,
+    "over_objects_sample": [
+      {
+        "bias": 0.0020000000949949,
+        "name": "way29352630",
+        "mat": "road_asphalt_2lane",
+        "pri": 13
+      },
+      {
+        "bias": 0.0020000000949949,
+        "name": "way49922862",
+        "mat": "road_asphalt_2lane",
+        "pri": 13
+      },
+      {
+        "bias": 0.0020000000949949,
+        "name": "way49922863",
+        "mat": "road_asphalt_2lane",
+        "pri": 13
+      },
+      {
+        "bias": 0.0020000000949949,
+        "name": "way54678807_0",
+        "mat": "road_asphalt_2lane",
+        "pri": 13
+      },
+      {
+        "bias": 0.0020000000949949,
+        "name": "way54678807_1",
+        "mat": "road_asphalt_2lane",
+        "pri": 13
+      },
+      {
+        "bias": 0.0020000000949949,
+        "name": "way54678807_2",
+        "mat": "road_asphalt_2lane",
+        "pri": 13
+      },
+      {
+        "bias": 0.0020000000949949,
+        "name": "way54678807_3",
+        "mat": "road_asphalt_2lane",
+        "pri": 13
+      },
+      {
+        "bias": 0.0020000000949949,
+        "name": "way54678807_4",
+        "mat": "road_asphalt_2lane",
+        "pri": 13
+      },
+      {
+        "bias": 0.0020000000949949,
+        "name": "way55286863",
+        "mat": "road_asphalt_2lane",
+        "pri": 13
+      },
+      {
+        "bias": 0.0020000000949949,
+        "name": "way55544190",
+        "mat": "road_asphalt_2lane",
+        "pri": 13
+      },
+      {
+        "bias": 0.0020000000949949,
+        "name": "way55544193",
+        "mat": "road_asphalt_2lane",
+        "pri": 13
+      },
+      {
+        "bias": 0.0020000000949949,
+        "name": "way55546169",
+        "mat": "road_asphalt_2lane",
+        "pri": 13
+      }
+    ],
+    "decal_bias_zero_count": 0
+  },
+  "surface_collision_probes": [
+    {
+      "ray2_hit_z": 103.3521,
+      "terrain_z": 103.3522,
+      "x": 7605.064453125,
+      "ray1_minus_terrain_m": 0.549,
+      "y": -8258.873046875,
+      "ray1_hit_z": 103.9012,
+      "double_layer_gap_m": 0.5491,
+      "label": "spawn_road"
+    },
+    {
+      "ray2_hit_z": 124.6432,
+      "terrain_z": 124.6441,
+      "x": 4358.1489257812,
+      "ray1_minus_terrain_m": 0.5432,
+      "y": -5365.9169921875,
+      "ray1_hit_z": 125.1873,
+      "double_layer_gap_m": 0.544,
+      "label": "ivanovo_exit"
+    },
+    {
+      "terrain_z": 118.0063,
+      "x": 6195.7163085938,
+      "ray1_minus_terrain_m": 0.0083,
+      "y": -7470.9067382812,
+      "ray1_hit_z": 118.0146,
+      "label": "kokhma_west"
+    },
+    {
+      "terrain_z": 104.1373,
+      "x": 7219.6655273438,
+      "ray1_minus_terrain_m": 0.0001,
+      "y": -7915.736328125,
+      "ray1_hit_z": 104.1374,
+      "label": "p152_gs_west"
+    },
+    {
+      "ray2_hit_z": 105.8846,
+      "terrain_z": 105.8854,
+      "x": 7913.7478027344,
+      "ray1_minus_terrain_m": 0.0497,
+      "y": -8304.7045898438,
+      "ray1_hit_z": 105.935,
+      "double_layer_gap_m": 0.0504,
+      "label": "uvod_bridge"
+    },
+    {
+      "ray2_hit_z": 106.6541,
+      "terrain_z": 106.6537,
+      "x": 8341.7521972656,
+      "ray1_minus_terrain_m": 0.5529,
+      "y": -8459.6403808594,
+      "ray1_hit_z": 107.2066,
+      "double_layer_gap_m": 0.5525,
+      "label": "kokhma_junc"
+    },
+    {
+      "ray2_hit_z": 113.1683,
+      "terrain_z": 113.168,
+      "x": 11131.906243904,
+      "ray1_minus_terrain_m": 0.5413,
+      "y": -9949.8911130397,
+      "ray1_hit_z": 113.7093,
+      "double_layer_gap_m": 0.541,
+      "label": "p152_east_corridor"
+    },
+    {
+      "terrain_z": 106.6352,
+      "x": 7525.064453125,
+      "ray1_minus_terrain_m": 0.0024,
+      "y": -8378.873046875,
+      "ray1_hit_z": 106.6376,
+      "label": "offroad_south"
+    },
+    {
+      "terrain_z": 108.2341,
+      "x": 7955.064453125,
+      "ray1_minus_terrain_m": 0.0001,
+      "y": -7908.873046875,
+      "ray1_hit_z": 108.2342,
+      "label": "offroad_far"
+    },
+    {
+      "ray2_hit_z": 124.4369,
+      "terrain_z": 125.0694,
+      "x": 4077.4305419922,
+      "ray1_minus_terrain_m": -0.0041,
+      "y": -5014.4267578125,
+      "ray1_hit_z": 125.0654,
+      "double_layer_gap_m": 0.6285,
+      "label": "hybrid_mesh_center"
+    },
+    {
+      "ray2_hit_z": 133.0499,
+      "terrain_z": 133.0328,
+      "x": 4077.4305419922,
+      "ray1_minus_terrain_m": 8.3025,
+      "y": -4828.4267578125,
+      "ray1_hit_z": 141.3353,
+      "double_layer_gap_m": 8.2854,
+      "label": "hybrid_mesh_inside_5m"
+    },
+    {
+      "ray2_hit_z": 132.9954,
+      "terrain_z": 132.9954,
+      "x": 4077.4305419922,
+      "ray1_minus_terrain_m": 8.3399,
+      "y": -4823.4267578125,
+      "ray1_hit_z": 141.3353,
+      "double_layer_gap_m": 8.3399,
+      "label": "hybrid_mesh_seam_edge"
+    },
+    {
+      "ray2_hit_z": 132.8344,
+      "terrain_z": 132.8173,
+      "x": 4077.4305419922,
+      "ray1_minus_terrain_m": 8.518,
+      "y": -4808.4267578125,
+      "ray1_hit_z": 141.3353,
+      "double_layer_gap_m": 8.5009,
+      "label": "hybrid_base_terrain_outside_15m"
+    }
+  ],
+  "navgraph_probes": [
+    {
+      "label": "spawn",
+      "center": [
+        7605.1,
+        -8258.9,
+        104.1
+      ],
+      "node_count": 52,
+      "zero_z_nodes": 0,
+      "min_z": 103.07,
+      "max_z": 107.01,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "ivanovo_exit",
+      "center": [
+        4358.1,
+        -5365.9,
+        125.2
+      ],
+      "node_count": 65,
+      "zero_z_nodes": 0,
+      "min_z": 122.01,
+      "max_z": 127.25,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "kokhma_west",
+      "center": [
+        6195.7,
+        -7470.9,
+        118.0
+      ],
+      "node_count": 71,
+      "zero_z_nodes": 0,
+      "min_z": 109.71,
+      "max_z": 123.25,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "p152_gs_west",
+      "center": [
+        7219.7,
+        -7915.7,
+        104.1
+      ],
+      "node_count": 50,
+      "zero_z_nodes": 0,
+      "min_z": 104.08,
+      "max_z": 115.56,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "uvod_bridge",
+      "center": [
+        7913.7,
+        -8304.7,
+        105.9
+      ],
+      "node_count": 33,
+      "zero_z_nodes": 0,
+      "min_z": 103.17,
+      "max_z": 115.25,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "kokhma_junc",
+      "center": [
+        8341.8,
+        -8459.6,
+        107.2
+      ],
+      "node_count": 50,
+      "zero_z_nodes": 0,
+      "min_z": 102.59,
+      "max_z": 119.02,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "p152_east_corridor",
+      "center": [
+        11131.9,
+        -9949.9,
+        113.7
+      ],
+      "node_count": 3,
+      "zero_z_nodes": 0,
+      "min_z": 113.73,
+      "max_z": 116.02,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "hybrid_seam_edge",
+      "center": [
+        4077.4,
+        -4823.4,
+        104.1
+      ],
+      "node_count": 60,
+      "zero_z_nodes": 0,
+      "min_z": 121.51,
+      "max_z": 126.47,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    }
+  ],
+  "drive_legs": [
+    {
+      "leg": "ivanovo_exit_to_kokhma_junc",
+      "reached_target": false,
+      "distance_km": 1.402,
+      "duration_s": 130.11,
+      "samples": 600,
+      "max_speed_kmh": 51.62,
+      "avg_speed_kmh": 38.86,
+      "min_vz": -0.291,
+      "max_vz": 0.277,
+      "p99_abs_vz": 0.254,
+      "min_z_seen": 122.11,
+      "damage_sum": 6416.4658203125
+    },
+    {
+      "leg": "kokhma_junc_to_p152_east_edge",
+      "reached_target": false,
+      "distance_km": 3.16,
+      "duration_s": 130.14,
+      "samples": 606,
+      "max_speed_kmh": 97.49,
+      "avg_speed_kmh": 87.84,
+      "min_vz": -2.682,
+      "max_vz": 2.819,
+      "p99_abs_vz": 2.312,
+      "min_z_seen": 105.06,
+      "damage_sum": 0
+    }
+  ],
+  "drive_totals": {
+    "legs_count": 2,
+    "total_distance_km": 4.562,
+    "max_speed_kmh": 97.49,
+    "max_damage_sum": 6416,
+    "max_abs_vz": 2.819
+  },
+  "perf_summary": {
+    "sample_count": 25,
+    "fps_avg": 97.82,
+    "fps_1pct_low": 78.66,
+    "fps_min_sampled": 68.96,
+    "frametime_avg_ms": 10.22,
+    "frametime_1pct_ms": 12.71,
+    "cpu_ms_avg": 10.26,
+    "gpu_ms_avg": 5.77,
+    "draw_calls_avg": null,
+    "draw_calls_max": null,
+    "polys_avg": null,
+    "polys_max": null,
+    "vram_peak_mib": 5021.0,
+    "vram_avg_mib": 4971.4,
+    "proc_ram_peak_mib": 4888.7,
+    "proc_private_peak_mib": 8409.5,
+    "proc_total_ram_peak_mib": 5928.3,
+    "pass_60fps_target": true
+  },
+  "log_metrics": {
+    "world_ready_s": 33.04516,
+    "load_stages_s": {
+      "engine.loading.stage.Terrain::TerrainBlock": {
+        "count": 1,
+        "seconds": 1.261
+      },
+      "engine.loading.stage.Environment::ScatterSky": {
+        "count": 1,
+        "seconds": 0.042
+      },
+      "engine.loading.stage.Environment::WaterBlock": {
+        "count": 2361,
+        "seconds": 0.15
+      },
+      "engine.loading.stage.Environment::GroundCover": {
+        "count": 8,
+        "seconds": 0.066
+      },
+      "engine.loading.stage.Forest::Forest": {
+        "count": 1,
+        "seconds": 0.403
+      },
+      "engine.loading.stage.Meshes::TSStatic": {
+        "count": 4586,
+        "seconds": 3.351
+      },
+      "engine.loading.stage.Roads::DecalRoad": {
+        "count": 11627,
+        "seconds": 0.609
+      },
+      "engine.loading.stage.Other::River": {
+        "count": 55,
+        "seconds": 0.029
+      }
+    },
+    "forest_items_loaded": 45000,
+    "forest_types_loaded": 30,
+    "static_collision_verts": 4021375,
+    "static_collision_tris": 5508624,
+    "static_collision_mb": 224.53,
+    "physics_instances": 63718,
+    "physics_memory_mb": 189.13,
+    "free_ram_at_spawn_gb": 15.021,
+    "total_error_lines": 163,
+    "total_warning_lines": 73,
+    "stock_error_lines": 149,
+    "level_error_lines": 14,
+    "level_error_samples": [
+      "34.32361|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'y' by inf m (local axis value inf). worst w",
+      "34.32365|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'y' by inf m (local axis value inf). worst w",
+      "34.32368|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'y' by inf m (local axis value inf). worst w",
+      "34.36528|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by -inf m (local axis value -inf). worst",
+      "34.36532|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by inf m (local axis value inf). worst w",
+      "34.36533|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by inf m (local axis value inf). worst w",
+      "34.36534|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by inf m (local axis value inf). worst w",
+      "34.36536|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by inf m (local axis value inf). worst w",
+      "34.55622|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white_discontinue] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by inf m (local axis value i",
+      "36.18550|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [road_asphalt_2lane] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by 2105.668 m (local axis value 41",
+      "36.18555|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [road_asphalt_2lane] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by 2106.3716 m (local axis value 4",
+      "36.26911|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [road_asphalt_2lane] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'y' by 8438.394 m (local axis value 10",
+      "36.72671|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [road_asphalt_2lane] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by inf m (local axis value inf). w",
+      "36.79843|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_dirt_road_gravels] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by 19074.639 m (local axis value "
+    ],
+    "level_warning_samples": [],
+    "signal_hits": {
+      "SceneStaticDecalRoadManager": 14
+    }
+  },
+  "screenshots_captured": [
+    "ivanovo_hybrid_corridor_p1_view1_p152_kokhma_junc.png",
+    "ivanovo_hybrid_corridor_p1_view2_uvod_bridge.png",
+    "ivanovo_hybrid_corridor_p1_view4_tjunc_closeup.png",
+    "ivanovo_hybrid_corridor_p1_spawn_road.png",
+    "ivanovo_hybrid_corridor_p1_corridor_aerial.png",
+    "ivanovo_hybrid_corridor_p1_hybrid_seam_closeup.png"
+  ]
+}

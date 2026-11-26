@@ -1,0 +1,588 @@
+{
+  "timestamp_utc": "2026-11-26T17:29:25.540618+00:00",
+  "level_id": "ivanovo_single_8192_2m",
+  "mode": "p0",
+  "vehicle": "etk800",
+  "cold_cache": false,
+  "wall_load_to_ready_s": 35.82,
+  "fps_limit_reason": "{\"backgroundCap\":240,\"backgroundActive\":false,\"fpsCap\":0,\"windowFocused\":false,\"vr\":false,\"foregroundCap\":60,\"foregroundActive\":false,\"vsync\":false}",
+  "settings": {
+    "settings_path": "<BEAMNG_USER_DIR>\\settings\\settings.json",
+    "GraphicDisplayResolutions": "1920 1080",
+    "GraphicDisplayModes": "Borderless",
+    "GraphicDisplayRefreshRates": 144,
+    "GraphicAntialiasType": "dlss",
+    "GraphicAntialias": 4,
+    "GraphicOverallQuality": "Ultra",
+    "GraphicTerrainQuality": "High",
+    "GraphicTextureQuality": "Normal",
+    "GraphicMeshQuality": "Ultra",
+    "GraphicShadowsQuality": "High",
+    "GraphicLightingQuality": "Ultra",
+    "GraphicDynReflectionEnabled": true,
+    "GraphicDynReflectionDistance": 250,
+    "GraphicDynMirrorsDistance": 500,
+    "enableMcp": true,
+    "pref_Terrain": {
+      "lodScale": 0.75,
+      "detailScale": 1.5
+    },
+    "pref_TS": {
+      "maxDecalCount": 8000,
+      "detailAdjust": 2,
+      "skipRenderDLs": 0
+    },
+    "pref_Video_displayDevice": "D3D12",
+    "pref_Video_gpu": "NVIDIA GeForce RTX 3080",
+    "resolution_warning": "Active resolution is '1920 1080', not '2560 1440' (1440p target). Set 2560x1440 in BeamNG Display settings before final benchmark."
+  },
+  "nvidia_smi_baseline": {
+    "gpu_name": "NVIDIA GeForce RTX 3080",
+    "vram_used_mib": 1628.0,
+    "vram_total_mib": 10240.0,
+    "gpu_util_pct": 7.0,
+    "gpu_clock_mhz": 210.0
+  },
+  "static_budget": {
+    "level_id": "ivanovo_single_8192_2m",
+    "level_dir": "<REPO_ROOT>\\build\\levels\\ivanovo_single_8192_2m",
+    "zip_path": null,
+    "zip_bytes": 0,
+    "zip_mib": 0.0,
+    "ter_bytes": 201326715,
+    "ter_mib": 192.0,
+    "terrain_grid_size": 8192,
+    "terrain_square_size_m": 2.0,
+    "decal_roads": 11629,
+    "decal_nodes": 136927,
+    "mesh_roads": 0,
+    "forest_items": 45000,
+    "forest_types": 30,
+    "water_blocks": 2361,
+    "rivers": 55,
+    "ts_statics": 4468,
+    "dae_files": 404,
+    "dae_bytes": 32249180
+  },
+  "extended_static": {
+    "terrain_blocks": 1,
+    "ground_covers": 8,
+    "decal_roads_over_objects_true": 47,
+    "decal_roads_over_objects_false": 11582,
+    "ground_mesh_statics": 0
+  },
+  "scene_probe": {
+    "decal_roads_over_objects_true": 47,
+    "spawn_pos": [
+      7605.064453125,
+      -8258.87109375,
+      104.09870147705
+    ],
+    "decal_roads_missing_material": 0,
+    "road_props_count": 4158,
+    "water_block_count": 2361,
+    "terrain_blocks": [
+      {
+        "min": [
+          3706.4306640625,
+          -16600.427734375,
+          88.73600769043
+        ],
+        "name": "theTerrain",
+        "squareSize": 2,
+        "pos": [
+          3706.4306640625,
+          -16600.427734375,
+          80.736267089844
+        ],
+        "max": [
+          20090.4296875,
+          -216.427734375,
+          161.58099365234
+        ]
+      }
+    ],
+    "river_count": 55,
+    "ts_static_count": 4479,
+    "groundcovers": [
+      {
+        "name": "gc_meadow_grass_close",
+        "maxElements": 48000
+      },
+      {
+        "name": "gc_meadow_grass_distant",
+        "maxElements": 72000
+      },
+      {
+        "name": "gc_tall_roadside_grass",
+        "maxElements": 48000
+      },
+      {
+        "name": "gc_field_grass",
+        "maxElements": 44000
+      },
+      {
+        "name": "gc_wildflowers",
+        "maxElements": 28000
+      },
+      {
+        "name": "gc_forest_undergrowth",
+        "maxElements": 48000
+      },
+      {
+        "name": "gc_low_scrub",
+        "maxElements": 18000
+      },
+      {
+        "name": "gc_3d_foliage_close",
+        "maxElements": 16000
+      }
+    ],
+    "decal_roads_total": 11629,
+    "decal_roads_over_objects_false": 11582,
+    "buildings_count": 242,
+    "ground_mesh_sample_boxes": {},
+    "groundcover_count": 8
+  },
+  "zfighting_and_materials": {
+    "decal_road_count": 11629,
+    "decal_bias_max": 0.0049999998882413,
+    "decal_bias_min": 0.0015000000130385,
+    "over_objects_sample": [
+      {
+        "bias": 0.0020000000949949,
+        "name": "way56035358",
+        "mat": "road_asphalt_2lane",
+        "pri": 13
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way56035358_mark_1",
+        "mat": "m_line_white_discontinue",
+        "pri": 2
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way56035358_line_left",
+        "mat": "m_line_white",
+        "pri": 1
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way56035358_line_right",
+        "mat": "m_line_white",
+        "pri": 1
+      },
+      {
+        "bias": 0.0020000000949949,
+        "name": "way83944496",
+        "mat": "road_asphalt_2lane",
+        "pri": 13
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way83944496_mark_1",
+        "mat": "m_line_white_discontinue",
+        "pri": 2
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way83944496_line_left",
+        "mat": "m_line_white",
+        "pri": 1
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way83944496_line_right",
+        "mat": "m_line_white",
+        "pri": 1
+      },
+      {
+        "bias": 0.0020000000949949,
+        "name": "way206480270",
+        "mat": "road_asphalt_2lane",
+        "pri": 13
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way206480270_mark_1",
+        "mat": "m_line_white_discontinue",
+        "pri": 2
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way206480270_line_left",
+        "mat": "m_line_white",
+        "pri": 1
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way206480270_line_right",
+        "mat": "m_line_white",
+        "pri": 1
+      }
+    ],
+    "decal_bias_zero_count": 0
+  },
+  "surface_collision_probes": [
+    {
+      "terrain_z": 103.9002,
+      "x": 7605.064453125,
+      "ray1_minus_terrain_m": 0.0,
+      "y": -8258.87109375,
+      "ray1_hit_z": 103.9002,
+      "label": "spawn_road"
+    },
+    {
+      "terrain_z": 125.1833,
+      "x": 4358.1489257812,
+      "ray1_minus_terrain_m": 0.0001,
+      "y": -5365.9169921875,
+      "ray1_hit_z": 125.1834,
+      "label": "ivanovo_exit"
+    },
+    {
+      "terrain_z": 118.2175,
+      "x": 6190.470703125,
+      "ray1_minus_terrain_m": -0.0001,
+      "y": -7475.4702148438,
+      "ray1_hit_z": 118.2174,
+      "label": "kokhma_west"
+    },
+    {
+      "terrain_z": 106.4597,
+      "x": 7346.10546875,
+      "ray1_minus_terrain_m": -0.0002,
+      "y": -8117.5805664062,
+      "ray1_hit_z": 106.4595,
+      "label": "p152_gs_west"
+    },
+    {
+      "terrain_z": 105.8952,
+      "x": 7913.7478027344,
+      "ray1_minus_terrain_m": 0.0398,
+      "y": -8304.7045898438,
+      "ray1_hit_z": 105.935,
+      "label": "uvod_bridge"
+    },
+    {
+      "terrain_z": 107.2149,
+      "x": 8341.7521972656,
+      "ray1_minus_terrain_m": -0.0,
+      "y": -8459.6403808594,
+      "ray1_hit_z": 107.2148,
+      "label": "kokhma_junc"
+    },
+    {
+      "terrain_z": 113.7005,
+      "x": 11131.907625796,
+      "ray1_minus_terrain_m": 0.0001,
+      "y": -9949.8990579389,
+      "ray1_hit_z": 113.7006,
+      "label": "p152_east_corridor"
+    },
+    {
+      "terrain_z": 106.6371,
+      "x": 7525.064453125,
+      "ray1_minus_terrain_m": 0.0006,
+      "y": -8378.87109375,
+      "ray1_hit_z": 106.6376,
+      "label": "offroad_south"
+    },
+    {
+      "terrain_z": 108.2129,
+      "x": 7955.064453125,
+      "ray1_minus_terrain_m": 0.0001,
+      "y": -7908.87109375,
+      "ray1_hit_z": 108.213,
+      "label": "offroad_far"
+    }
+  ],
+  "navgraph_probes": [
+    {
+      "label": "spawn",
+      "center": [
+        7605.1,
+        -8258.9,
+        104.1
+      ],
+      "node_count": 51,
+      "zero_z_nodes": 0,
+      "min_z": 103.08,
+      "max_z": 107.14,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "ivanovo_exit",
+      "center": [
+        4358.1,
+        -5365.9,
+        125.2
+      ],
+      "node_count": 64,
+      "zero_z_nodes": 0,
+      "min_z": 122.0,
+      "max_z": 127.22,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "kokhma_west",
+      "center": [
+        6190.5,
+        -7475.5,
+        118.2
+      ],
+      "node_count": 67,
+      "zero_z_nodes": 0,
+      "min_z": 109.62,
+      "max_z": 123.4,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "p152_gs_west",
+      "center": [
+        7346.1,
+        -8117.6,
+        106.5
+      ],
+      "node_count": 14,
+      "zero_z_nodes": 0,
+      "min_z": 104.69,
+      "max_z": 110.07,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "uvod_bridge",
+      "center": [
+        7913.7,
+        -8304.7,
+        105.9
+      ],
+      "node_count": 33,
+      "zero_z_nodes": 0,
+      "min_z": 103.18,
+      "max_z": 115.28,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "kokhma_junc",
+      "center": [
+        8341.8,
+        -8459.6,
+        107.2
+      ],
+      "node_count": 48,
+      "zero_z_nodes": 0,
+      "min_z": 102.58,
+      "max_z": 119.02,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "p152_east_corridor",
+      "center": [
+        11131.9,
+        -9949.9,
+        113.7
+      ],
+      "node_count": 3,
+      "zero_z_nodes": 0,
+      "min_z": 113.72,
+      "max_z": 116.02,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    }
+  ],
+  "drive_legs": [
+    {
+      "leg": "ivanovo_exit_to_kokhma_junc",
+      "reached_target": false,
+      "distance_km": 3.222,
+      "duration_s": 130.32,
+      "samples": 600,
+      "max_speed_kmh": 98.04,
+      "avg_speed_kmh": 89.26,
+      "min_vz": -1.666,
+      "max_vz": 1.658,
+      "p99_abs_vz": 1.562,
+      "min_z_seen": 109.0,
+      "damage_sum": 0
+    },
+    {
+      "leg": "kokhma_junc_to_p152_east_edge",
+      "reached_target": false,
+      "distance_km": 3.151,
+      "duration_s": 130.05,
+      "samples": 610,
+      "max_speed_kmh": 97.46,
+      "avg_speed_kmh": 87.35,
+      "min_vz": -2.727,
+      "max_vz": 2.781,
+      "p99_abs_vz": 2.322,
+      "min_z_seen": 105.06,
+      "damage_sum": 0
+    }
+  ],
+  "drive_totals": {
+    "legs_count": 2,
+    "total_distance_km": 6.373,
+    "max_speed_kmh": 98.04,
+    "max_damage_sum": 0,
+    "max_abs_vz": 2.781
+  },
+  "perf_summary": {
+    "sample_count": 25,
+    "fps_avg": 105.5,
+    "fps_1pct_low": 89.64,
+    "fps_min_sampled": 88.27,
+    "frametime_avg_ms": 9.48,
+    "frametime_1pct_ms": 11.16,
+    "cpu_ms_avg": 9.41,
+    "gpu_ms_avg": 5.45,
+    "draw_calls_avg": null,
+    "draw_calls_max": null,
+    "polys_avg": null,
+    "polys_max": null,
+    "vram_peak_mib": 4930.0,
+    "vram_avg_mib": 4923.0,
+    "proc_ram_peak_mib": 5562.6,
+    "proc_private_peak_mib": 9209.4,
+    "proc_total_ram_peak_mib": 6581.6,
+    "pass_60fps_target": true
+  },
+  "log_metrics": {
+    "world_ready_s": 27.71593,
+    "load_stages_s": {
+      "engine.loading.stage.Terrain::TerrainBlock": {
+        "count": 1,
+        "seconds": 1.65
+      },
+      "engine.loading.stage.Environment::ScatterSky": {
+        "count": 1,
+        "seconds": 0.042
+      },
+      "engine.loading.stage.Environment::WaterBlock": {
+        "count": 2361,
+        "seconds": 0.159
+      },
+      "engine.loading.stage.Environment::GroundCover": {
+        "count": 8,
+        "seconds": 0.073
+      },
+      "engine.loading.stage.Forest::Forest": {
+        "count": 1,
+        "seconds": 0.435
+      },
+      "engine.loading.stage.Meshes::TSStatic": {
+        "count": 4468,
+        "seconds": 2.541
+      },
+      "engine.loading.stage.Roads::DecalRoad": {
+        "count": 11629,
+        "seconds": 0.609
+      },
+      "engine.loading.stage.Other::River": {
+        "count": 55,
+        "seconds": 0.029
+      }
+    },
+    "forest_items_loaded": 45000,
+    "forest_types_loaded": 30,
+    "static_collision_verts": 2919046,
+    "static_collision_tris": 3922137,
+    "static_collision_mb": 160.54,
+    "physics_instances": 63473,
+    "physics_memory_mb": 134.66,
+    "free_ram_at_spawn_gb": 14.198,
+    "total_error_lines": 153,
+    "total_warning_lines": 73,
+    "stock_error_lines": 134,
+    "level_error_lines": 19,
+    "level_error_samples": [
+      "29.03128|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'y' by inf m (local axis value inf). worst w",
+      "29.03132|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'y' by inf m (local axis value inf). worst w",
+      "29.03137|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by inf m (local axis value inf). worst w",
+      "29.03138|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'y' by inf m (local axis value inf). worst w",
+      "29.05966|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by inf m (local axis value inf). worst w",
+      "29.05970|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by inf m (local axis value inf). worst w",
+      "29.05971|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by inf m (local axis value inf). worst w",
+      "29.05973|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by inf m (local axis value inf). worst w",
+      "30.47660|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [road_asphalt_2lane] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by 2106.3716 m (local axis value 4",
+      "30.47666|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [road_asphalt_2lane] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by 2142.4517 m (local axis value 4",
+      "30.54028|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [road_asphalt_2lane] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'y' by 8438.394 m (local axis value 10",
+      "30.90086|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [road_asphalt_2lane] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'y' by 2195.628 m (local axis value 42",
+      "30.93203|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [road_asphalt_2lane] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'y' by inf m (local axis value inf). w",
+      "31.03831|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_dirt_road_gravels] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by 19074.639 m (local axis value ",
+      "31.08733|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white_discontinue] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by inf m (local axis value i",
+      "31.08737|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white_discontinue] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by inf m (local axis value i",
+      "31.08738|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white_discontinue] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by inf m (local axis value i",
+      "31.08740|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white_discontinue] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by inf m (local axis value i",
+      "31.08744|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [m_line_white_discontinue] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'x' by inf m (local axis value i"
+    ],
+    "level_warning_samples": [],
+    "signal_hits": {
+      "SceneStaticDecalRoadManager": 19
+    }
+  },
+  "screenshots_captured": [
+    "ivanovo_single_8192_2m_p0_view1_p152_kokhma_junc.png",
+    "ivanovo_single_8192_2m_p0_view2_uvod_bridge.png",
+    "ivanovo_single_8192_2m_p0_view4_tjunc_closeup.png",
+    "ivanovo_single_8192_2m_p0_spawn_road.png",
+    "ivanovo_single_8192_2m_p0_corridor_aerial.png"
+  ]
+}

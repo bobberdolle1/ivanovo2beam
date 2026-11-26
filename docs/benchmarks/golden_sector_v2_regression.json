@@ -1,0 +1,462 @@
+{
+  "timestamp_utc": "2026-11-26T14:39:44.424117+00:00",
+  "level_id": "ivanovo_golden_sector",
+  "mode": "regression",
+  "vehicle": "etk800",
+  "cold_cache": false,
+  "wall_load_to_ready_s": 35.79,
+  "fps_limit_reason": "{\"backgroundCap\":240,\"backgroundActive\":false,\"fpsCap\":0,\"windowFocused\":true,\"vr\":false,\"foregroundCap\":60,\"foregroundActive\":false,\"vsync\":false}",
+  "settings": {
+    "settings_path": "<BEAMNG_USER_DIR>\\settings\\settings.json",
+    "GraphicDisplayResolutions": "1920 1080",
+    "GraphicDisplayModes": "Borderless",
+    "GraphicDisplayRefreshRates": 144,
+    "GraphicAntialiasType": "dlss",
+    "GraphicAntialias": 4,
+    "GraphicOverallQuality": "Ultra",
+    "GraphicTerrainQuality": "High",
+    "GraphicTextureQuality": "Normal",
+    "GraphicMeshQuality": "Ultra",
+    "GraphicShadowsQuality": "High",
+    "GraphicLightingQuality": "Ultra",
+    "GraphicDynReflectionEnabled": true,
+    "GraphicDynReflectionDistance": 250,
+    "GraphicDynMirrorsDistance": 500,
+    "enableMcp": true,
+    "pref_Terrain": {
+      "lodScale": 0.75,
+      "detailScale": 1.5
+    },
+    "pref_TS": {
+      "maxDecalCount": 8000,
+      "detailAdjust": 2,
+      "skipRenderDLs": 0
+    },
+    "pref_Video_displayDevice": "D3D12",
+    "pref_Video_gpu": "NVIDIA GeForce RTX 3080",
+    "resolution_warning": "Active resolution is '1920 1080', not '2560 1440' (1440p target). Set 2560x1440 in BeamNG Display settings before final benchmark."
+  },
+  "nvidia_smi_baseline": {
+    "gpu_name": "NVIDIA GeForce RTX 3080",
+    "vram_used_mib": 2026.0,
+    "vram_total_mib": 10240.0,
+    "gpu_util_pct": 4.0,
+    "gpu_clock_mhz": 1860.0
+  },
+  "static_budget": {
+    "level_id": "ivanovo_golden_sector",
+    "level_dir": "<REPO_ROOT>\\build\\levels\\ivanovo_golden_sector",
+    "zip_path": "<REPO_ROOT>\\build\\ivanovo_golden_sector.zip",
+    "zip_bytes": 34245409,
+    "zip_mib": 32.66,
+    "ter_bytes": 50331771,
+    "ter_mib": 48.0,
+    "terrain_grid_size": 4096,
+    "terrain_square_size_m": 1.0,
+    "decal_roads": 1733,
+    "decal_nodes": 21578,
+    "mesh_roads": 0,
+    "forest_items": 45000,
+    "forest_types": 30,
+    "water_blocks": 407,
+    "rivers": 9,
+    "ts_statics": 642,
+    "dae_files": 45,
+    "dae_bytes": 3721264
+  },
+  "extended_static": {
+    "terrain_blocks": 1,
+    "ground_covers": 8,
+    "decal_roads_over_objects_true": 8,
+    "decal_roads_over_objects_false": 1725,
+    "ground_mesh_statics": 0
+  },
+  "scene_probe": {
+    "decal_roads_over_objects_true": 8,
+    "spawn_pos": [
+      7605.0639648438,
+      -8258.87109375,
+      104.09823608398
+    ],
+    "decal_roads_missing_material": 0,
+    "road_props_count": 604,
+    "water_block_count": 407,
+    "terrain_blocks": [
+      {
+        "min": [
+          7135.880859375,
+          -11504.350585938,
+          96.040832519531
+        ],
+        "name": "theTerrain",
+        "squareSize": 1,
+        "pos": [
+          7135.880859375,
+          -11504.350585938,
+          88.04118347168
+        ],
+        "max": [
+          11231.880859375,
+          -7408.3505859375,
+          152.10542297363
+        ]
+      }
+    ],
+    "river_count": 9,
+    "ts_static_count": 653,
+    "groundcovers": [
+      {
+        "name": "gc_meadow_grass_close",
+        "maxElements": 48000
+      },
+      {
+        "name": "gc_meadow_grass_distant",
+        "maxElements": 72000
+      },
+      {
+        "name": "gc_tall_roadside_grass",
+        "maxElements": 48000
+      },
+      {
+        "name": "gc_field_grass",
+        "maxElements": 44000
+      },
+      {
+        "name": "gc_wildflowers",
+        "maxElements": 28000
+      },
+      {
+        "name": "gc_forest_undergrowth",
+        "maxElements": 48000
+      },
+      {
+        "name": "gc_low_scrub",
+        "maxElements": 18000
+      },
+      {
+        "name": "gc_3d_foliage_close",
+        "maxElements": 16000
+      }
+    ],
+    "decal_roads_total": 1733,
+    "decal_roads_over_objects_false": 1725,
+    "buildings_count": 34,
+    "ground_mesh_sample_boxes": {},
+    "groundcover_count": 8
+  },
+  "zfighting_and_materials": {
+    "decal_road_count": 1733,
+    "decal_bias_max": 0.0049999998882413,
+    "decal_bias_min": 0.0015000000130385,
+    "over_objects_sample": [
+      {
+        "bias": 0.0020000000949949,
+        "name": "way274102985",
+        "mat": "road_asphalt_2lane",
+        "pri": 13
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way274102985_mark_1",
+        "mat": "m_line_white_discontinue",
+        "pri": 2
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way274102985_line_left",
+        "mat": "m_line_white",
+        "pri": 1
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way274102985_line_right",
+        "mat": "m_line_white",
+        "pri": 1
+      },
+      {
+        "bias": 0.0020000000949949,
+        "name": "way274102983",
+        "mat": "road_asphalt_2lane",
+        "pri": 15
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way274102983_mark_1",
+        "mat": "m_line_white_discontinue",
+        "pri": 2
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way274102983_line_left",
+        "mat": "m_line_white",
+        "pri": 1
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way274102983_line_right",
+        "mat": "m_line_white",
+        "pri": 1
+      }
+    ],
+    "decal_bias_zero_count": 0
+  },
+  "surface_collision_probes": [
+    {
+      "terrain_z": 101.8948,
+      "x": 7600,
+      "ray1_minus_terrain_m": 0.002,
+      "y": -8178,
+      "ray1_hit_z": 101.8968,
+      "label": "p152_west_approach"
+    },
+    {
+      "ray2_hit_z": 100.3895,
+      "terrain_z": 100.3892,
+      "x": 7944,
+      "ray1_minus_terrain_m": 6.471,
+      "y": -8306,
+      "ray1_hit_z": 106.8602,
+      "double_layer_gap_m": 6.4707,
+      "label": "uvod_bridge_deck"
+    },
+    {
+      "terrain_z": 107.4154,
+      "x": 8348,
+      "ray1_minus_terrain_m": -0.0,
+      "y": -8464.4,
+      "ray1_hit_z": 107.4154,
+      "label": "kokhma_se_junc"
+    },
+    {
+      "terrain_z": 104.785,
+      "x": 8250,
+      "ray1_minus_terrain_m": 0.0006,
+      "y": -8420,
+      "ray1_hit_z": 104.7856,
+      "label": "open_meadow"
+    }
+  ],
+  "navgraph_probes": [
+    {
+      "label": "spawn",
+      "center": [
+        7605.1,
+        -8258.9,
+        104.1
+      ],
+      "node_count": 51,
+      "zero_z_nodes": 0,
+      "min_z": 103.07,
+      "max_z": 107.12,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "uvod_bridge",
+      "center": [
+        7944.0,
+        -8306.0,
+        109.0
+      ],
+      "node_count": 24,
+      "zero_z_nodes": 0,
+      "min_z": 103.27,
+      "max_z": 115.26,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "kokhma_junc",
+      "center": [
+        8348.0,
+        -8464.4,
+        107.5
+      ],
+      "node_count": 50,
+      "zero_z_nodes": 0,
+      "min_z": 102.58,
+      "max_z": 118.98,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    }
+  ],
+  "drive_legs": [
+    {
+      "leg": "p152_eastbound",
+      "reached_target": true,
+      "distance_km": 1.142,
+      "duration_s": 39.69,
+      "samples": 184,
+      "max_speed_kmh": 175.2,
+      "avg_speed_kmh": 103.62,
+      "min_vz": -1.959,
+      "max_vz": 2.868,
+      "p99_abs_vz": 2.718,
+      "min_z_seen": 103.37,
+      "damage_sum": 0
+    },
+    {
+      "leg": "p152_westbound",
+      "reached_target": false,
+      "distance_km": 1.074,
+      "duration_s": 48.41,
+      "samples": 224,
+      "max_speed_kmh": 178.63,
+      "avg_speed_kmh": 79.15,
+      "min_vz": -2.686,
+      "max_vz": 1.658,
+      "p99_abs_vz": 1.994,
+      "min_z_seen": 103.38,
+      "damage_sum": 0
+    }
+  ],
+  "drive_totals": {
+    "legs_count": 2,
+    "total_distance_km": 2.216,
+    "max_speed_kmh": 178.63,
+    "max_damage_sum": 0,
+    "max_abs_vz": 2.868
+  },
+  "perf_summary": {
+    "sample_count": 15,
+    "fps_avg": 143.17,
+    "fps_1pct_low": 111.07,
+    "fps_min_sampled": 104.97,
+    "frametime_avg_ms": 6.98,
+    "frametime_1pct_ms": 9.0,
+    "cpu_ms_avg": 5.96,
+    "gpu_ms_avg": 6.65,
+    "draw_calls_avg": null,
+    "draw_calls_max": null,
+    "polys_avg": null,
+    "polys_max": null,
+    "vram_peak_mib": 4575.0,
+    "vram_avg_mib": 4533.5,
+    "proc_ram_peak_mib": 3957.4,
+    "proc_private_peak_mib": 7076.6,
+    "proc_total_ram_peak_mib": 4979.4,
+    "pass_60fps_target": true
+  },
+  "log_metrics": {
+    "world_ready_s": 24.29904,
+    "load_stages_s": {
+      "engine.loading.stage.Terrain::TerrainBlock": {
+        "count": 1,
+        "seconds": 0.553
+      },
+      "engine.loading.stage.Environment::ScatterSky": {
+        "count": 1,
+        "seconds": 0.05
+      },
+      "engine.loading.stage.Environment::WaterBlock": {
+        "count": 407,
+        "seconds": 0.039
+      },
+      "engine.loading.stage.Environment::GroundCover": {
+        "count": 8,
+        "seconds": 0.089
+      },
+      "engine.loading.stage.Forest::Forest": {
+        "count": 1,
+        "seconds": 0.566
+      },
+      "engine.loading.stage.Meshes::TSStatic": {
+        "count": 642,
+        "seconds": 0.686
+      },
+      "engine.loading.stage.Roads::DecalRoad": {
+        "count": 1733,
+        "seconds": 0.135
+      }
+    },
+    "forest_items_loaded": 45000,
+    "forest_types_loaded": 30,
+    "static_collision_verts": 1154728,
+    "static_collision_tris": 1553104,
+    "static_collision_mb": 63.56,
+    "physics_instances": 49892,
+    "physics_memory_mb": 53.32,
+    "free_ram_at_spawn_gb": 14.594,
+    "total_error_lines": 196,
+    "total_warning_lines": 73,
+    "stock_error_lines": 155,
+    "level_error_lines": 41,
+    "level_error_samples": [
+      "18.91828|E|GELua.jsonDecode| JSON decoding error: JSON error (line 3, col 108): '\". This was handed down to her daughter's son. The daughter has a broken marriage and the son is a fire starter, who was also h' - Expected dictionary separator ':' or '=' instead",
+      "19.09534|E|GELua.jsonDecode| JSON decoding error: JSON error (line 21, col 15): '\":\"vehiclesData.hopper.xt4_A.Description\",' - Expected dictionary separator ':' or '=' instead of: '\"'",
+      "19.09684|E|GELua.jsonDecode| JSON decoding error: JSON error (line 21, col 15): '\":\"vehiclesData.hopper.xt4_A.Description\",' - Expected dictionary separator ':' or '=' instead of: '\"'",
+      "19.09755|E|GELua.jsonDecode| JSON decoding error: JSON error (line 21, col 15): '\":\"vehiclesData.hopper.xt4_A.Description\",' - Expected dictionary separator ':' or '=' instead of: '\"'",
+      "22.35353|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: etk800_lettering_858 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35356|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: etk800_lettering_848 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35379|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: pickup_oilpan_i6_race in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35381|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: pickup_oilpan_i6 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35399|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: usarstate in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35418|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: usmisemi in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35449|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: etk_wheel_10a_19x9_R in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35449|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: etk_wheel_10b_19x9_R in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35470|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_oilpan_color_291_colorabe in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35471|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_oilpan_color_291 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35506|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: pigeon_i3_oilpan in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35507|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: pigeon_i3_oilpan_race in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35523|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: tire_R_175_65_14_uni_2 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35531|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_oilpan_v8_small_race_291 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35532|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_oilpan_v8_small_291 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35533|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_oilpan_v8_small_drysump_291 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35535|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_engine_color_291 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35536|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_engine_color_291_colorable in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35552|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: covello_wheel_05a_14x7_F in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35672|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: tire_F_175_65_14_uni_2 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35745|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: pickup_engine_v8_6.9_ecu_sport in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35749|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: pickup_engine_v8_6.9_ecu_race in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35750|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: pickup_engine_v8_6.9_ecu in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35778|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_oilpan_v8_small_race_alu in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35779|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_oilpan_v8_small_alu in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35780|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_oilpan_v8_small_drysump_alu in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35829|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: tire_R_175_70_13_standard in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35830|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: tire_R_165_70_13_old in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "22.35831|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: tire_R_155_13_standard in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
+      "24.06132|E|engine::SceneContainer::checkBins| Failed to find Sceneobject in SceneOctree:",
+      "24.06134|E|engine::SceneContainer::checkBins|     Octree search worldBox, [DecalRoad - (7431.1353, -7340.032, 126.12745)  (7431.136, -7340.0312, 126.128456)]",
+      "24.06135|E|engine::SceneContainer::checkBins|     Octree fixed",
+      "24.06135|E|engine::SceneContainer::checkBins| Failed to find Sceneobject in render SceneOctree:",
+      "24.06136|E|engine::SceneContainer::checkBins|     Render octree search worldBox, [DecalRoad - (7431.1353, -7340.032, 126.12745)  (7431.136, -7340.0312, 126.128456)]",
+      "24.06136|E|engine::SceneContainer::checkBins|     Render octree fixed",
+      "25.77921|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [road_asphalt_2lane] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'y' by inf m (local axis value inf). w",
+      "25.77925|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [road_asphalt_2lane] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'y' by inf m (local axis value inf). w"
+    ],
+    "level_warning_samples": [],
+    "signal_hits": {
+      "SceneStaticDecalRoadManager": 2,
+      "SceneContainer::checkBins": 6,
+      "Failed to find": 2
+    }
+  },
+  "screenshots_captured": [
+    "ivanovo_golden_sector_regression_view1_p152_kokhma_junc.png",
+    "ivanovo_golden_sector_regression_view2_uvod_bridge.png",
+    "ivanovo_golden_sector_regression_view4_tjunc_closeup.png",
+    "ivanovo_golden_sector_regression_spawn_road.png",
+    "ivanovo_golden_sector_regression_corridor_aerial.png"
+  ]
+}
