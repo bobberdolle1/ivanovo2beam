@@ -53,8 +53,10 @@ from ivanovo2beam.osm.merge import merge_osm_data, osm_bbox_tiles
 from ivanovo2beam.provenance import build_attribution_manifest, write_attribution_files
 from ivanovo2beam.roads.bridges import (
     compute_bridge_deck_profile,
+    detect_twin_bridge_suppressed_sides,
     emit_bridges_materials,
     export_bridge_bundle,
+    snap_bridge_profile_portals,
 )
 from ivanovo2beam.roads.build import (
     _should_generate_markings,
@@ -895,7 +897,7 @@ def build_level(
         fog_density=0.00018,
     )
 
-    bridge_profiles = getattr(build, "bridge_profiles", {}) or {}
+    bridge_profiles = dict(getattr(build, "bridge_profiles", {}) or {})
     ground_roads = [r for r in roads if not (r.bridge and r.osm_id in bridge_profiles)]
     export_stats = add_network_to_scene(
         tree,
@@ -906,6 +908,15 @@ def build_level(
         include_props=False,
     )
     if bridge_profiles:
+        # Snap bridge portals to the final quantized TerrainBlock elevation so
+        # no +/-0.2..0.5 m abutment step remains against ground approach DecalRoads.
+        for bid, (b_pts, deck_z) in list(bridge_profiles.items()):
+            if len(b_pts) >= 2:
+                tz = sample_points_z(np.asarray([b_pts[0, :2], b_pts[-1, :2]], dtype=np.float64), build)
+                bridge_profiles[bid] = (
+                    b_pts,
+                    snap_bridge_profile_portals(b_pts, deck_z, float(tz[0]), float(tz[1])),
+                )
         portal_pts: list[tuple[float, float]] = []
         for b_pts, _ in bridge_profiles.values():
             if len(b_pts) >= 2:
@@ -951,8 +962,9 @@ def build_level(
                         r_solved,
                         level.id,
                         obj_nodes,
-                        is_start_junction=False,
-                        is_end_junction=False,
+                        is_start_junction=(seg_idx == 0),
+                        is_end_junction=(seg_idx == len(b_objs) - 1),
+                        clip_distance_m=1.25,
                         parent_key=base_k,
                         parent="road_network",
                     )
@@ -1011,6 +1023,8 @@ def build_level(
         def _bridge_ground_sampler(x: float, y: float) -> float:
             return float(sample_points_z(np.array([[x, y]], dtype=np.float64), build)[0])
 
+        suppressed_sides = detect_twin_bridge_suppressed_sides(bridge_roads)
+
         for r in bridge_roads:
             try:
                 if r.osm_id in bridge_profiles:
@@ -1020,6 +1034,7 @@ def build_level(
                     gz = sample_surface_z(r, build)
                     deck_z = compute_bridge_deck_profile(r, ground_z=gz, water_network=water_network)
                     r_solved = r
+                sup_l, sup_r = suppressed_sides.get(r.osm_id, (False, False))
                 objs = export_bridge_bundle(
                     r_solved,
                     deck_z,
@@ -1027,6 +1042,8 @@ def build_level(
                     bridges_dir,
                     ground_sampler=_bridge_ground_sampler,
                     parent="bridges",
+                    suppress_left_parapet=sup_l,
+                    suppress_right_parapet=sup_r,
                 )
                 for obj in objs:
                     tree.add_object(("level_objects", "bridges"), obj)

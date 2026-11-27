@@ -63,7 +63,7 @@ GUARDRAIL_STEEL_TEXTURES: dict[str, str] = {
 #: Bridge slab parameters (in metres)
 #: Coupled vertical curve, skirt, and end-lip constants adapted from MapNG
 #: (https://github.com/nikkiluzader/mapng), MIT License.
-SLAB_EXTRA_WIDTH_M = 1.2
+SLAB_EXTRA_WIDTH_M = 1.4
 SLAB_THICKNESS_M = 0.65
 TOP_SKIRT_M = 0.15
 GIRDER_DEPTH_M = 1.0
@@ -637,6 +637,8 @@ def _populate_bridge_geometry(
     *,
     deck_geom: BridgeGeometry | None,
     struct_geom: BridgeGeometry,
+    suppress_left_parapet: bool = False,
+    suppress_right_parapet: bool = False,
 ) -> None:
     """Populate combined or split deck/structure bridge geometry."""
     pts = np.asarray(road.points, dtype=np.float64)
@@ -818,68 +820,72 @@ def _populate_bridge_geometry(
         # Concrete barrier curbs (0..0.42m) with metric UVs
         cz = ch * 0.25
         cw = gw * 0.25
-        l_out_bot0 = (px0 - deck_half * nx0, py0 - deck_half * ny0, z0)
-        l_out_top0 = (px0 - deck_half * nx0, py0 - deck_half * ny0, z0 + ch)
-        l_in_top0 = (px0 - (deck_half - gw) * nx0, py0 - (deck_half - gw) * ny0, z0 + ch)
-        l_in_bot0 = (px0 - (deck_half - gw) * nx0, py0 - (deck_half - gw) * ny0, z0)
+        if not suppress_left_parapet:
+            l_out_bot0 = (px0 - deck_half * nx0, py0 - deck_half * ny0, z0)
+            l_out_top0 = (px0 - deck_half * nx0, py0 - deck_half * ny0, z0 + ch)
+            l_in_top0 = (px0 - (deck_half - gw) * nx0, py0 - (deck_half - gw) * ny0, z0 + ch)
+            l_in_bot0 = (px0 - (deck_half - gw) * nx0, py0 - (deck_half - gw) * ny0, z0)
 
-        l_out_bot1 = (px1 - deck_half * nx1, py1 - deck_half * ny1, z1)
-        l_out_top1 = (px1 - deck_half * nx1, py1 - deck_half * ny1, z1 + ch)
-        l_in_top1 = (px1 - (deck_half - gw) * nx1, py1 - (deck_half - gw) * ny1, z1 + ch)
-        l_in_bot1 = (px1 - (deck_half - gw) * nx1, py1 - (deck_half - gw) * ny1, z1)
+            l_out_bot1 = (px1 - deck_half * nx1, py1 - deck_half * ny1, z1)
+            l_out_top1 = (px1 - deck_half * nx1, py1 - deck_half * ny1, z1 + ch)
+            l_in_top1 = (px1 - (deck_half - gw) * nx1, py1 - (deck_half - gw) * ny1, z1 + ch)
+            l_in_bot1 = (px1 - (deck_half - gw) * nx1, py1 - (deck_half - gw) * ny1, z1)
 
-        struct_geom.add_quad(
-            l_out_top0, l_out_top1, l_in_top1, l_in_top0,
-            _quad_face_normal(l_out_top0, l_out_top1, l_in_top1, (0.0, 0.0, 1.0)),
-            (0.0, s0), (0.0, s1), (cw, s1), (cw, s0),
-            material=BRIDGE_PARAPET_MATERIAL,
-        )
-        struct_geom.add_quad(
-            l_in_top0, l_in_top1, l_in_bot1, l_in_bot0,
-            _quad_face_normal(l_in_top0, l_in_top1, l_in_bot1, (nx0, ny0, 0.0)),
-            (s0, cz), (s1, cz), (s1, 0.0), (s0, 0.0),
-            material=BRIDGE_PARAPET_MATERIAL,
-        )
-        struct_geom.add_quad(
-            l_out_bot0, l_out_bot1, l_out_top1, l_out_top0,
-            _quad_face_normal(l_out_bot0, l_out_bot1, l_out_top1, (-nx0, -ny0, 0.0)),
-            (s0, 0.0), (s1, 0.0), (s1, cz), (s0, cz),
-            material=BRIDGE_PARAPET_MATERIAL,
-        )
+            struct_geom.add_quad(
+                l_out_top0, l_out_top1, l_in_top1, l_in_top0,
+                _quad_face_normal(l_out_top0, l_out_top1, l_in_top1, (0.0, 0.0, 1.0)),
+                (0.0, s0), (0.0, s1), (cw, s1), (cw, s0),
+                material=BRIDGE_PARAPET_MATERIAL,
+            )
+            struct_geom.add_quad(
+                l_in_top0, l_in_top1, l_in_bot1, l_in_bot0,
+                _quad_face_normal(l_in_top0, l_in_top1, l_in_bot1, (nx0, ny0, 0.0)),
+                (s0, cz), (s1, cz), (s1, 0.0), (s0, 0.0),
+                material=BRIDGE_PARAPET_MATERIAL,
+            )
+            struct_geom.add_quad(
+                l_out_bot0, l_out_bot1, l_out_top1, l_out_top0,
+                _quad_face_normal(l_out_bot0, l_out_bot1, l_out_top1, (-nx0, -ny0, 0.0)),
+                (s0, 0.0), (s1, 0.0), (s1, cz), (s0, cz),
+                material=BRIDGE_PARAPET_MATERIAL,
+            )
 
-        r_in_bot0 = (px0 + (deck_half - gw) * nx0, py0 + (deck_half - gw) * ny0, z0)
-        r_in_top0 = (px0 + (deck_half - gw) * nx0, py0 + (deck_half - gw) * ny0, z0 + ch)
-        r_out_top0 = (px0 + deck_half * nx0, py0 + deck_half * ny0, z0 + ch)
-        r_out_bot0 = (px0 + deck_half * nx0, py0 + deck_half * ny0, z0)
+        if not suppress_right_parapet:
+            r_in_bot0 = (px0 + (deck_half - gw) * nx0, py0 + (deck_half - gw) * ny0, z0)
+            r_in_top0 = (px0 + (deck_half - gw) * nx0, py0 + (deck_half - gw) * ny0, z0 + ch)
+            r_out_top0 = (px0 + deck_half * nx0, py0 + deck_half * ny0, z0 + ch)
+            r_out_bot0 = (px0 + deck_half * nx0, py0 + deck_half * ny0, z0)
 
-        r_in_bot1 = (px1 + (deck_half - gw) * nx1, py1 + (deck_half - gw) * ny1, z1)
-        r_in_top1 = (px1 + (deck_half - gw) * nx1, py1 + (deck_half - gw) * ny1, z1 + ch)
-        r_out_top1 = (px1 + deck_half * nx1, py1 + deck_half * ny1, z1 + ch)
-        r_out_bot1 = (px1 + deck_half * nx1, py1 + deck_half * ny1, z1)
+            r_in_bot1 = (px1 + (deck_half - gw) * nx1, py1 + (deck_half - gw) * ny1, z1)
+            r_in_top1 = (px1 + (deck_half - gw) * nx1, py1 + (deck_half - gw) * ny1, z1 + ch)
+            r_out_top1 = (px1 + deck_half * nx1, py1 + deck_half * ny1, z1 + ch)
+            r_out_bot1 = (px1 + deck_half * nx1, py1 + deck_half * ny1, z1)
 
-        struct_geom.add_quad(
-            r_in_top0, r_in_top1, r_out_top1, r_out_top0,
-            _quad_face_normal(r_in_top0, r_in_top1, r_out_top1, (0.0, 0.0, 1.0)),
-            (0.0, s0), (0.0, s1), (cw, s1), (cw, s0),
-            material=BRIDGE_PARAPET_MATERIAL,
-        )
-        struct_geom.add_quad(
-            r_in_bot0, r_in_bot1, r_in_top1, r_in_top0,
-            _quad_face_normal(r_in_bot0, r_in_bot1, r_in_top1, (-nx0, -ny0, 0.0)),
-            (s0, 0.0), (s1, 0.0), (s1, cz), (s0, cz),
-            material=BRIDGE_PARAPET_MATERIAL,
-        )
-        struct_geom.add_quad(
-            r_out_top0, r_out_top1, r_out_bot1, r_out_bot0,
-            _quad_face_normal(r_out_top0, r_out_top1, r_out_bot1, (nx0, ny0, 0.0)),
-            (s0, cz), (s1, cz), (s1, 0.0), (s0, 0.0),
-            material=BRIDGE_PARAPET_MATERIAL,
-        )
+            struct_geom.add_quad(
+                r_in_top0, r_in_top1, r_out_top1, r_out_top0,
+                _quad_face_normal(r_in_top0, r_in_top1, r_out_top1, (0.0, 0.0, 1.0)),
+                (0.0, s0), (0.0, s1), (cw, s1), (cw, s0),
+                material=BRIDGE_PARAPET_MATERIAL,
+            )
+            struct_geom.add_quad(
+                r_in_bot0, r_in_bot1, r_in_top1, r_in_top0,
+                _quad_face_normal(r_in_bot0, r_in_bot1, r_in_top1, (-nx0, -ny0, 0.0)),
+                (s0, 0.0), (s1, 0.0), (s1, cz), (s0, cz),
+                material=BRIDGE_PARAPET_MATERIAL,
+            )
+            struct_geom.add_quad(
+                r_out_top0, r_out_top1, r_out_bot1, r_out_bot0,
+                _quad_face_normal(r_out_top0, r_out_top1, r_out_bot1, (nx0, ny0, 0.0)),
+                (s0, cz), (s1, cz), (s1, 0.0), (s0, 0.0),
+                material=BRIDGE_PARAPET_MATERIAL,
+            )
 
         # Steel top & mid horizontal rails (0.54..0.62m and 0.75..0.85m)
         r_in_d = deck_half - gw * 0.65
         r_out_d = deck_half - gw * 0.25
         for side_sign in (-1.0, 1.0):
+            if (side_sign < 0.0 and suppress_left_parapet) or (side_sign > 0.0 and suppress_right_parapet):
+                continue
             for rail_z0, rail_z1 in ((0.54, 0.62), (0.75, gh)):
                 p0_o_b = (px0 + side_sign * r_out_d * nx0, py0 + side_sign * r_out_d * ny0, z0 + rail_z0)
                 p0_i_b = (px0 + side_sign * r_in_d * nx0, py0 + side_sign * r_in_d * ny0, z0 + rail_z0)
@@ -895,7 +901,7 @@ def _populate_bridge_geometry(
                     struct_geom.add_box(p0_i_b, p1_i_b, p1_o_b, p0_o_b, p0_i_t, p1_i_t, p1_o_t, p0_o_t, material=BRIDGE_STEEL_MATERIAL, uv_scale=0.5)
 
     # Vertical steel guardrail posts spaced every POST_SPACING_M
-    if total_len > 0.5:
+    if total_len > 0.5 and (not suppress_left_parapet or not suppress_right_parapet):
         n_posts = max(2, round(total_len / POST_SPACING_M) + 1)
         post_dists = np.linspace(0.25, max(0.25, total_len - 0.25), n_posts)
         post_c_off = deck_half - gw * 0.45
@@ -912,6 +918,8 @@ def _populate_bridge_geometry(
             tx, ty = float(seg_tangents[pidx, 0]), float(seg_tangents[pidx, 1])
             nx, ny = float(normals[pidx, 0]), float(normals[pidx, 1])
             for side_sign in (-1.0, 1.0):
+                if (side_sign < 0.0 and suppress_left_parapet) or (side_sign > 0.0 and suppress_right_parapet):
+                    continue
                 cx_p = px + side_sign * post_c_off * nx
                 cy_p = py + side_sign * post_c_off * ny
                 zb = pz + ch - 0.02
@@ -929,41 +937,45 @@ def _populate_bridge_geometry(
     # Curb end caps
     nx0, ny0 = float(normals[0, 0]), float(normals[0, 1])
     px0, py0, z0 = float(pts[0, 0]), float(pts[0, 1]), float(deck_z[0])
-    struct_geom.add_quad(
-        (px0 - deck_half * nx0, py0 - deck_half * ny0, z0 + ch),
-        (px0 - (deck_half - gw) * nx0, py0 - (deck_half - gw) * ny0, z0 + ch),
-        (px0 - (deck_half - gw) * nx0, py0 - (deck_half - gw) * ny0, z0),
-        (px0 - deck_half * nx0, py0 - deck_half * ny0, z0),
-        (-float(t0[0]), -float(t0[1]), 0.0),
-        material=BRIDGE_PARAPET_MATERIAL,
-    )
-    struct_geom.add_quad(
-        (px0 + (deck_half - gw) * nx0, py0 + (deck_half - gw) * ny0, z0 + ch),
-        (px0 + deck_half * nx0, py0 + deck_half * ny0, z0 + ch),
-        (px0 + deck_half * nx0, py0 + deck_half * ny0, z0),
-        (px0 + (deck_half - gw) * nx0, py0 + (deck_half - gw) * ny0, z0),
-        (-float(t0[0]), -float(t0[1]), 0.0),
-        material=BRIDGE_PARAPET_MATERIAL,
-    )
+    if not suppress_left_parapet:
+        struct_geom.add_quad(
+            (px0 - deck_half * nx0, py0 - deck_half * ny0, z0 + ch),
+            (px0 - (deck_half - gw) * nx0, py0 - (deck_half - gw) * ny0, z0 + ch),
+            (px0 - (deck_half - gw) * nx0, py0 - (deck_half - gw) * ny0, z0),
+            (px0 - deck_half * nx0, py0 - deck_half * ny0, z0),
+            (-float(t0[0]), -float(t0[1]), 0.0),
+            material=BRIDGE_PARAPET_MATERIAL,
+        )
+    if not suppress_right_parapet:
+        struct_geom.add_quad(
+            (px0 + (deck_half - gw) * nx0, py0 + (deck_half - gw) * ny0, z0 + ch),
+            (px0 + deck_half * nx0, py0 + deck_half * ny0, z0 + ch),
+            (px0 + deck_half * nx0, py0 + deck_half * ny0, z0),
+            (px0 + (deck_half - gw) * nx0, py0 + (deck_half - gw) * ny0, z0),
+            (-float(t0[0]), -float(t0[1]), 0.0),
+            material=BRIDGE_PARAPET_MATERIAL,
+        )
 
     nx1, ny1 = float(normals[-1, 0]), float(normals[-1, 1])
     px1, py1, z1 = float(pts[-1, 0]), float(pts[-1, 1]), float(deck_z[-1])
-    struct_geom.add_quad(
-        (px1 - deck_half * nx1, py1 - deck_half * ny1, z1 + ch),
-        (px1 - deck_half * nx1, py1 - deck_half * ny1, z1),
-        (px1 - (deck_half - gw) * nx1, py1 - (deck_half - gw) * ny1, z1),
-        (px1 - (deck_half - gw) * nx1, py1 - (deck_half - gw) * ny1, z1 + ch),
-        (float(t_end[0]), float(t_end[1]), 0.0),
-        material=BRIDGE_PARAPET_MATERIAL,
-    )
-    struct_geom.add_quad(
-        (px1 + (deck_half - gw) * nx1, py1 + (deck_half - gw) * ny1, z1 + ch),
-        (px1 + (deck_half - gw) * nx1, py1 + (deck_half - gw) * ny1, z1),
-        (px1 + deck_half * nx1, py1 + deck_half * ny1, z1),
-        (px1 + deck_half * nx1, py1 + deck_half * ny1, z1 + ch),
-        (float(t_end[0]), float(t_end[1]), 0.0),
-        material=BRIDGE_PARAPET_MATERIAL,
-    )
+    if not suppress_left_parapet:
+        struct_geom.add_quad(
+            (px1 - deck_half * nx1, py1 - deck_half * ny1, z1 + ch),
+            (px1 - deck_half * nx1, py1 - deck_half * ny1, z1),
+            (px1 - (deck_half - gw) * nx1, py1 - (deck_half - gw) * ny1, z1),
+            (px1 - (deck_half - gw) * nx1, py1 - (deck_half - gw) * ny1, z1 + ch),
+            (float(t_end[0]), float(t_end[1]), 0.0),
+            material=BRIDGE_PARAPET_MATERIAL,
+        )
+    if not suppress_right_parapet:
+        struct_geom.add_quad(
+            (px1 + (deck_half - gw) * nx1, py1 + (deck_half - gw) * ny1, z1 + ch),
+            (px1 + (deck_half - gw) * nx1, py1 + (deck_half - gw) * ny1, z1),
+            (px1 + deck_half * nx1, py1 + deck_half * ny1, z1),
+            (px1 + deck_half * nx1, py1 + deck_half * ny1, z1 + ch),
+            (float(t_end[0]), float(t_end[1]), 0.0),
+            material=BRIDGE_PARAPET_MATERIAL,
+        )
 
     # 3. Abutments + smooth 1.6m portal transition wedges (4mm under deck at portal, sloping down to -6cm at 1.6m)
     def add_abutment(
@@ -1074,13 +1086,23 @@ def build_bridge_geometry(
     ground_sampler: Callable[[float, float], float] | None = None,
     *,
     localize: bool = False,
+    suppress_left_parapet: bool = False,
+    suppress_right_parapet: bool = False,
 ) -> BridgeGeometry:
     """Generate complete 3D procedural bridge geometry.
 
     Includes deck slab manifold, guardrails, abutments, end lips, and piers.
     """
     geom = BridgeGeometry()
-    _populate_bridge_geometry(road, deck_z, ground_sampler, deck_geom=None, struct_geom=geom)
+    _populate_bridge_geometry(
+        road,
+        deck_z,
+        ground_sampler,
+        deck_geom=None,
+        struct_geom=geom,
+        suppress_left_parapet=suppress_left_parapet,
+        suppress_right_parapet=suppress_right_parapet,
+    )
     if localize and geom.positions:
         ox, oy, oz = geom.center
         geom.positions = [(px - ox, py - oy, pz - oz) for px, py, pz in geom.positions]
@@ -1094,6 +1116,8 @@ def build_bridge_split_geometry(
     ground_sampler: Callable[[float, float], float] | None = None,
     *,
     localize: bool = True,
+    suppress_left_parapet: bool = False,
+    suppress_right_parapet: bool = False,
 ) -> tuple[BridgeGeometry, BridgeGeometry]:
     """Build split ``(deck_geom, structure_geom)`` sharing the same centroid origin.
 
@@ -1103,7 +1127,15 @@ def build_bridge_split_geometry(
     """
     deck_geom = BridgeGeometry()
     struct_geom = BridgeGeometry()
-    _populate_bridge_geometry(road, deck_z, ground_sampler, deck_geom=deck_geom, struct_geom=struct_geom)
+    _populate_bridge_geometry(
+        road,
+        deck_z,
+        ground_sampler,
+        deck_geom=deck_geom,
+        struct_geom=struct_geom,
+        suppress_left_parapet=suppress_left_parapet,
+        suppress_right_parapet=suppress_right_parapet,
+    )
     if localize and struct_geom.positions:
         ox, oy, oz = struct_geom.center
         deck_geom.positions = [(px - ox, py - oy, pz - oz) for px, py, pz in deck_geom.positions]
@@ -1171,11 +1203,51 @@ def export_bridge_dae(
         dz = float(origin[2]) - geom.origin[2]
 
     if dx == 0.0 and dy == 0.0 and dz == 0.0:
-        pos_flat = [coord for p in geom.positions for coord in p]
+        shifted_pos = geom.positions
     else:
-        pos_flat = [coord for p in geom.positions for coord in (p[0] - dx, p[1] - dy, p[2] - dz)]
-    norm_flat = [coord for n in geom.normals for coord in n]
-    uv_flat = [coord for uv in geom.uvs for coord in uv]
+        shifted_pos = [(p[0] - dx, p[1] - dy, p[2] - dz) for p in geom.positions]
+
+    # Weld shared rounded vertices/normals/UVs so adjacent triangles share identical
+    # edge indices with zero 0.1 mm Collada seam cracks under overObjects DecalRoad projection.
+    pos_map: dict[tuple[float, float, float], int] = {}
+    unique_pos: list[tuple[float, float, float]] = []
+    pos_remap: list[int] = []
+    for p in shifted_pos:
+        key = (round(float(p[0]), 4), round(float(p[1]), 4), round(float(p[2]), 4))
+        idx = pos_map.get(key)
+        if idx is None:
+            idx = len(unique_pos)
+            pos_map[key] = idx
+            unique_pos.append(key)
+        pos_remap.append(idx)
+
+    norm_map: dict[tuple[float, float, float], int] = {}
+    unique_norm: list[tuple[float, float, float]] = []
+    norm_remap: list[int] = []
+    for n in geom.normals:
+        key = (round(float(n[0]), 4), round(float(n[1]), 4), round(float(n[2]), 4))
+        idx = norm_map.get(key)
+        if idx is None:
+            idx = len(unique_norm)
+            norm_map[key] = idx
+            unique_norm.append(key)
+        norm_remap.append(idx)
+
+    uv_map: dict[tuple[float, float], int] = {}
+    unique_uv: list[tuple[float, float]] = []
+    uv_remap: list[int] = []
+    for uv in geom.uvs:
+        key = (round(float(uv[0]), 4), round(float(uv[1]), 4))
+        idx = uv_map.get(key)
+        if idx is None:
+            idx = len(unique_uv)
+            uv_map[key] = idx
+            unique_uv.append(key)
+        uv_remap.append(idx)
+
+    pos_flat = [coord for p in unique_pos for coord in p]
+    norm_flat = [coord for n in unique_norm for coord in n]
+    uv_flat = [coord for uv in unique_uv for coord in uv]
 
     pos_str = _format_floats(pos_flat)
     norm_str = _format_floats(norm_flat)
@@ -1187,7 +1259,9 @@ def export_bridge_dae(
 
     grouped: dict[str, list[str]] = {}
     for tri, mat in zip(geom.triangles, tri_mats, strict=True):
-        grouped.setdefault(mat, []).extend(f"{vi} {ni} {uvi}" for vi, ni, uvi in tri)
+        grouped.setdefault(mat, []).extend(
+            f"{pos_remap[vi]} {norm_remap[ni]} {uv_remap[uvi]}" for vi, ni, uvi in tri
+        )
 
     ordered_mats = [BRIDGE_DECAL_MATERIAL] if BRIDGE_DECAL_MATERIAL in grouped else []
     for mat in grouped:
@@ -1262,7 +1336,7 @@ def export_bridge_dae(
         <source id="{safe_name}-mesh-positions">
           <float_array id="{safe_name}-mesh-positions-array" count="{len(pos_flat)}">{pos_str}</float_array>
           <technique_common>
-            <accessor source="#{safe_name}-mesh-positions-array" count="{len(geom.positions)}" stride="3">
+            <accessor source="#{safe_name}-mesh-positions-array" count="{len(unique_pos)}" stride="3">
               <param name="X" type="float"/>
               <param name="Y" type="float"/>
               <param name="Z" type="float"/>
@@ -1272,7 +1346,7 @@ def export_bridge_dae(
         <source id="{safe_name}-mesh-normals">
           <float_array id="{safe_name}-mesh-normals-array" count="{len(norm_flat)}">{norm_str}</float_array>
           <technique_common>
-            <accessor source="#{safe_name}-mesh-normals-array" count="{len(geom.normals)}" stride="3">
+            <accessor source="#{safe_name}-mesh-normals-array" count="{len(unique_norm)}" stride="3">
               <param name="X" type="float"/>
               <param name="Y" type="float"/>
               <param name="Z" type="float"/>
@@ -1282,7 +1356,7 @@ def export_bridge_dae(
         <source id="{safe_name}-mesh-map-0">
           <float_array id="{safe_name}-mesh-map-0-array" count="{len(uv_flat)}">{uv_str}</float_array>
           <technique_common>
-            <accessor source="#{safe_name}-mesh-map-0-array" count="{len(geom.uvs)}" stride="2">
+            <accessor source="#{safe_name}-mesh-map-0-array" count="{len(unique_uv)}" stride="2">
               <param name="S" type="float"/>
               <param name="T" type="float"/>
             </accessor>
@@ -1448,6 +1522,8 @@ def export_bridge_bundle(
     *,
     ground_sampler: Callable[[float, float], float] | None = None,
     parent: str = "bridges",
+    suppress_left_parapet: bool = False,
+    suppress_right_parapet: bool = False,
 ) -> list[dict[str, Any]]:
     """Export split ``_deck`` and structural bridge DAEs + TSStatic scene objects."""
     deck_geom, struct_geom = build_bridge_split_geometry(
@@ -1455,6 +1531,8 @@ def export_bridge_bundle(
         deck_z,
         ground_sampler=ground_sampler,
         localize=True,
+        suppress_left_parapet=suppress_left_parapet,
+        suppress_right_parapet=suppress_right_parapet,
     )
     base_name = f"bridge_way{road.osm_id}"
     export_bridge_dae(bridges_dir / f"{base_name}_deck.dae", deck_geom, f"{base_name}_deck")
@@ -1463,6 +1541,128 @@ def export_bridge_bundle(
         build_bridge_scene_object(road, level_id, position=deck_geom.origin, parent=parent, part="deck"),
         build_bridge_scene_object(road, level_id, position=struct_geom.origin, parent=parent, part="structure"),
     ]
+
+
+def detect_twin_bridge_suppressed_sides(bridge_roads: Sequence[Road]) -> dict[int, tuple[bool, bool]]:
+    """Detect parallel/overlapping twin bridges and mark interior sides for parapet suppression.
+
+    Dual-carriageway bridges separated laterally by less than the sum of their
+    deck half-widths would otherwise place concrete curbs and steel guardrails
+    inside the neighboring deck's traffic lanes.
+    """
+    suppressed: dict[int, tuple[bool, bool]] = {}
+    items = [r for r in bridge_roads if getattr(r, "bridge", False) and r.points.shape[0] >= 2]
+    if len(items) < 2:
+        return suppressed
+
+    for r in items:
+        pts = r.points
+        diffs = np.diff(pts, axis=0)
+        lens = np.hypot(diffs[:, 0], diffs[:, 1])
+        cum = np.concatenate(([0.0], np.cumsum(lens)))
+        total = float(cum[-1])
+        if total < 1.0:
+            continue
+        mid_d = 0.5 * total
+        idx = max(0, min(int(np.searchsorted(cum, mid_d, side="right") - 1), len(lens) - 1))
+        slen = float(lens[idx])
+        t = 0.0 if slen <= 1e-6 else (mid_d - float(cum[idx])) / slen
+        mx = float(pts[idx, 0] + t * (pts[idx + 1, 0] - pts[idx, 0]))
+        my = float(pts[idx, 1] + t * (pts[idx + 1, 1] - pts[idx, 1]))
+        tx = float(diffs[idx, 0]) / max(1e-6, slen)
+        ty = float(diffs[idx, 1]) / max(1e-6, slen)
+        nx, ny = -ty, tx
+        r_deck_half = 0.5 * (float(r.width_m) + SLAB_EXTRA_WIDTH_M)
+
+        sup_l = False
+        sup_r = False
+        for other in items:
+            if other.osm_id == r.osm_id:
+                continue
+            o_pts = other.points
+            o_half = 0.5 * (float(other.width_m) + SLAB_EXTRA_WIDTH_M)
+            margin = o_half + r_deck_half + 1.0
+            if (
+                mx < float(o_pts[:, 0].min()) - margin
+                or mx > float(o_pts[:, 0].max()) + margin
+                or my < float(o_pts[:, 1].min()) - margin
+                or my > float(o_pts[:, 1].max()) + margin
+            ):
+                continue
+            p0 = o_pts[:-1]
+            p1 = o_pts[1:]
+            seg = p1 - p0
+            l2 = seg[:, 0] ** 2 + seg[:, 1] ** 2
+            safe_l2 = np.where(l2 > 1e-9, l2, 1.0)
+            proj_t = np.clip(((mx - p0[:, 0]) * seg[:, 0] + (my - p0[:, 1]) * seg[:, 1]) / safe_l2, 0.0, 1.0)
+            cx = p0[:, 0] + proj_t * seg[:, 0]
+            cy = p0[:, 1] + proj_t * seg[:, 1]
+            d2 = (cx - mx) ** 2 + (cy - my) ** 2
+            best_i = int(np.argmin(d2))
+            center_dist = math.sqrt(float(d2[best_i]))
+            if center_dist > r_deck_half + o_half + 0.35:
+                continue
+            o_len = math.sqrt(float(l2[best_i]))
+            if o_len <= 1e-6:
+                continue
+            otx = float(seg[best_i, 0]) / o_len
+            oty = float(seg[best_i, 1]) / o_len
+            if abs(tx * otx + ty * oty) < 0.7:
+                continue
+            # Side offset of other bridge center relative to r's left normal (+n = right? wait normals in _populate are [-ty, tx], so +n is LEFT!)
+            side_proj = (float(cx[best_i]) - mx) * nx + (float(cy[best_i]) - my) * ny
+            if side_proj < 0.0:
+                sup_l = True
+            elif side_proj > 0.0:
+                sup_r = True
+        if sup_l or sup_r:
+            suppressed[r.osm_id] = (sup_l, sup_r)
+    return suppressed
+
+
+def snap_bridge_profile_portals(
+    pts: np.ndarray,
+    deck_z: np.ndarray,
+    tz0: float | None,
+    tz1: float | None,
+    *,
+    max_snap_m: float = 0.80,
+    blend_len_m: float = 20.0,
+) -> np.ndarray:
+    """Cosine-blend bridge portals onto final quantized TerrainBlock elevations."""
+    z_out = np.asarray(deck_z, dtype=np.float64).copy()
+    if pts.shape[0] < 2 or z_out.shape[0] != pts.shape[0]:
+        return z_out
+    diffs = np.diff(pts[:, :2], axis=0)
+    cum = np.concatenate(([0.0], np.cumsum(np.hypot(diffs[:, 0], diffs[:, 1]))))
+    total = float(cum[-1])
+    if total <= 1e-3:
+        return z_out
+    eff_blend = min(float(blend_len_m), total * 0.45)
+    if eff_blend <= 1e-3:
+        return z_out
+
+    if tz0 is not None and math.isfinite(float(tz0)):
+        dz0 = float(tz0) - float(z_out[0])
+        if abs(dz0) <= max_snap_m:
+            for i in range(z_out.size):
+                s = float(cum[i])
+                if s >= eff_blend:
+                    break
+                w = 0.5 * (1.0 + math.cos(math.pi * s / eff_blend))
+                z_out[i] += dz0 * w
+            z_out[0] = float(tz0)
+    if tz1 is not None and math.isfinite(float(tz1)):
+        dz1 = float(tz1) - float(z_out[-1])
+        if abs(dz1) <= max_snap_m:
+            for i in range(z_out.size - 1, -1, -1):
+                s = total - float(cum[i])
+                if s >= eff_blend:
+                    break
+                w = 0.5 * (1.0 + math.cos(math.pi * s / eff_blend))
+                z_out[i] += dz1 * w
+            z_out[-1] = float(tz1)
+    return z_out
 
 
 def create_bridgehead_ramps(

@@ -279,6 +279,30 @@ def _collapse_close_nodes(pts: np.ndarray, min_spacing_m: float) -> np.ndarray:
     return np.asarray(kept, dtype=np.float64)
 
 
+def _tame_tight_bend_nodes(pts: np.ndarray, half_width_m: float) -> np.ndarray:
+    """Thin dense micro-vertices around cul-de-sacs whose radius < ribbon half-width."""
+    if pts.shape[0] <= 3 or half_width_m <= 1.5:
+        return pts
+    min_bend_chord = max(3.0, min(6.0, 0.85 * half_width_m))
+    kept: list[np.ndarray] = [pts[0]]
+    for i in range(1, pts.shape[0] - 1):
+        prev = kept[-1]
+        curr = pts[i]
+        nxt = pts[i + 1]
+        dx1, dy1 = float(curr[0] - prev[0]), float(curr[1] - prev[1])
+        dx2, dy2 = float(nxt[0] - curr[0]), float(nxt[1] - curr[1])
+        l1 = math.hypot(dx1, dy1)
+        l2 = math.hypot(dx2, dy2)
+        if l1 < min_bend_chord or l2 < min_bend_chord:
+            if l1 > 1e-6 and l2 > 1e-6:
+                dot = (dx1 * dx2 + dy1 * dy2) / (l1 * l2)
+                if dot < 0.96:
+                    continue
+        kept.append(curr)
+    kept.append(pts[-1])
+    return np.asarray(kept, dtype=np.float64)
+
+
 def _remove_spike_nodes(pts: np.ndarray, reversal_dot: float = SPIKE_REVERSAL_DOT) -> np.ndarray:
     """Drop interior hairpin reversal spikes that break BeamNG's ``improvedSpline``."""
     if pts.shape[0] <= 2:
@@ -695,6 +719,8 @@ def road_to_decal_object(
         min_spacing_m=0.5 if road.bridge else MIN_ROAD_NODE_SPACING_M,
         reversal_dot=SPIKE_REVERSAL_DOT,
     )
+    if not road.bridge:
+        points = _tame_tight_bend_nodes(points, road.half_width_m)
     arc_len = _polyline_arc_length_xy(points)
     if points.shape[0] < 2 or arc_len < 0.4:
         return None
@@ -1300,7 +1326,8 @@ def generate_lane_markings(
 
     emit_edges = (road.highway in _MAJOR_MARKING_HIGHWAYS) if include_edge_lines is None else include_edge_lines
     if emit_edges and road.width_m >= (4.5 if road.oneway else 6.0):
-        edge_offset = max(0.5, road.half_width_m - _EDGE_LINE_INSET_M)
+        edge_inset = max(_EDGE_LINE_INSET_M, 0.45) if road.bridge else _EDGE_LINE_INSET_M
+        edge_offset = max(0.5, road.half_width_m - edge_inset)
         line_specs.append((f"{base_key}_line_left", -edge_offset, "m_line_white", EDGE_LINE_RENDER_PRIORITY))
         line_specs.append((f"{base_key}_line_right", edge_offset, "m_line_white", EDGE_LINE_RENDER_PRIORITY))
 

@@ -2389,6 +2389,19 @@ def build_terrain(
                         matched_far_z = float(np.interp(tot_c - ramp_len_m, cum_c, c.surface_z))
             return matched_far_z
 
+        def _sibling_bridge_portal_z(wx: float, wy: float, own_id: int) -> float | None:
+            best_d = 15.0
+            best_z: float | None = None
+            for ob_id, (ob_pts, ob_z) in bridge_profiles.items():
+                if ob_id == own_id or len(ob_pts) < 2:
+                    continue
+                for end_i in (0, -1):
+                    d = math.hypot(float(ob_pts[end_i, 0]) - wx, float(ob_pts[end_i, 1]) - wy)
+                    if d < best_d:
+                        best_d = d
+                        best_z = float(ob_z[end_i])
+            return best_z
+
         for br in bridge_roads:
             if not getattr(br, "bridge", False) or br.points.shape[0] < 2:
                 continue
@@ -2396,6 +2409,12 @@ def build_terrain(
             k1 = (round(float(br.points[-1, 0]) * 2.0), round(float(br.points[-1, 1]) * 2.0))
             ez0 = ground_end_z[k0][0] if k0 in ground_end_z else _fallback_surface_z(float(br.points[0, 0]), float(br.points[0, 1]))
             ez1 = ground_end_z[k1][0] if k1 in ground_end_z else _fallback_surface_z(float(br.points[-1, 0]), float(br.points[-1, 1]))
+            sib0 = _sibling_bridge_portal_z(float(br.points[0, 0]), float(br.points[0, 1]), br.osm_id)
+            sib1 = _sibling_bridge_portal_z(float(br.points[-1, 0]), float(br.points[-1, 1]), br.osm_id)
+            if sib0 is not None and (ez0 is None or abs(sib0 - ez0) <= 1.0):
+                ez0 = sib0
+            if sib1 is not None and (ez1 is None or abs(sib1 - ez1) <= 1.0):
+                ez1 = sib1
             b_pts, b_z = solve_coupled_bridge_profile(
                 br,
                 ground_sampler=_dem_world,

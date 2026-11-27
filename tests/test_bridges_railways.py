@@ -832,3 +832,68 @@ class TestWindingAndEdgeCases:
             assert (tmp_path / rel).is_file()
         assert (tmp_path / "art" / "shapes" / "railways" / "main.materials.json").is_file()
 
+
+class TestTwinBridgeAndPortalSnap:
+    def test_detect_twin_bridge_suppressed_sides_and_welded_dae(self, tmp_path: Path) -> None:
+        from ivanovo2beam.roads.bridges import (
+            detect_twin_bridge_suppressed_sides,
+            export_bridge_bundle,
+            snap_bridge_profile_portals,
+        )
+
+        # Twin parallel 10m bridges separated by only 5.2m (< deck_half_a + deck_half_b)
+        b_south = Road(
+            osm_id=83944496,
+            highway="primary",
+            points=np.array([[0.0, 0.0], [30.0, 0.0], [60.0, 0.0]]),
+            width_m=10.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=True,
+            bridge=True,
+            tunnel=False,
+            layer=1,
+            name="SouthBridge",
+            maxspeed_kph=60.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        b_north = Road(
+            osm_id=1008641205,
+            highway="primary",
+            points=np.array([[60.0, 5.2], [30.0, 5.2], [0.0, 5.2]]),
+            width_m=10.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=True,
+            bridge=True,
+            tunnel=False,
+            layer=1,
+            name="NorthBridge",
+            maxspeed_kph=60.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        sup = detect_twin_bridge_suppressed_sides([b_south, b_north])
+        # b_south (+X): north (+Y) is LEFT (+normal) -> sup_right (+normal), wait +normal is [-ty,tx]=(0,1), wait in bridges.py +normal is r_ (right) and -normal is l_!
+        assert sup[83944496] == (False, True)
+        assert sup[1008641205] == (False, True)
+
+        deck_z = np.array([108.9, 110.0, 108.9])
+        snapped = snap_bridge_profile_portals(b_south.points, deck_z, 109.1, 108.8)
+        assert float(snapped[0]) == pytest.approx(109.1)
+        assert float(snapped[-1]) == pytest.approx(108.8)
+
+        # Welded DAE should share vertices (far fewer unique positions than 3*tri_count)
+        export_bridge_bundle(b_south, snapped, "test_lvl", tmp_path, suppress_left_parapet=False, suppress_right_parapet=True)
+        ns = {"c": "http://www.collada.org/2005/11/COLLADASchema"}
+        root = ET.parse(tmp_path / "bridge_way83944496_deck.dae").getroot()
+        pos_count = int(root.find(".//c:source[@id='bridge_way83944496_deck-mesh-positions']//c:accessor", ns).attrib["count"])
+        tri_count = sum(int(t.attrib["count"]) for t in root.findall(".//c:triangles", ns))
+        assert pos_count < tri_count * 3
+
+

@@ -1450,4 +1450,26 @@ class TestGoldenSectorRoadOverhaul:
             assert obj["endTangent"] == 0
             assert all(n[2] == pytest.approx(110.5) for n in ns)
 
+    def test_tight_loop_decal_road_taming(self) -> None:
+        # Simulate way977895558-style cul-de-sac P-loop with dense 1m bend vertices on a 7m road
+        pts = np.array(
+            [
+                [0.0, 0.0],
+                [12.0, 10.0],
+                [13.0, 10.6],
+                [14.5, 11.1],
+                [15.6, 11.3],
+                [16.5, 11.2],
+                [17.4, 10.8],
+                [18.3, 10.1],
+                [35.0, -10.0],
+            ]
+        )
+        loop_road = self._road(977895558, pts, highway="residential", lanes=2, width_m=7.0, oneway=False)
+        objs = road_to_decal_objects(loop_road, "test_level", ground_z=np.full(len(pts), 120.0))
+        assert len(objs) == 1
+        assert len(objs[0]["nodes"]) < len(pts)
+        assert len(objs[0]["nodes"]) >= 3
+
+
 
