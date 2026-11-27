@@ -1,10 +1,10 @@
 {
-  "timestamp_utc": "2026-11-27T07:34:36.280280+00:00",
+  "timestamp_utc": "2026-11-27T12:09:36.944348+00:00",
   "level_id": "ivanovo_golden_sector",
   "mode": "regression",
   "vehicle": "etk800",
   "cold_cache": true,
-  "wall_load_to_ready_s": 35.8,
+  "wall_load_to_ready_s": 35.81,
   "fps_limit_reason": "{\"backgroundCap\":240,\"backgroundActive\":false,\"fpsCap\":0,\"windowFocused\":false,\"vr\":false,\"foregroundCap\":60,\"foregroundActive\":false,\"vsync\":false}",
   "settings": {
     "settings_path": "<BEAMNG_USER_DIR>\\settings\\settings.json",
@@ -38,23 +38,23 @@
   },
   "nvidia_smi_baseline": {
     "gpu_name": "NVIDIA GeForce RTX 3080",
-    "vram_used_mib": 1863.0,
+    "vram_used_mib": 1801.0,
     "vram_total_mib": 10240.0,
-    "gpu_util_pct": 6.0,
-    "gpu_clock_mhz": 390.0
+    "gpu_util_pct": 10.0,
+    "gpu_clock_mhz": 330.0
   },
   "static_budget": {
     "level_id": "ivanovo_golden_sector",
     "level_dir": "<REPO_ROOT>\\build\\levels\\ivanovo_golden_sector",
     "zip_path": "<REPO_ROOT>\\build\\ivanovo_golden_sector.zip",
-    "zip_bytes": 37644336,
-    "zip_mib": 35.9,
+    "zip_bytes": 37623296,
+    "zip_mib": 35.88,
     "ter_bytes": 50331771,
     "ter_mib": 48.0,
     "terrain_grid_size": 4096,
     "terrain_square_size_m": 1.0,
     "decal_roads": 979,
-    "decal_nodes": 13994,
+    "decal_nodes": 13827,
     "mesh_roads": 0,
     "forest_items": 45000,
     "forest_types": 30,
@@ -62,7 +62,7 @@
     "rivers": 9,
     "ts_statics": 310,
     "dae_files": 34,
-    "dae_bytes": 4493315
+    "dae_bytes": 3684252
   },
   "extended_static": {
     "terrain_blocks": 1,
@@ -76,7 +76,7 @@
     "spawn_pos": [
       7605.0639648438,
       -8258.87109375,
-      104.09824371338
+      104.09822845459
     ],
     "decal_roads_missing_material": 0,
     "road_props_count": 283,
@@ -191,8 +191,8 @@
       "x": 7944,
       "ray1_minus_terrain_m": 6.471,
       "y": -8306,
-      "ray1_hit_z": 106.8602,
-      "double_layer_gap_m": 6.4707,
+      "ray1_hit_z": 106.8601,
+      "double_layer_gap_m": 6.4706,
       "label": "uvod_bridge_deck"
     },
     {
@@ -241,10 +241,10 @@
         -8306.0,
         109.0
       ],
-      "node_count": 24,
+      "node_count": 26,
       "zero_z_nodes": 0,
       "min_z": 103.27,
-      "max_z": 115.26,
+      "max_z": 115.93,
       "raw_keys": [
         "closestRoad",
         "nodeCount",
@@ -290,16 +290,16 @@
     {
       "leg": "p152_eastbound",
       "reached_target": false,
-      "distance_km": 0.977,
-      "duration_s": 50.07,
-      "samples": 237,
-      "max_speed_kmh": 95.6,
-      "avg_speed_kmh": 71.03,
-      "min_vz": -1.14,
-      "max_vz": 1.615,
-      "p99_abs_vz": 1.454,
+      "distance_km": 0.981,
+      "duration_s": 50.28,
+      "samples": 224,
+      "max_speed_kmh": 95.5,
+      "avg_speed_kmh": 70.02,
+      "min_vz": -1.15,
+      "max_vz": 1.61,
+      "p99_abs_vz": 1.371,
       "peak_vz_pos": [
-        7883.4,
+        7883.1,
         -8303.2,
         105.5
       ],
@@ -310,18 +310,18 @@
     {
       "leg": "p152_westbound",
       "reached_target": false,
-      "distance_km": 1.011,
-      "duration_s": 50.16,
-      "samples": 238,
-      "max_speed_kmh": 95.47,
-      "avg_speed_kmh": 72.74,
-      "min_vz": -1.589,
-      "max_vz": 1.113,
-      "p99_abs_vz": 1.455,
+      "distance_km": 1.005,
+      "duration_s": 50.22,
+      "samples": 231,
+      "max_speed_kmh": 95.49,
+      "avg_speed_kmh": 72.67,
+      "min_vz": -1.61,
+      "max_vz": 1.103,
+      "p99_abs_vz": 1.46,
       "peak_vz_pos": [
-        7883.8,
-        -8302.7,
-        105.6
+        7878.7,
+        -8302.3,
+        105.3
       ],
       "min_z_seen": 103.37,
       "damage_sum": 0,
@@ -330,48 +330,48 @@
   ],
   "drive_totals": {
     "legs_count": 2,
-    "total_distance_km": 1.988,
-    "max_speed_kmh": 95.6,
+    "total_distance_km": 1.986,
+    "max_speed_kmh": 95.5,
     "max_damage_sum": 0,
-    "max_abs_vz": 1.615
+    "max_abs_vz": 1.61
   },
   "perf_summary": {
     "sample_count": 25,
-    "fps_avg": 137.45,
-    "fps_1pct_low": 118.03,
-    "fps_min_sampled": 113.98,
-    "frametime_avg_ms": 7.28,
-    "frametime_1pct_ms": 8.47,
-    "cpu_ms_avg": 5.37,
-    "gpu_ms_avg": 6.34,
-    "perf_render_ms_avg": 1.94,
-    "perf_shadows_ms_avg": 0.78,
-    "perf_reflections_ms_avg": 0.7,
-    "perf_post_render_ms_avg": 0.13,
-    "perf_lua_ms_avg": 1.62,
-    "perf_physics_nodes_ms_avg": 0.08,
-    "terrain_draw_calls_avg": 251.9,
-    "terrain_draw_calls_max": 297,
+    "fps_avg": 142.88,
+    "fps_1pct_low": 105.77,
+    "fps_min_sampled": 113.75,
+    "frametime_avg_ms": 7.0,
+    "frametime_1pct_ms": 9.45,
+    "cpu_ms_avg": 6.44,
+    "gpu_ms_avg": 6.2,
+    "perf_render_ms_avg": 2.31,
+    "perf_shadows_ms_avg": 0.89,
+    "perf_reflections_ms_avg": 0.94,
+    "perf_post_render_ms_avg": 0.15,
+    "perf_lua_ms_avg": 2.87,
+    "perf_physics_nodes_ms_avg": 0.11,
+    "terrain_draw_calls_avg": 247.2,
+    "terrain_draw_calls_max": 279,
     "forest_items_rendered_avg": 0.0,
     "forest_items_rendered_max": 0,
     "draw_calls_avg": null,
     "draw_calls_max": null,
     "polys_avg": null,
     "polys_max": null,
-    "vram_peak_mib": 4769.0,
-    "vram_avg_mib": 4726.2,
-    "proc_ram_peak_mib": 4032.2,
-    "proc_private_peak_mib": 7328.3,
-    "proc_total_ram_peak_mib": 5082.7,
+    "vram_peak_mib": 4700.0,
+    "vram_avg_mib": 4653.8,
+    "proc_ram_peak_mib": 3923.9,
+    "proc_private_peak_mib": 7099.8,
+    "proc_total_ram_peak_mib": 4969.1,
     "pass_60fps_target": true
   },
   "stabilization": null,
   "log_metrics": {
-    "world_ready_s": 28.40713,
+    "world_ready_s": 29.28471,
     "load_stages_s": {
       "engine.loading.stage.Terrain::TerrainBlock": {
         "count": 1,
-        "seconds": 6.617
+        "seconds": 6.781
       },
       "engine.loading.stage.Environment::ScatterSky": {
         "count": 1,
@@ -383,19 +383,19 @@
       },
       "engine.loading.stage.Environment::GroundCover": {
         "count": 8,
-        "seconds": 0.082
+        "seconds": 0.112
       },
       "engine.loading.stage.Forest::Forest": {
         "count": 1,
-        "seconds": 0.753
+        "seconds": 1.011
       },
       "engine.loading.stage.Meshes::TSStatic": {
         "count": 310,
-        "seconds": 0.911
+        "seconds": 0.931
       },
       "engine.loading.stage.Roads::DecalRoad": {
         "count": 979,
-        "seconds": 0.069
+        "seconds": 0.071
       }
     },
     "forest_items_loaded": 45000,
@@ -405,68 +405,15 @@
     "static_collision_mb": 49.9,
     "physics_instances": 48003,
     "physics_memory_mb": 41.94,
-    "free_ram_at_spawn_gb": 18.084,
-    "total_error_lines": 272,
+    "free_ram_at_spawn_gb": 15.485,
+    "total_error_lines": 195,
     "total_warning_lines": 73,
     "stock_error_lines": 195,
-    "level_error_lines": 77,
+    "level_error_lines": 0,
     "decal_road_batch_errors": 0,
-    "level_error_samples": [
-      "23.05854|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
-      "23.05856|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
-      "23.05857|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
-      "23.05858|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
-      "23.05859|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
-      "23.05859|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
-      "23.05861|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
-      "23.05863|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
-      "23.05863|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
-      "23.05865|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05866|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05867|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05870|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05871|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05872|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05873|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05874|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05875|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05876|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05877|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05878|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05879|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05880|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05881|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05882|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05883|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05884|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05885|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05886|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05886|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
-      "23.05887|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05888|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
-      "23.05889|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
-      "23.05890|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
-      "23.05891|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
-      "23.05892|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_bridge_not_motorway.dae",
-      "23.05893|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
-      "23.05894|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_stop.dae",
-      "23.05895|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05896|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
-      "23.05897|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
-      "23.05900|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
-      "23.05901|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
-      "23.05902|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
-      "23.05903|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_speed_90.dae",
-      "23.05904|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_speed_60.dae",
-      "23.05905|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_speed_90.dae",
-      "23.05906|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_speed_90.dae",
-      "23.05907|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_speed_60.dae",
-      "23.05907|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_speed_90.dae"
-    ],
+    "level_error_samples": [],
     "level_warning_samples": [],
-    "signal_hits": {
-      "TSStatic": 77
-    }
+    "signal_hits": {}
   },
   "screenshots_captured": [
     "ivanovo_golden_sector_regression_view1_p152_kokhma_junc.png",
