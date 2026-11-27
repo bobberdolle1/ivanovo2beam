@@ -545,17 +545,23 @@ def solve_coupled_bridge_profile(
 
     water_req = _water_requirements_along(pts_r, water_network)
     ground_req = ground + deck_clear_m
+    if approach_end_z is not None and approach_end_z[0] is not None:
+        ground_req[0] = z0
+    if approach_end_z is not None and approach_end_z[1] is not None:
+        ground_req[-1] = z1
     portal_guard_m = min(24.0, total_len * 0.4)
-    # Lift abutments if raw portal heights sit too low to clear water or bank terrain within DECK_MAX_GRADE
+    has_coupled_z0 = approach_end_z is not None and approach_end_z[0] is not None
+    has_coupled_z1 = approach_end_z is not None and approach_end_z[1] is not None
+    # Lift abutments if raw portal heights sit too low to clear water or (for uncoupled portals) bank terrain
     for k in range(n_steps):
         sk = float(s[k])
         if np.isfinite(water_req[k]):
             z0 = max(z0, float(water_req[k]) - _eased_grade(sk))
             z1 = max(z1, float(water_req[k]) - _eased_grade(total_len - sk))
         if ground_sampler is not None:
-            if sk <= portal_guard_m:
+            if not has_coupled_z0 and sk <= portal_guard_m:
                 z0 = max(z0, float(ground_req[k]) - _eased_grade(sk))
-            if total_len - sk <= portal_guard_m:
+            if not has_coupled_z1 and total_len - sk <= portal_guard_m:
                 z1 = max(z1, float(ground_req[k]) - _eased_grade(total_len - sk))
 
     base = z0 + (s / total_len) * (z1 - z0)
@@ -602,9 +608,11 @@ def solve_coupled_bridge_profile(
         z = np.maximum(_smooth_pinned(z, actual_step, max(6.0, actual_step * 2.5)), floor)
         z[0] = z0
         z[-1] = z1
-        # Enforce smooth portal continuity so ground[1] never creates a vertical cliff at [0]->[1]
+        # Enforce smooth portal continuity so interior ground bumps never create a vertical cliff at portals
+        z[0] = z0
+        z[-1] = z1
         eff_max_grade = max(DECK_MAX_GRADE + 0.02, abs(z1 - z0) / total_len + 0.02)
-        for k in range(1, n_steps):
+        for k in range(1, n_steps - 1):
             ds = float(s[k] - s[k - 1])
             lim = eff_max_grade * ds
             if z[k] > z[k - 1] + lim:

@@ -1617,3 +1617,73 @@ class TestV2TerrainAndHydrologyRegressions:
         sub = layers[15:110, 15:110]
         assert (sub == mat_idx["ForestFloor"]).any()
         assert (sub == mat_idx["Grass"]).any()
+
+    def test_twin_bridge_laterally_offset_portal_matches_merged_approach(self, projection) -> None:
+        from ivanovo2beam.config import RoadSettings
+        from ivanovo2beam.roads.network import Road
+        from ivanovo2beam.water.extract import RiverChannel, WaterNetwork
+
+        class HillyDem:
+            def sample_array(self, lons, lats):
+                xs, ys = projection.geo_to_world_array(np.asarray(lons), np.asarray(lats))
+                bump = 2.0 * np.exp(-((xs - 270.0) ** 2 + (ys - 305.0) ** 2) / 9.0)
+                return 100.0 + bump
+
+        approach_w = RoadCorridor(
+            points=np.array([[100.0, 300.0], [270.0, 300.0]]),
+            half_width_m=7.0,
+            corridor_half_width_m=15.0,
+            priority=80,
+            surface_z=np.array([100.0, 100.0]),
+            key="way1",
+        )
+        approach_e = RoadCorridor(
+            points=np.array([[330.0, 300.0], [500.0, 300.0]]),
+            half_width_m=7.0,
+            corridor_half_width_m=15.0,
+            priority=80,
+            surface_z=np.array([100.0, 100.0]),
+            key="way2",
+        )
+        twin_bridge = Road(
+            osm_id=778,
+            highway="primary",
+            points=np.array([[270.0, 305.0], [330.0, 305.0]]),
+            width_m=6.0,
+            lanes=1,
+            surface="asphalt",
+            oneway=True,
+            bridge=True,
+            tunnel=False,
+            layer=1,
+            name="TwinBridge",
+            maxspeed_kph=60.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        river = RiverChannel(
+            osm_id=889,
+            name="River",
+            waterway_type="river",
+            points=np.array([[300.0, 100.0], [300.0, 500.0]]),
+            width_m=20.0,
+            depth_m=2.0,
+            z_water=np.array([96.0, 96.0]),
+        )
+        build = build_terrain(
+            HillyDem(),
+            projection,
+            origin_x=0.0,
+            origin_y=0.0,
+            grid_size=256,
+            cell_size_m=2.5,
+            corridors=[approach_w, approach_e],
+            water_network=WaterNetwork(rivers=[river]),
+            bridge_roads=[twin_bridge],
+            road_settings=RoadSettings(),
+        )
+        _, b_z = build.bridge_profiles[778]
+        assert float(b_z[0]) == pytest.approx(100.0, abs=0.05)
+        assert float(b_z[-1]) == pytest.approx(100.0, abs=0.05)
