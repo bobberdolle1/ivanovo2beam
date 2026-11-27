@@ -31,12 +31,12 @@ terrain grading, road markings, coupled 3D bridges, rivers/waterbodies,
 | Coordinate system (1:1 metric plane) | **Done, verified** | Custom Transverse Mercator (`k0 = 1 − W²/4`); Ivanovo→Shuya 29.138 km vs 29.141 km WGS84 geodesic |
 | BeamNG `.ter` terrain format v9 | **Done, verified byte-exactly** | Shipped game terrains round-trip byte-identically |
 | Geodata acquisition (DEM + OSM PBF/Overpass + WorldCover) | **Done, cached** | Copernicus GLO-30 / AWS / SRTM DEM, pure-Python `.osm.pbf` streaming + Overpass, ESA WorldCover 2021 10 m `.npz` cache |
-| Road network, markings & `renderPriority` | **Done** | Z-aware 3D smoothing, junction elevation pinning, crisp T-junction/ramp crossing cuts (`1.5 m` margin), clean feathered shoulders |
-| Coupled hydrology, split bridges & ramps | **Done** | Clamped river channels (no floating water/cliffs), `2 m` Hermite bridge decks, localized split `_deck`/`_structure` `.dae` meshes |
-| Summer vegetation (`.link`, `.forest4.json` & `GroundCover`) | **Done** | 30 zero-copy `.link` species + organic edge tapering, 8 native `GroundCover` 3D grass/wildflower/scrub layers (`322k` max elements) |
-| Roadside infrastructure & buildings | **Done** | GOST speed/priority/bridge/zebra signs, streetlights, poles, OSM bus stops, W-beam guardrails, terrain-clipped 500 m chunked OSM buildings |
+| Road network, markings & `renderPriority` | **Done** | Z-aware 3D smoothing, bend taming, junction elevation pinning, crisp crossing cuts (`1.5 m` margin), pruned minor edge decals (`-41.2%` `DecalRoad`s) |
+| Coupled hydrology, split bridges & ramps | **Done** | Clamped river channels, scanline-coalesced `WaterBlock`s (`-81.0%`), `2 m` Hermite welded bridge decks with snapped portals & twin inner-parapet suppression |
+| Summer vegetation (`.link`, `.forest4.json` & `GroundCover`) | **Done** | 32 zero-copy `.link` species + organic edge tapering, 8 distance-dissolved `GroundCover` layers, `4 m` urban road anti-bleed masking |
+| Roadside infrastructure & buildings | **Done** | `Colmesh-1` GOST signs/poles/shelters/guardrails (`-77.3%` static collision), `750 m` chunked OSM buildings with `Colmesh-1` prism colliders & `nulldetail6` LOD |
 | Structural validator & provenance | **Done** | Validates scene tree, `.ter` (`HOLE=255` safe), base + extra `main.materials.json` files, ODbL/Copernicus notices |
-| Live BeamNG.drive 0.40+ V2 verification | **Verified (1080p Ultra)** | Golden Sector V2: `143.17 FPS` avg / `111.07 FPS` 1% low (`4,575 MiB` VRAM); 33 km `ivanovo_shuya_v2`: `80.32 FPS` avg / `48.68 FPS` 1% low (`6,333 MiB` VRAM); `2560×1440` `NOT_TESTED` |
+| Live BeamNG.drive 0.40+ verification | **Stabilized (1080p Ultra)** | Golden Sector V2: `142.88 / 105.77 FPS` (`0` errors, `damageSum=0`); 33 km `ivanovo_shuya_v2`: `99.72–111.16` urban / `106.53` rural / `160–166` 720° spin (`0` hitches `> 33 ms`), `59.646 km` `5/5` unbroken round-trip; `2560×1440` `NOT_TESTED` |
 | Scaling architecture study (P0/P1/P2) | **Verified (`Single 8192` wins)** | `Single 8192×8192 @ 4.0 m` (`ivanovo_shuya_v2`) beat Hybrid (`4m + 1m DAE`) and Dual-`TerrainBlock` (see [`docs/p3_scaling_study.md`](docs/p3_scaling_study.md)) |
 
 ---
@@ -46,7 +46,7 @@ terrain grading, road markings, coupled 3D bridges, rivers/waterbodies,
 | Config | Level ID | Grid & Extent | Focus |
 |---|---|---|---|
 | `configs/golden_sector.yaml` | `ivanovo_golden_sector` | `4096 × 4096 @ 1.0 m` (`4.095 × 4.095 km`) | Kokhma SE / Р152 Uvod crossing: primary highway, `way/274102985` bridge, hydrology, summer forest, D3D12 baseline |
-| `configs/ivanovo_shuya_v2.yaml` | `ivanovo_shuya_v2` | `8192 × 8192 @ 4.0 m` (`32.764 × 32.764 km`) | **Production 33 km Ivanovo–Kokhma–Shuya corridor**: V2 materials, `GroundCover`, `120k` `.link` trees, `11,945` buildings, `82` bridges |
+| `configs/ivanovo_shuya_v2.yaml` | `ivanovo_shuya_v2` | `8192 × 8192 @ 4.0 m` (`32.764 × 32.764 km`) | **Production 33 km Ivanovo–Kokhma–Shuya corridor**: stabilized `Colmesh-1` props/buildings, `120k` `.link` trees, `GroundCover`, `82` bridges, real in-game previews |
 | `configs/ivanovo_shuya.yaml` | `ivanovo_shuya` | `4096 × 4096 @ 8.0 m` (`32.760 × 32.760 km`) | Legacy lightweight Ivanovo → Shuya corridor |
 | `configs/ivanovo_mvp.yaml` | `ivanovo_mvp` | `4096 × 4096 @ 1.25 m` (`5.118 × 5.118 km`) | Central Ivanovo road-network stress test |
 | `configs/experiment_single_8192_2m.yaml` | `ivanovo_single_8192_2m` | `8192 × 8192 @ 2.0 m` (`16.382 × 16.382 km`) | P0 single-block scaling benchmark |
@@ -58,9 +58,9 @@ Measured on Ryzen 5 7500F / RTX 3080 10 GB / BeamNG 0.40.6.0 D3D12 at
 `1920×1080 Borderless, Overall: Ultra` (DLSS; `2560×1440`: **`NOT_TESTED`** — active
 monitor caps at `1920×1080 @ 144 Hz`):
 
-- **Golden Sector V2 (`ivanovo_golden_sector`, 4.1 km)**: `143.17 / 111.07 FPS` (warm), `24.30 s` warm / `27.89 s` cold load, `4,575–4,729 MiB` VRAM, `damageSum = 0` up to `178.63 km/h`
+- **Golden Sector V2 (`ivanovo_golden_sector`, 4.1 km, cold)**: `142.88 / 105.77 FPS`, `35.81 s` wall (`29.28 s` `world_ready_s`), `4,700 MiB` VRAM, `49.90 MB` static collision, `0` level errors, `damageSum = 0` (`1.986 km` @ `95.5 km/h` max)
 - **P0 Single `8192@2m` (`16.4 km`) vs P1 Hybrid (`16.4 km`)**: P0 `105.50 / 89.64 FPS`, `27.72 s` warm, `4,930 MiB` VRAM, `damageSum = 0` (`6.37 km`) vs P1 `97.82 / 78.66 FPS`, `33.05 s` warm, `5,021 MiB` VRAM, `-40%` collision in P0
-- **P2 Corridor V2 (`ivanovo_shuya_v2`, 32.8 km / 1,073.5 km²)**: `80.32 / 48.68 FPS` (cold), `78.35 s` cold load, `6,333 MiB` VRAM, unbroken `25.229 km` Ivanovo→Shuya `navgraph` (`486` nodes, `0` `z=0` nodes), `0` `GroundCover`/`ForestData`/`TerrainBlock`/`WarningMaterial`/`checkBins` errors (see [Performance & budgets](docs/performance.md) and [P3 scaling study](docs/p3_scaling_study.md))
+- **Stabilized 33 km Corridor (`ivanovo_shuya_v2`, 32.8 km / 1,073.5 km², cold)**: improved from `45.65–50.99 FPS` → **`99.72–111.16 FPS`** (urban Ivanovo/Shuya) and **`106.53 FPS`** (rural Р152), **`160.0–166.4 FPS`** in 720° camera-spin (`0` hitches `> 33 ms`), `-77.3%` static collision (`735.64 → 166.66 MB`), `64.30 s` cold load, `0` `Bounds` errors, `38 → 19` `DecalRoad` pack warnings, and **`59.646 km` continuous 5/5 unbroken round-trip** (`113.19 FPS` avg, twin-bridge portals clean; minor `way493492348` `10.8%` sag scrape on `rt_1/5`) — see [Performance & budgets](docs/performance.md) and [Project status](docs/STATUS.md)
 
 ## How it works
 
@@ -139,8 +139,8 @@ src/ivanovo2beam/
   roads/       road network, DecalRoads, markings/cuts, coupled 3D bridges, 1520 mm rail, GOST props & guardrails
   water/       OSM waterways/waterbodies → clamped River splines & curved WaterBlock tiling
   vegetation/  ESA WorldCover 2021 + OSM woods → .link summer species, .forest4.json & GroundCover
-  buildings/   optional OSM footprints & 500 m chunked Collada blocks with slope skirts
-  beamng/      .ter v9 codec, scene tree writer, 14-surface terrain PBR library
+  buildings/   optional OSM footprints & 750 m chunked Collada blocks with Colmesh-1 & slope skirts
+  beamng/      .ter v9 codec, scene tree writer, previews/, 14-surface terrain PBR library
   sectors/     spatial grid, P2 multi-TerrainBlock & P1 hybrid corridor harnesses
   validation/  structural & material validation of built levels
   provenance.py SHA-256 input manifests & ODbL/Copernicus attribution notices
@@ -148,9 +148,9 @@ src/ivanovo2beam/
   build.py     pipeline orchestration
   cli.py       command line interface
 configs/       golden_sector.yaml, ivanovo_shuya_v2.yaml, ivanovo_shuya.yaml, ivanovo_mvp.yaml, experiment_*.yaml
-docs/          architecture, performance, status, p2_multiblock_experiment, p3_scaling_study, benchmarks/, research/
-scripts/       live BeamNG MCP benchmark, scaling QA, host bridge & experiment helpers
-tests/         780 tests total; 777 offline (`-m "not network"`), 3 live-network
+docs/          ROADMAP, architecture, performance, status, p2_multiblock_experiment, p3_scaling_study, benchmarks/, research/
+scripts/       live BeamNG MCP benchmark, scaling QA, host bridge, cleanup_beamng_levels.py & experiment helpers
+tests/         offline unit/integration suite (`-m "not network"`) + 3 live-network tests
 ```
 
 ## Testing
@@ -194,17 +194,18 @@ be added: their terms prohibit building derived mapping datasets.
 
 ## Roadmap
 
-| Milestone | Contents | State |
+See the full 8-phase engineering plan in [`docs/ROADMAP.md`](docs/ROADMAP.md) (including the dedicated **Procedural Urban Environment Subsystem** and **Universal External Asset Import** spec).
+
+| Phase | Contents | State |
 |---|---|---|
-| **M0 Research** | Engine limits, prior art, licensing | Done |
-| **M1 Data pipeline** | Coordinates, OSM PBF/Overpass, DEM, WorldCover cache | Done |
-| **M2 First drivable sector** | 5 × 5 km Ivanovo (`ivanovo_mvp`) | Done |
-| **M3 City & natural features** | Buildings, vegetation, water, rail, 3D bridges | Done |
-| **M4 Ivanovo–Shuya corridor** | ~33 km intercity route (`ivanovo_shuya_v2` `8192@4m`) + Golden Sector (`golden_sector`) | Done (1080p Ultra live-verified) |
-| **M5 Regional road network** | Whole-oblast roads, tiled terrain | Planned |
-| **M6 Full oblast** | Complete 220 × 145 km | Planned |
-| **M7 Optimization** | 512 px base maps, `.forest4.json` + `.link`, tiered DecalRoad LOD, MCP benchmark | Done (`1920×1080` verified; `2560×1440` `NOT_TESTED`) |
-| **M8 Public release** | v1.0.0 | Planned |
+| **1. Corridor Stabilization & Optimization** | Zero `Bounds` errors, `-77.3%` static collision, `0` spin hitches, `59.646 km` round-trip, picker cleanup & previews | **Done** (`1920×1080` verified; `2560×1440` `NOT_TESTED`) |
+| **2. Procedural Russian Architecture** | Private houses (`наличники`), `хрущёвки`/`брежневки`, balconies, red-brick factories, fences, landmark hooks | Planned |
+| **3. Full Russian Road System** | Complete PDD & GOST markings, Cyrillic signs, overhead gantries, traffic lights, turn lanes & priorities | Planned |
+| **4. Infrastructure & Urban Environment** | Dedicated `urban/` sidewalks, curbs (`бордюры`), dropped curbs (`пониженные бордюры`), parking, embankments, lighting, power/catenary lines | Planned |
+| **5. Street Names, Labels & POI Markers** | Settlement boards, river plates, street plaques, in-game BigMap / QuickTravel POIs | Planned |
+| **6. Realistic AI Traffic** | Lane-level PDD `navgraph`, speed/yield/signal rules, Russian vehicle pools, scheduled transit buses | Planned |
+| **7. Full 220 × 145 km Ivanovo Oblast** | Tiled `8192 × 8192` sector federation on shared projection with seamless border handoff | Planned |
+| **8. Assetto Corsa & Russian World Gen** | Backend-agnostic `WorldIR`, `.kn5`/CSP exporter, generalized multi-region Russian World Generator | Planned |
 
 ## Known limitations
 
@@ -222,12 +223,14 @@ be added: their terms prohibit building derived mapping datasets.
 
 ## Documentation
 
+* [Roadmap](docs/ROADMAP.md) — 8-phase long-term roadmap, Procedural Urban Environment Subsystem, and external asset integration
 * [Coordinate system](docs/coordinate_system.md) — why this projection, and how accuracy is proven
 * [Architecture](docs/architecture.md) — pipeline stages, coupled subsystems, and module boundaries
 * [Performance & budgets](docs/performance.md) — runtime optimizations, MCP benchmark harness, and D3D12 metrics
-* [Project status](docs/STATUS.md) — Golden Sector & 33 km Corridor V2 sign-off, benchmarks, and reproduction CLI
+* [Project status](docs/STATUS.md) — Golden Sector & stabilized 33 km Corridor V2 sign-off, Before/After benchmarks, and cleanup/reproduction CLI
 * [P2 multi-TerrainBlock experiment](docs/p2_multiblock_experiment.md) — empirical dual-block BeamNG 0.40 engine findings
 * [P3 scaling study](docs/p3_scaling_study.md) — P0 single-block vs P1 hybrid vs P2 33 km corridor benchmark synthesis
+* [External asset reuse](docs/research/asset_reuse.md) — `ccd2beam` & `UUBI_Ivanovo` audit, license isolation, and geo-pinned replacement design
 * [Data sources](docs/data_sources.md) — datasets, licences, attribution obligations
 * [BeamNG install](docs/beamng_install.md) — getting a generated level into the game
 * [Development](docs/development.md) — setup, testing, and the sandbox gotchas

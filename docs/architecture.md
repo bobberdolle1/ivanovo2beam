@@ -64,11 +64,11 @@ Each stage is a separate module, cacheable on disk, and callable from the CLI.
 | `gis/` (`projection.py`, `_wgs84.py`) | WGS84 ↔ metric Transverse Mercator (`k0 = 1 − W²/4`), geodesic scale error | `pyproj` |
 | `osm/` (`pbf.py`, `fetch.py`, `parse.py`, `merge.py`, `types.py`) | Streaming pure-Python `.osm.pbf` (plus optional `osmium` fast path) & tiled Overpass fetch/merge | stdlib (optional `osmium`) |
 | `terrain/` (`dem.py`, `_geotiff.py`, `builder.py`) | DEM acquisition, row-by-row sampling, road grading, coupled water carving, landcover + natural variation painting | `numpy`, `shapely`, optional `rasterio`/`scipy` |
-| `roads/` (`network.py`, `build.py`, `materials.py`, `bridges.py`, `railways.py`, `props.py`) | Road extraction, Z-aware DecalRoad export, crossing cuts, `renderPriority`, split bridges, 1520 mm rail, GOST roadside props & guardrails | `numpy`, `shapely` |
-| `water/` (`extract.py`, `export.py`) | Waterways & waterbodies → elevation-clamped `River` splines & buffered curved `WaterBlock` tiling | `numpy`, `shapely` |
+| `roads/` (`network.py`, `build.py`, `materials.py`, `bridges.py`, `railways.py`, `props.py`) | Road extraction, Z-aware DecalRoad export, bend taming, crossing cuts, `renderPriority`, split bridges with welded DAEs & snapped portals, 1520 mm rail, `Colmesh-1` GOST props & guardrails | `numpy`, `shapely` |
+| `water/` (`extract.py`, `export.py`) | Waterways & waterbodies → elevation-clamped `River` splines & bounds-clipped scanline-coalesced `WaterBlock` tiling | `numpy`, `shapely` |
 | `vegetation/` (`worldcover.py`, `extract.py`, `forest.py`, `groundcover.py`) | ESA WorldCover 2021 + OSM woods → keepout masks, organic tapered `.link`/`.forest4.json` trees, native 8-layer `GroundCover` | `numpy`, `shapely`, `Pillow` |
-| `buildings/` (`footprints.py`, `mesh.py`, `export.py`) | Optional OSM footprints, terrain-bounds clipping, 500 m chunked Collada blocks with slope skirts & PBR materials | `numpy`, `shapely` |
-| `beamng/` (`ter.py`, `level.py`, `materials.py`, `preview.py`) | `.ter` v9 codec, `SceneTree` writer, `LevelInfo` (`decalBias`), 14-surface terrain PBR library + isotropic FBM base maps | `numpy` |
+| `buildings/` (`footprints.py`, `mesh.py`, `export.py`) | Optional OSM footprints, terrain-bounds clipping, `750 m` chunked Collada blocks with slope skirts, `Colmesh-1` flat-top prism colliders, `nulldetail6` LOD & PBR materials | `numpy`, `shapely` |
+| `beamng/` (`ter.py`, `level.py`, `materials.py`, `preview.py`, `previews/`) | `.ter` v9 codec, `SceneTree` writer, `LEVEL_METADATA`, bundled real in-game screenshot previews, `LevelInfo` (`decalBias`), 14-surface terrain PBR library + isotropic FBM base maps | `numpy` |
 | `sectors/` (`grid.py`, `multiblock.py`, `hybrid.py`) | World ↔ signed square sector grid mapping, P2 multi-`TerrainBlock` experiment & P1 RTIN hybrid corridor prototype | `numpy`, `shapely` |
 | `validation/level.py` | Structural checks: scene tree, `.ter`/`.terrain.json` (`HOLE=255` safe), scale, base + extra materials | `numpy` |
 | `provenance.py` | SHA-256 input manifests and ODbL / Copernicus attribution notices | stdlib |
@@ -158,14 +158,48 @@ detected; no game asset bytes are duplicated into the repository or mod `.zip`.
 - `configs/ivanovo_shuya_v2.yaml` (`ivanovo_shuya_v2`): `8192 × 8192` @ `4.0 m`
   (`32.764 km` per side, `1,073.5 km²`) covering the continuous ~33 km
   Ivanovo–Kokhma–Shuya corridor with Golden Sector V2 fidelity (`120,000` `.link`
-  trees, `8` `GroundCover` layers, `12,000`-building selective cap, `82` 3D
-  bridges, `23,711` roadside props) selected from the P0/P1/P2 scaling study
-  ([`docs/p3_scaling_study.md`](p3_scaling_study.md)).
+  trees, `8` `GroundCover` layers, `12,000`-building selective cap across `456`
+  `750 m` chunks, `82` welded 3D bridges with snapped portals, `12,464`
+  `TSStatic`s using `Colmesh-1` / `"Collision Mesh"`, `1,859` coalesced
+  `WaterBlock`s, and `40,601` `DecalRoad`s) selected from the P0/P1/P2 scaling
+  study ([`docs/p3_scaling_study.md`](p3_scaling_study.md)).
 - `configs/ivanovo_shuya.yaml` (`ivanovo_shuya`): legacy `4096 × 4096` @ `8.0 m`
   (`32.760 km` per side) lightweight corridor configuration.
 - `configs/experiment_single_8192_2m.yaml` & `configs/experiment_hybrid_corridor.yaml`:
   apples-to-apples `16.38 km` P0 single-block vs P1 hybrid (base `TerrainBlock` +
   RTIN Collada corridor chunks) scaling benchmark configs.
+
+### Level selector metadata, real previews & cleanup
+
+`beamng/level.py` maintains `LEVEL_METADATA` (curated human-friendly titles,
+concise descriptions, road/feature summaries, and `"country": "Russia"`) for
+primary maps (`ivanovo_shuya_v2`, `ivanovo_golden_sector`) alongside
+`install_bundled_previews()`, which copies real in-game `1280×720` PNG
+screenshots from `beamng/previews/` to both `<level_id>_preview.png` and
+`preview.png` when `write_level_files()` writes `info.json` (so
+`beamng/preview.py` preserves them rather than overwriting with the fallback
+gradient). Obsolete experimental builds in BeamNG's user folder are pruned
+safely via [`scripts/cleanup_beamng_levels.py`](../scripts/cleanup_beamng_levels.py)
+(`--dry-run` / `--stop-beamng`), keeping `ivanovo_golden_sector`,
+`ivanovo_shuya_v2`, and unrelated third-party mods intact.
+
+## Long-term roadmap & external asset integration
+
+Planned subsystems beyond Phase 1 stabilization are specified in:
+- [`docs/ROADMAP.md`](ROADMAP.md): 8-phase plan covering procedural Russian
+  architecture (`наличники`, `хрущёвки`/`брежневки`, brick factories), full
+  Russian PDD/GOST roads, infrastructure, the dedicated **Procedural Urban
+  Environment Subsystem** (`src/ivanovo2beam/urban/` — sidewalks, physical and
+  dropped curbs `пониженные бордюры`, urban lawns, courtyard driveways, parking
+  pockets, riverfront embankments, and bus-stop pads with `250–500 m` chunking,
+  3-tier LOD, and `Colmesh-1` proxies), POI/settlement labels, realistic AI
+  traffic, seamless `220 × 145 km` Oblast scaling, and Assetto Corsa export.
+- [`docs/research/asset_reuse.md`](research/asset_reuse.md): local-only
+  `assets_external/` + `asset_manifest.yaml` architecture for geo-pinned
+  replacement of procedural OSM buildings/props using external assets (e.g.,
+  City Car Driving / `ccd2beam` Russian libraries and `UUBI_Ivanovo` X-Plane 12
+  airport/city scenery) with strict license isolation and `ExternalAssetIR`
+  multi-sim export.
 
 ## Determinism
 
