@@ -151,7 +151,7 @@ class TestRoadsideProps:
                 assert o["collisionType"] == "Collision Mesh"
                 assert o["useInstanceRenderData"] is True
             elif sn == BUS_STOP_SIGN or "/Clutter/" in sn:
-                assert o["collisionType"] == "Bounds"
+                assert o["collisionType"] == "Collision Mesh"
                 assert o["useInstanceRenderData"] is True
 
     def test_guardrail_and_poles_never_block_curved_approaches_or_loops(self, tmp_path: Path) -> None:

@@ -243,22 +243,9 @@ def _sample_polyline_at(pts: np.ndarray, cum: np.ndarray, dist_m: float) -> tupl
     return (ax + t * dx, ay + t * dy, dx / seg_len, dy / seg_len)
 
 
-_COLLISION_MESH_SHAPES: frozenset[str] = frozenset(
-    {
-        POLE_WOOD_OLD,
-        POLE_LIGHT_SINGLE,
-        BUS_STOP_SHELTER,
-        SIGN_SHAPES["warn_zebra"],
-    }
-)
-
-
 def _collision_type_for_shape(shape_name: str) -> str:
-    """Use stock ``Colmesh`` proxies where present and ``Bounds`` for colmesh-less signs."""
-    if shape_name in _COLLISION_MESH_SHAPES:
-        return "Collision Mesh"
-    if shape_name == BUS_STOP_SIGN or shape_name.startswith(f"{_CLUTTER}/"):
-        return "Bounds"
+    """Use ``Collision Mesh`` across stock props (BeamNG 0.40 rejects ``Bounds`` on TSStatic)."""
+    _ = shape_name
     return "Collision Mesh"
 
 
