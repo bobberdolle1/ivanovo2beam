@@ -186,10 +186,10 @@ def _clip_ground_decal_roads_to_bounds(
     level_id: str,
     bounds: tuple[float, float, float, float],
 ) -> tuple[list[dict[str, Any]], int, int]:
-    """Clip ground-projected ``DecalRoad``s (``overObjects=False``) strictly inside terrain bounds.
+    """Clip ``DecalRoad``s (including off-map ``overObjects`` bridges) strictly inside terrain bounds.
 
     Roads extracted with ``ROAD_RENDER_MARGIN_M`` remain available for grading
-    and crossing cuts, while clipping exported ground decals avoids BeamNG
+    and crossing cuts, while clipping exported decals avoids BeamNG
     ``SceneStaticDecalRoadManager`` 2048 m / ``inf`` packing errors off-terrain.
     """
     from shapely.geometry import LineString, box
@@ -201,11 +201,8 @@ def _clip_ground_decal_roads_to_bounds(
     node_total = 0
 
     for obj in objects:
-        if obj.get("class") != "DecalRoad" or bool(obj.get("overObjects")):
+        if obj.get("class") != "DecalRoad":
             kept.append(obj)
-            if obj.get("class") == "DecalRoad":
-                exported += 1
-                node_total += len(obj.get("nodes") or [])
             continue
 
         raw_nodes = obj.get("nodes") or []
@@ -252,6 +249,10 @@ def _clip_ground_decal_roads_to_bounds(
             clone = dict(obj)
             clone["nodes"] = dedup
             clone["position"] = dedup[0][:3]
+            fade = obj.get("startEndFade")
+            if isinstance(fade, (list, tuple)) and len(fade) == 2:
+                max_fade = round(0.4 * seg_len, 3)
+                clone["startEndFade"] = [min(float(fade[0]), max_fade), min(float(fade[1]), max_fade)]
             if len(parts) > 1:
                 seg_name = f"{base_name}_c{idx}"
                 clone["name"] = seg_name
@@ -989,7 +990,11 @@ def build_level(
     # -- water scene objects -----------------------------------------------
     if water_network is not None:
         report(0.76, "exporting water scene objects")
-        water_objects_count = export_water_to_scene(tree, water_network)
+        water_objects_count = export_water_to_scene(
+            tree,
+            water_network,
+            clip_bounds=(origin_x, origin_y, origin_x + extent, origin_y + extent),
+        )
         water_stats["scene_objects"] = water_objects_count
 
     # -- bridges 3D meshes -------------------------------------------------
