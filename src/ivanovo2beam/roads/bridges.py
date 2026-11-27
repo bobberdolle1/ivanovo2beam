@@ -544,12 +544,19 @@ def solve_coupled_bridge_profile(
         z1 = float(ground[-1])
 
     water_req = _water_requirements_along(pts_r, water_network)
-    # Lift abutments if raw portal heights sit too low to clear water within DECK_MAX_GRADE
+    ground_req = ground + deck_clear_m
+    portal_guard_m = min(24.0, total_len * 0.4)
+    # Lift abutments if raw portal heights sit too low to clear water or bank terrain within DECK_MAX_GRADE
     for k in range(n_steps):
+        sk = float(s[k])
         if np.isfinite(water_req[k]):
-            sk = float(s[k])
             z0 = max(z0, float(water_req[k]) - _eased_grade(sk))
             z1 = max(z1, float(water_req[k]) - _eased_grade(total_len - sk))
+        if ground_sampler is not None:
+            if sk <= portal_guard_m:
+                z0 = max(z0, float(ground_req[k]) - _eased_grade(sk))
+            if total_len - sk <= portal_guard_m:
+                z1 = max(z1, float(ground_req[k]) - _eased_grade(total_len - sk))
 
     base = z0 + (s / total_len) * (z1 - z0)
     cap = np.array(
@@ -570,7 +577,7 @@ def solve_coupled_bridge_profile(
         cap = np.minimum(cap, rounded_cap)
 
     req_vals = np.maximum(base, water_req)
-    z = np.maximum(np.minimum(req_vals, cap), ground + deck_clear_m)
+    z = np.maximum(np.minimum(req_vals, cap), ground_req)
     z[0] = z0
     z[-1] = z1
 
@@ -579,7 +586,7 @@ def solve_coupled_bridge_profile(
         z = np.maximum(np.minimum(filled, np.maximum(cap, z)), z)
         actual_step = total_len / (n_steps - 1)
         sigma = min(40.0, max(12.0, total_len / 25.0))
-        floor = np.minimum(np.maximum(water_req, ground + deck_clear_m), cap)
+        floor = np.minimum(np.maximum(water_req, ground_req), cap)
         sm = _smooth_pinned(z, actual_step, sigma)
         for _ in range(12):
             short = np.maximum(0.0, floor - sm)
@@ -591,8 +598,24 @@ def solve_coupled_bridge_profile(
             gl = float(short.max() / lift.max()) if float(lift.max()) > 1e-9 else 0.0
             gd = float(over.max() / drop.max()) if float(drop.max()) > 1e-9 else 0.0
             sm = sm + lift * gl - drop * gd
-        z = np.maximum(np.minimum(sm, cap), np.maximum(floor, ground + deck_clear_m))
-        z = np.maximum(_smooth_pinned(z, actual_step, max(6.0, actual_step * 2.5)), np.maximum(floor, ground + deck_clear_m))
+        z = np.maximum(np.minimum(sm, cap), np.maximum(floor, ground_req))
+        z = np.maximum(_smooth_pinned(z, actual_step, max(6.0, actual_step * 2.5)), floor)
+        z[0] = z0
+        z[-1] = z1
+        # Enforce smooth portal continuity so ground[1] never creates a vertical cliff at [0]->[1]
+        eff_max_grade = max(DECK_MAX_GRADE + 0.02, abs(z1 - z0) / total_len + 0.02)
+        for k in range(1, n_steps):
+            ds = float(s[k] - s[k - 1])
+            lim = eff_max_grade * ds
+            if z[k] > z[k - 1] + lim:
+                z[k] = z[k - 1] + lim
+            elif z[k] < z[k - 1] - lim and not np.isfinite(water_req[k]):
+                z[k] = z[k - 1] - lim
+        for k in range(n_steps - 2, 0, -1):
+            ds = float(s[k + 1] - s[k])
+            lim = eff_max_grade * ds
+            if z[k] > z[k + 1] + lim:
+                z[k] = z[k + 1] + lim
         z[0] = z0
         z[-1] = z1
 
@@ -686,7 +709,8 @@ def _populate_bridge_geometry(
             (0.0, s0), (0.0, s1), (1.0, s1), (1.0, s0),
         )
         if deck_geom is not None:
-            # 0.15m top skirt + underside so _deck is a closed non-zero-height box for BeamNG DecalRoad
+            # Open-bottom 0.15m top skirt sheet: no underside or end caps so
+            # overObjects downward DecalRoad casts only hit the +Z deck surface.
             deck_geom.add_quad(
                 sl[i], sl[i + 1], tl[i + 1], tl[i],
                 _quad_face_normal(sl[i], sl[i + 1], tl[i + 1], (-float(normals[i, 0]), -float(normals[i, 1]), 0.0)),
@@ -696,11 +720,6 @@ def _populate_bridge_geometry(
                 tr[i], tr[i + 1], sr[i + 1], sr[i],
                 _quad_face_normal(tr[i], tr[i + 1], sr[i + 1], (float(normals[i, 0]), float(normals[i, 1]), 0.0)),
                 (0.0, s0), (0.0, s1), (1.0, s1), (1.0, s0),
-            )
-            deck_geom.add_quad(
-                sl[i], sr[i], sr[i + 1], sl[i + 1],
-                _quad_face_normal(sl[i], sr[i], sr[i + 1], (0.0, 0.0, -1.0)),
-                (0.0, s0), (1.0, s0), (1.0, s1), (0.0, s1),
             )
 
         # Bottom face (-Z) & slab sides on structural mesh
@@ -720,12 +739,9 @@ def _populate_bridge_geometry(
             (0.0, s0), (0.0, s1), (1.0, s1), (1.0, s0),
         )
 
-    # Deck end caps
+    # Structural slab end caps (omitted on _deck so end-plane quads never confuse DecalRoad projection)
     t0 = seg_tangents[0]
     t_end = seg_tangents[-1]
-    if deck_geom is not None:
-        deck_geom.add_quad(tl[0], tr[0], sr[0], sl[0], (-float(t0[0]), -float(t0[1]), 0.0))
-        deck_geom.add_quad(tl[-1], sl[-1], sr[-1], tr[-1], (float(t_end[0]), float(t_end[1]), 0.0))
     struct_geom.add_quad(tl[0], tr[0], br[0], bl[0], (-float(t0[0]), -float(t0[1]), 0.0))
     struct_geom.add_quad(tl[-1], bl[-1], br[-1], tr[-1], (float(t_end[0]), float(t_end[1]), 0.0))
 
@@ -1273,15 +1289,19 @@ def export_bridge_dae(
   </library_geometries>
   <library_visual_scenes>
     <visual_scene id="Scene" name="Scene">
-      <node id="{safe_name}" name="{safe_name}" type="NODE">
-        <matrix sid="transform">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
-        <instance_geometry url="#{safe_name}-mesh" name="{safe_name}">
-          <bind_material>
-            <technique_common>
+      <node id="base00" name="base00" type="NODE">
+        <node id="start01" name="start01" type="NODE">
+          <node id="{'bridge_deck' if safe_name.endswith('_deck') else 'bridge_struct'}" name="{'bridge_deck' if safe_name.endswith('_deck') else 'bridge_struct'}" type="NODE">
+            <matrix sid="transform">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+            <instance_geometry url="#{safe_name}-mesh" name="{safe_name}">
+              <bind_material>
+                <technique_common>
 {bind_xml}
-            </technique_common>
-          </bind_material>
-        </instance_geometry>
+                </technique_common>
+              </bind_material>
+            </instance_geometry>
+          </node>
+        </node>
       </node>
     </visual_scene>
   </library_visual_scenes>

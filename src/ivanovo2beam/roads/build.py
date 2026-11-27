@@ -70,6 +70,14 @@ MAX_DECAL_NODE_SPACING_M = 6.0
 #: Maximum segment length in metres before splitting into chained segments.
 MAX_SEGMENT_LENGTH_M = 1500.0
 
+#: Bridge DecalRoads cap arc length at 250 m (BeamNG heroRoadEditor maxDecalRoadLenM)
+#: so 16-bit index batches on dense 2 m bridge splines never overflow.
+MAX_BRIDGE_SEGMENT_LENGTH_M = 250.0
+
+#: Drape height (m) added to overObjects=True bridge DecalRoads so downward
+#: projection cleanly hits the bridge deck mesh instead of slipping under/below.
+_BRIDGE_DECAL_Z_OFFSET_M = 0.50
+
 #: Maximum axis-aligned bounding-box span (X, Y, Z) per DecalRoad, in metres.
 #: BeamNG's SceneStaticDecalRoadManager packs positions in a 2048 m local range;
 #: capping each DecalRoad's bbox span at 800 m keeps every leaf safely inside.
@@ -83,6 +91,10 @@ _MIN_NODE_DIST_M = MIN_ROAD_NODE_SPACING_M
 #: Normalized dot-product threshold below which an interior vertex is treated as
 #: a hairline spike reversal and dropped so improvedSpline cannot blow up.
 SPIKE_REVERSAL_DOT = -0.99
+
+#: Tighter hairpin threshold for offset edge/marking strips where tight curve radii
+#: (R < lateral_offset) self-fold at dot < -0.65 (e.g. -0.967 on loops).
+_OFFSET_STRIP_REVERSAL_DOT = -0.65
 
 #: Default BeamNG DecalRoad spline sampling detail (0.5 avoids 2 m-node dropout).
 DECAL_ROAD_DETAIL = 0.5
@@ -156,14 +168,14 @@ _DECAL_LOD_BY_CLASS: dict[str, tuple[tuple[float, float], float, float]] = {
     "secondary_link": ((550.0, 120.0), 1.5, DECAL_ROAD_DETAIL),
     "tertiary": ((550.0, 120.0), 1.5, DECAL_ROAD_DETAIL),
     "tertiary_link": ((550.0, 120.0), 1.5, DECAL_ROAD_DETAIL),
-    "residential": ((400.0, 100.0), 2.0, DECAL_ROAD_DETAIL),
-    "unclassified": ((400.0, 100.0), 2.0, DECAL_ROAD_DETAIL),
-    "service": ((250.0, 75.0), 2.0, DECAL_ROAD_DETAIL),
-    "living_street": ((250.0, 75.0), 2.0, DECAL_ROAD_DETAIL),
-    "track": ((250.0, 75.0), 2.0, DECAL_ROAD_DETAIL),
-    "path": ((250.0, 75.0), 2.0, DECAL_ROAD_DETAIL),
+    "residential": ((300.0, 80.0), 2.0, DECAL_ROAD_DETAIL),
+    "unclassified": ((350.0, 90.0), 2.0, DECAL_ROAD_DETAIL),
+    "service": ((180.0, 60.0), 2.5, DECAL_ROAD_DETAIL),
+    "living_street": ((180.0, 60.0), 2.5, DECAL_ROAD_DETAIL),
+    "track": ((200.0, 60.0), 2.5, DECAL_ROAD_DETAIL),
+    "path": ((180.0, 60.0), 2.5, DECAL_ROAD_DETAIL),
 }
-_DEFAULT_DECAL_LOD: tuple[tuple[float, float], float, float] = ((250.0, 75.0), 2.0, DECAL_ROAD_DETAIL)
+_DEFAULT_DECAL_LOD: tuple[tuple[float, float], float, float] = ((200.0, 60.0), 2.5, DECAL_ROAD_DETAIL)
 
 
 def surface_render_priority_for(road: Road) -> int:
@@ -391,12 +403,34 @@ def _bbox_span(pts: np.ndarray) -> float:
     return float(np.max(maxs - mins))
 
 
+def _polyline_arc_length_xy(pts: np.ndarray) -> float:
+    """Return total 2D XY arc length of a ``(n, >=2)`` point array."""
+    if pts.shape[0] < 2:
+        return 0.0
+    deltas = np.diff(pts[:, :2], axis=0)
+    return float(np.hypot(deltas[:, 0], deltas[:, 1]).sum())
+
+
+def _clamp_fade_for_length(fade: tuple[float, float], arc_len_m: float) -> tuple[float, float]:
+    """Ensure ``start_fade + end_fade`` never exceeds 40% of ``arc_len_m``."""
+    sf = max(0.0, float(fade[0]))
+    ef = max(0.0, float(fade[1]))
+    total = sf + ef
+    if total <= 1e-6:
+        return (0.0, 0.0)
+    cap = max(0.0, arc_len_m * 0.4)
+    if total > cap:
+        scale = cap / total
+        return (round(sf * scale, 3), round(ef * scale, 3))
+    return (sf, ef)
+
+
 def _split_points_by_span(
     pts: np.ndarray,
     max_segment_length_m: float,
     max_bbox_span_m: float,
 ) -> list[np.ndarray]:
-    """Split a 3D polyline into contiguous slices bounded by arc length and bbox span."""
+    """Split a 3D polyline into contiguous slices bounded by arc length, bbox span, and origin distance."""
     n = pts.shape[0]
     if n < 2:
         return []
@@ -404,8 +438,13 @@ def _split_points_by_span(
     deltas = np.diff(pts[:, :2], axis=0)
     seg_lengths = np.hypot(deltas[:, 0], deltas[:, 1])
     total_len = float(seg_lengths.sum())
+    if total_len < 0.4:
+        return []
 
-    if total_len <= max_segment_length_m and _bbox_span(pts) <= max_bbox_span_m:
+    max_dist_from_start = float(
+        np.hypot(pts[:, 0] - pts[0, 0], pts[:, 1] - pts[0, 1]).max()
+    )
+    if total_len <= max_segment_length_m and _bbox_span(pts) <= max_bbox_span_m and max_dist_from_start <= max_bbox_span_m:
         return [pts]
 
     slices: list[np.ndarray] = []
@@ -414,6 +453,7 @@ def _split_points_by_span(
         current_len = 0.0
         min_xyz = pts[start_idx].copy()
         max_xyz = pts[start_idx].copy()
+        sx, sy = float(pts[start_idx, 0]), float(pts[start_idx, 1])
         end_idx = start_idx
         while end_idx < n - 1:
             step = float(seg_lengths[end_idx])
@@ -421,13 +461,20 @@ def _split_points_by_span(
             cand_min = np.minimum(min_xyz, nxt)
             cand_max = np.maximum(max_xyz, nxt)
             cand_span = float(np.max(cand_max - cand_min))
-            if (current_len + step > max_segment_length_m or cand_span > max_bbox_span_m) and end_idx > start_idx:
+            cand_dist = math.hypot(float(nxt[0]) - sx, float(nxt[1]) - sy)
+            if (
+                current_len + step > max_segment_length_m
+                or cand_span > max_bbox_span_m
+                or cand_dist > max_bbox_span_m
+            ) and end_idx > start_idx:
                 break
             current_len += step
             min_xyz = cand_min
             max_xyz = cand_max
             end_idx += 1
-        slices.append(pts[start_idx : end_idx + 1])
+        sub = pts[start_idx : end_idx + 1]
+        if _polyline_arc_length_xy(sub) >= 0.4:
+            slices.append(sub)
         start_idx = end_idx
     return slices
 
@@ -643,7 +690,13 @@ def road_to_decal_object(
             max_node_spacing_m=max_node_spacing_m,
         )
 
-    if points.shape[0] < 2:
+    points = sanitize_road_nodes(
+        points,
+        min_spacing_m=0.5 if road.bridge else MIN_ROAD_NODE_SPACING_M,
+        reversal_dot=SPIKE_REVERSAL_DOT,
+    )
+    arc_len = _polyline_arc_length_xy(points)
+    if points.shape[0] < 2 or arc_len < 0.4:
         return None
 
     # Public roads are not gated; only private/no access or driveways/parking aisles are gated.
@@ -657,8 +710,8 @@ def road_to_decal_object(
     else:
         drivability = 1.0
 
-    # On bridges, lift nodes tightly (+0.002m) so the decal projects directly onto the 3D bridge deck.
-    z_offset = 0.002 if road.bridge else 0.0
+    # On bridges, lift nodes by drape height (+0.5m) so overObjects projects cleanly DOWN onto the 3D deck.
+    z_offset = _BRIDGE_DECAL_Z_OFFSET_M if road.bridge else 0.0
     # BeamNG node format is [x, y, z, width], where width is the full width.
     nodes = [[float(p[0]), float(p[1]), float(p[2]) + z_offset, float(road.width_m)] for p in points]
 
@@ -666,6 +719,7 @@ def road_to_decal_object(
     distance_fade, break_angle, detail = _decal_lod_for(road.highway)
     if road.bridge:
         break_angle = min(break_angle, 1.5)
+    clamped_fade = _clamp_fade_for_length(start_end_fade, arc_len)
     obj: dict[str, Any] = build_road_object(
         level_id,
         key=object_key,
@@ -679,12 +733,14 @@ def road_to_decal_object(
         render_priority=surface_render_priority_for(road),
         break_angle=break_angle,
         distance_fade=distance_fade,
-        start_end_fade=start_end_fade,
+        start_end_fade=clamped_fade,
     )
 
     # Populate BeamNG AI navgraph and LOD properties
     obj["name"] = object_key
     obj["detail"] = detail
+    obj["startTangent"] = 0
+    obj["endTangent"] = 0
     obj["oneWay"] = bool(road.oneway)
     obj["autoLanes"] = False
     obj["lanesLeft"] = 0 if road.oneway else max(1, road.lanes // 2)
@@ -737,17 +793,22 @@ def road_to_decal_objects(
     if road.tunnel:
         return []
 
+    eff_seg_len = min(max_segment_length_m, MAX_BRIDGE_SEGMENT_LENGTH_M) if road.bridge else max_segment_length_m
+    eff_bbox_span = min(max_bbox_span_m, MAX_BRIDGE_SEGMENT_LENGTH_M) if road.bridge else max_bbox_span_m
+
     pts = _prepare_road_points_3d(
         road,
         ground_z=ground_z,
         terrain_build=terrain_build,
         max_node_spacing_m=max_node_spacing_m,
-        max_bbox_span_m=max_bbox_span_m,
+        max_bbox_span_m=eff_bbox_span,
     )
     if pts.shape[0] < 2:
         return []
 
-    slices = _split_points_by_span(pts, max_segment_length_m, max_bbox_span_m)
+    slices = _split_points_by_span(pts, eff_seg_len, eff_bbox_span)
+    if not slices:
+        return []
     if len(slices) == 1:
         obj = road_to_decal_object(
             road,
@@ -827,6 +888,13 @@ def _should_generate_markings(road: Road) -> bool:
 def _should_generate_edge_decals(road: Road) -> bool:
     """Return whether a ground asphalt road receives grass-edge blend decals."""
     if not road.drivable or road.bridge or road.tunnel or _is_unpaved_road(road):
+        return False
+    if road.highway in {"service", "living_street", "pedestrian", "footway", "cycleway", "steps"}:
+        return False
+    if not math.isfinite(road.width_m) or road.width_m <= 5.5:
+        return False
+    min_len = 20.0 if road.highway == "residential" else 12.0
+    if road.length_m < min_len:
         return False
     return road.material_key in {"Asphalt", "Asphalt_worn"} and road.decal_material in {
         "road_asphalt_2lane",
@@ -1199,10 +1267,13 @@ def generate_lane_markings(
     seg_lens = np.hypot(deltas[:, 0], deltas[:, 1])
     total_len = float(seg_lens.sum())
 
+    is_closed_loop = (
+        math.hypot(float(clean_pts[0, 0] - clean_pts[-1, 0]), float(clean_pts[0, 1] - clean_pts[-1, 1])) < 0.5
+    )
     effective_clip = crossing_margin_m if carriageway_index is not None else clip_distance_m
-    start_clip = effective_clip if is_start_junction else 0.0
-    end_clip = total_len - (effective_clip if is_end_junction else 0.0)
-    min_len = 3.0 if carriageway_index is not None else 12.0
+    start_clip = 0.0 if is_closed_loop else (effective_clip if is_start_junction else 0.0)
+    end_clip = total_len if is_closed_loop else (total_len - (effective_clip if is_end_junction else 0.0))
+    min_len = 6.0 if carriageway_index is not None else 12.0
 
     if end_clip - start_clip < min_len:
         return []
@@ -1233,9 +1304,12 @@ def generate_lane_markings(
         line_specs.append((f"{base_key}_line_left", -edge_offset, "m_line_white", EDGE_LINE_RENDER_PRIORITY))
         line_specs.append((f"{base_key}_line_right", edge_offset, "m_line_white", EDGE_LINE_RENDER_PRIORITY))
 
-    z_delta = 0.002 if road.bridge else 0.01
+    # Avoid double-adding bridge drape Z if points_3d was copied directly from a bridge DecalRoad node array
+    z_delta = 0.0 if road.bridge else 0.01
     is_link_road = road.highway.endswith("_link")
     skip_minor = road.highway not in _MINOR_UNCUT_HIGHWAYS
+    eff_seg_len = min(max_segment_length_m, MAX_BRIDGE_SEGMENT_LENGTH_M) if road.bridge else max_segment_length_m
+    eff_bbox_span = min(max_bbox_span_m, MAX_BRIDGE_SEGMENT_LENGTH_M) if road.bridge else max_bbox_span_m
     markings: list[dict[str, object]] = []
     for key_prefix, offset, material, priority in line_specs:
         raw_line = np.column_stack(
@@ -1245,8 +1319,12 @@ def generate_lane_markings(
                 clipped_pts[:, 2] + z_delta,
             )
         )
-        clean_line = _sanitize_xyz_points(raw_line)
-        if clean_line.shape[0] < 2:
+        clean_line = sanitize_road_nodes(
+            raw_line,
+            min_spacing_m=0.5 if road.bridge else MIN_ROAD_NODE_SPACING_M,
+            reversal_dot=_OFFSET_STRIP_REVERSAL_DOT,
+        )
+        if clean_line.shape[0] < 2 or _polyline_arc_length_xy(clean_line) < 0.5:
             continue
 
         is_edge_line = key_prefix.endswith(("_line_left", "_line_right"))
@@ -1267,14 +1345,16 @@ def generate_lane_markings(
                     skip_minor_crossings=skip_minor,
                     end_cap_m=crossing_margin_m,
                 ),
-                min_piece_m=1.5,
+                min_piece_m=4.0,
             )
         else:
             piece_runs = [clean_line]
 
         for piece_idx, piece in enumerate(piece_runs):
-            line_slices = _split_points_by_span(piece, max_segment_length_m, max_bbox_span_m)
+            line_slices = _split_points_by_span(piece, eff_seg_len, eff_bbox_span)
             for seg_idx, sub_line in enumerate(line_slices):
+                if _polyline_arc_length_xy(sub_line) < 0.5:
+                    continue
                 line_nodes = [[float(p[0]), float(p[1]), float(p[2]), 0.15] for p in sub_line]
                 if len(piece_runs) == 1 and len(line_slices) == 1:
                     line_key = key_prefix
@@ -1301,6 +1381,8 @@ def generate_lane_markings(
                 )
                 line_obj["name"] = line_key
                 line_obj["detail"] = DECAL_ROAD_DETAIL
+                line_obj["startTangent"] = 0
+                line_obj["endTangent"] = 0
                 line_obj["decalBias"] = 0.005
                 line_obj["autoJunction"] = False
                 line_obj["autoLanes"] = False
@@ -1345,6 +1427,7 @@ def generate_edge_decals(
     lateral = road.half_width_m + edge_width * 0.5 - overlap
     normals = _compute_polyline_normals(clean_pts)
     base_key = parent_key or f"way{road.osm_id}"
+    skip_minor = road.highway not in _MINOR_UNCUT_HIGHWAYS
 
     edges: list[dict[str, object]] = []
     for side_name, sign, reverse_nodes in (("edge_left", -1.0, True), ("edge_right", 1.0, False)):
@@ -1355,8 +1438,12 @@ def generate_edge_decals(
                 clean_pts[:, 2],
             )
         )
-        clean_strip = _sanitize_xyz_points(raw_strip)
-        if clean_strip.shape[0] < 2:
+        clean_strip = sanitize_road_nodes(
+            raw_strip,
+            min_spacing_m=0.25,
+            reversal_dot=_OFFSET_STRIP_REVERSAL_DOT,
+        )
+        if clean_strip.shape[0] < 2 or _polyline_arc_length_xy(clean_strip) < 2.0:
             continue
 
         if carriageway_index is not None:
@@ -1373,9 +1460,10 @@ def generate_edge_decals(
                     cut_all_angles=True,
                     ignored_ids=ignored_ids,
                     caller_highway=road.highway,
+                    skip_minor_crossings=skip_minor,
                     end_cap_m=margin_m,
                 ),
-                min_piece_m=1.5,
+                min_piece_m=6.0,
             )
         else:
             piece_runs = [clean_strip]
@@ -1384,6 +1472,9 @@ def generate_edge_decals(
             oriented = piece[::-1] if reverse_nodes else piece
             strip_slices = _split_points_by_span(oriented, max_segment_length_m, max_bbox_span_m)
             for seg_idx, sub_strip in enumerate(strip_slices):
+                slice_len = _polyline_arc_length_xy(sub_strip)
+                if slice_len < 2.0:
+                    continue
                 strip_nodes = [[float(p[0]), float(p[1]), float(p[2]), edge_width] for p in sub_strip]
                 if len(piece_runs) == 1 and len(strip_slices) == 1:
                     edge_key = f"{base_key}_{side_name}"
@@ -1404,12 +1495,14 @@ def generate_edge_decals(
                     gated_road=False,
                     texture_length=_EDGE_GRASS_TEXTURE_LENGTH,
                     render_priority=EDGE_GRASS_RENDER_PRIORITY,
-                    break_angle=1.0,
-                    distance_fade=(200.0, 50.0),
-                    start_end_fade=(0.5, 0.5),
+                    break_angle=2.0,
+                    distance_fade=(150.0, 45.0),
+                    start_end_fade=_clamp_fade_for_length((0.5, 0.5), slice_len),
                 )
                 edge_obj["name"] = edge_key
                 edge_obj["detail"] = DECAL_ROAD_DETAIL
+                edge_obj["startTangent"] = 0
+                edge_obj["endTangent"] = 0
                 edge_obj["decalBias"] = 0.0025
                 edge_obj["autoJunction"] = False
                 edge_obj["autoLanes"] = False

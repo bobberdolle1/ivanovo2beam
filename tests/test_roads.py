@@ -637,9 +637,9 @@ class TestAITrafficAndNavgraph:
         assert obj["overObjects"] is True
         assert obj["decalBias"] == 0.002
         assert obj["autoJunction"] is False
-        # Node elevations must be lifted by +0.002
+        # Node elevations must be lifted by bridge drape height for clean overObjects projection
         for node in obj["nodes"]:
-            assert node[2] == pytest.approx(15.002)
+            assert node[2] == pytest.approx(15.5)
 
 
 class TestRoadSplittingAndMarkings:
@@ -956,8 +956,8 @@ class TestDecalRoadSafetyAndMaterials:
         cases = [
             ("trunk", [750.0, 180.0], 1.5, 0.5, 12),
             ("secondary", [550.0, 120.0], 1.5, 0.5, 15),
-            ("residential", [400.0, 100.0], 2.0, 0.5, 20),
-            ("service", [250.0, 75.0], 2.0, 0.5, 22),
+            ("residential", [300.0, 80.0], 2.0, 0.5, 20),
+            ("service", [180.0, 60.0], 2.5, 0.5, 22),
         ]
         for highway, exp_fade, exp_break, exp_detail, exp_prio in cases:
             road = self._make_road(410, pts, highway=highway)
@@ -1394,5 +1394,60 @@ class TestGoldenSectorRoadOverhaul:
         assert len(center) == 2
         piece2_xs = [n[0] for n in center[1]["nodes"]]
         assert min(piece2_xs) < 67.0 and max(piece2_xs) > 199.0
+
+    def test_edge_decals_skip_service_narrow_and_despike_tight_curves(self) -> None:
+        from types import SimpleNamespace
+
+        from ivanovo2beam.beamng.level import SceneTree
+        from ivanovo2beam.roads.build import add_network_to_scene
+
+        elev = np.zeros((4, 4), dtype=np.float64)
+        build = SimpleNamespace(elevations=elev, origin_x=-50.0, origin_y=-50.0, cell_size_m=50.0)
+        tree = SceneTree(level_id="test_level")
+
+        service = self._road(931, np.array([[0.0, 0.0], [80.0, 0.0]]), highway="service", lanes=1, width_m=7.0)
+        narrow_res = self._road(932, np.array([[0.0, 20.0], [80.0, 20.0]]), highway="residential", lanes=1, width_m=4.5)
+        short_stub = self._road(933, np.array([[0.0, 40.0], [8.0, 40.0]]), highway="unclassified", lanes=2, width_m=7.0)
+        # Tight 180-deg hairpin turn where inner 4.25m lateral offset would self-fold without despiking
+        angles = np.linspace(0.0, math.pi, 13)
+        curve_pts = np.column_stack((30.0 + 3.0 * np.cos(angles), 60.0 + 3.0 * np.sin(angles)))
+        curve_pts = np.vstack(([[33.0, 45.0]], curve_pts, [[27.0, 45.0]]))
+        hairpin = self._road(934, curve_pts, highway="residential", lanes=2, width_m=7.0)
+
+        add_network_to_scene(tree, [service, narrow_res, short_stub, hairpin], build)
+        objs = tree.objects[("level_objects", "road_network")]
+        names = {o["name"] for o in objs}
+
+        assert not any(n.startswith("way931_edge_") for n in names)
+        assert not any(n.startswith("way932_edge_") for n in names)
+        assert not any(n.startswith("way933_edge_") for n in names)
+        for obj in objs:
+            assert obj["startTangent"] == 0
+            assert obj["endTangent"] == 0
+            ns = obj["nodes"]
+            arc_len = sum(math.hypot(ns[i][0] - ns[i - 1][0], ns[i][1] - ns[i - 1][1]) for i in range(1, len(ns)))
+            assert sum(obj["startEndFade"]) <= arc_len * 0.4 + 1e-6
+            if obj["name"].startswith("way934_edge_"):
+                for i in range(1, len(ns) - 1):
+                    ax, ay = ns[i][0] - ns[i - 1][0], ns[i][1] - ns[i - 1][1]
+                    bx, by = ns[i + 1][0] - ns[i][0], ns[i + 1][1] - ns[i][1]
+                    la, lb = math.hypot(ax, ay), math.hypot(bx, by)
+                    if la > 1e-6 and lb > 1e-6:
+                        assert (ax * bx + ay * by) / (la * lb) > -0.65
+
+    def test_bridge_overobjects_capping_and_drape_height(self) -> None:
+        pts = np.column_stack((np.linspace(0.0, 420.0, 43), np.zeros(43)))
+        long_bridge = self._road(940, pts, highway="primary", lanes=2, width_m=10.0, bridge=True, layer=1)
+        deck_z = np.full(43, 110.0)
+        b_objs = road_to_decal_objects(long_bridge, "test_level", ground_z=deck_z)
+        assert len(b_objs) >= 2
+        for obj in b_objs:
+            ns = obj["nodes"]
+            arc_len = sum(math.hypot(ns[i][0] - ns[i - 1][0], ns[i][1] - ns[i - 1][1]) for i in range(1, len(ns)))
+            assert arc_len <= 250.5
+            assert obj["overObjects"] is True
+            assert obj["startTangent"] == 0
+            assert obj["endTangent"] == 0
+            assert all(n[2] == pytest.approx(110.5) for n in ns)
 
 

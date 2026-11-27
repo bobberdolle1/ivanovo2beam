@@ -345,6 +345,80 @@ class TestBridgeDeckAndGeometry:
         chord = np.linspace(deck_z[0], deck_z[-1], deck_z.size)
         assert np.all(deck_z >= chord - 1e-4)
 
+    def test_solve_coupled_bridge_profile_no_portal_step_kink(self) -> None:
+        bridge = Road(
+            osm_id=744374326,
+            highway="secondary",
+            points=np.array([[0.0, 0.0], [28.0, 0.0]]),
+            width_m=7.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=False,
+            bridge=True,
+            tunnel=False,
+            layer=1,
+            name="Portal Bank Bridge",
+            maxspeed_kph=60.0,
+            priority=60,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        # Simulate steep embankment right behind abutment where approach_end_z=107.3 is below raw ground[1]=108.6
+        def ground(x: float, _y: float) -> float:
+            if 2.0 <= x <= 26.0:
+                return 108.6
+            return 107.3
+
+        pts_r, deck_z = solve_coupled_bridge_profile(
+            bridge,
+            ground_sampler=ground,
+            approach_end_z=(107.3, 107.3),
+        )
+        seg_ds = np.hypot(np.diff(pts_r[:, 0]), np.diff(pts_r[:, 1]))
+        slopes = np.abs(np.diff(deck_z)) / seg_ds
+        assert float(slopes.max()) <= 0.12
+
+    def test_deck_dae_open_sheet_and_digit_free_node_hierarchy(self, tmp_path: Path) -> None:
+        pts = np.array([[0.0, 0.0], [20.0, 0.0], [40.0, 0.0]])
+        road = Road(
+            osm_id=183556845,
+            highway="primary",
+            points=pts,
+            width_m=10.0,
+            lanes=2,
+            surface="asphalt",
+            oneway=False,
+            bridge=True,
+            tunnel=False,
+            layer=1,
+            name="Deck Mesh Bridge",
+            maxspeed_kph=90.0,
+            priority=80,
+            drivable=True,
+            material_key="Asphalt",
+            decal_material="road_asphalt_2lane",
+        )
+        deck_z = np.array([105.0, 105.2, 105.0])
+        deck_geom, struct_geom = build_bridge_split_geometry(road, deck_z, ground_sampler=lambda _x, _y: 100.0, localize=True)
+        # Open-bottom top+0.15m side-skirt sheet: 2 segments * (top + left skirt + right skirt) * 2 tris = 12 tris, zero -Z faces
+        assert len(deck_geom.triangles) == 12
+        for fn in deck_geom.normals:
+            assert fn[2] >= -1e-6
+
+        deck_dae = tmp_path / "bridge_way183556845_deck.dae"
+        struct_dae = tmp_path / "bridge_way183556845.dae"
+        export_bridge_dae(deck_dae, deck_geom, "bridge_way183556845_deck")
+        export_bridge_dae(struct_dae, struct_geom, "bridge_way183556845")
+
+        ns = {"c": "http://www.collada.org/2005/11/COLLADASchema"}
+        d_root = ET.parse(deck_dae).getroot()
+        s_root = ET.parse(struct_dae).getroot()
+        d_nodes = [n.attrib["id"] for n in d_root.findall(".//c:visual_scene//c:node", ns)]
+        s_nodes = [n.attrib["id"] for n in s_root.findall(".//c:visual_scene//c:node", ns)]
+        assert d_nodes == ["base00", "start01", "bridge_deck"]
+        assert s_nodes == ["base00", "start01", "bridge_struct"]
+
     def test_export_bridge_bundle_split_deck_and_structure(self, tmp_path: Path) -> None:
         from dataclasses import replace
 
