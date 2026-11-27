@@ -2311,6 +2311,43 @@ def build_terrain(
                 if prev is None or c.priority > prev[1]:
                     ground_end_z[k] = (z_val, c.priority)
 
+        def _fallback_surface_z(wx: float, wy: float) -> float | None:
+            """Match Y-split / twin-bridge portals laterally overlapping a graded carriageway."""
+            best_score: tuple[int, float] | None = None
+            best_z: float | None = None
+            for c in prepared:
+                if not c.grade_terrain or c.surface_z is None or c.points.shape[0] < 2:
+                    continue
+                pts_c = c.points
+                margin = float(c.half_width_m) + 3.0
+                if (
+                    wx < float(pts_c[:, 0].min()) - margin
+                    or wx > float(pts_c[:, 0].max()) + margin
+                    or wy < float(pts_c[:, 1].min()) - margin
+                    or wy > float(pts_c[:, 1].max()) + margin
+                ):
+                    continue
+                p0 = pts_c[:-1]
+                p1 = pts_c[1:]
+                seg = p1 - p0
+                l2 = seg[:, 0] ** 2 + seg[:, 1] ** 2
+                safe_l2 = np.where(l2 > 1e-9, l2, 1.0)
+                t = np.clip(((wx - p0[:, 0]) * seg[:, 0] + (wy - p0[:, 1]) * seg[:, 1]) / safe_l2, 0.0, 1.0)
+                t = np.where(l2 > 1e-9, t, 0.0)
+                dx = p0[:, 0] + t * seg[:, 0] - wx
+                dy = p0[:, 1] + t * seg[:, 1] - wy
+                d2 = dx * dx + dy * dy
+                idx_seg = int(np.argmin(d2))
+                dist = math.sqrt(float(d2[idx_seg]))
+                if dist <= margin:
+                    score = (-int(c.priority), dist)
+                    if best_score is None or score < best_score:
+                        best_score = score
+                        best_z = float(
+                            c.surface_z[idx_seg] + t[idx_seg] * (c.surface_z[idx_seg + 1] - c.surface_z[idx_seg])
+                        )
+            return best_z
+
         def _dem_world(wx: float, wy: float) -> float:
             return float(profile_dem.sample_world_array(np.array([wx]), np.array([wy]))[0])  # type: ignore[attr-defined]
 
@@ -2357,8 +2394,8 @@ def build_terrain(
                 continue
             k0 = (round(float(br.points[0, 0]) * 2.0), round(float(br.points[0, 1]) * 2.0))
             k1 = (round(float(br.points[-1, 0]) * 2.0), round(float(br.points[-1, 1]) * 2.0))
-            ez0 = ground_end_z[k0][0] if k0 in ground_end_z else None
-            ez1 = ground_end_z[k1][0] if k1 in ground_end_z else None
+            ez0 = ground_end_z[k0][0] if k0 in ground_end_z else _fallback_surface_z(float(br.points[0, 0]), float(br.points[0, 1]))
+            ez1 = ground_end_z[k1][0] if k1 in ground_end_z else _fallback_surface_z(float(br.points[-1, 0]), float(br.points[-1, 1]))
             b_pts, b_z = solve_coupled_bridge_profile(
                 br,
                 ground_sampler=_dem_world,
