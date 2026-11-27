@@ -2084,6 +2084,7 @@ class _PlacementJob:
     taper_boundary: Any = None
     edge_taper_m: float = 0.0
     taper_mode: str = "none"
+    zone_tier: int = 1
 
 
 def _build_forest_zone_jobs(
@@ -2140,6 +2141,7 @@ def _build_forest_zone_jobs(
                     taper_boundary=outer_boundary,
                     edge_taper_m=_EDGE_TAPER_WIDTH_M,
                     taper_mode="canopy",
+                    zone_tier=0,
                 )
             )
         n_saplings = round(ep_ha * _DEFAULT_SAPLING_ROADSIDE_PER_HA * density_scale)
@@ -2155,6 +2157,7 @@ def _build_forest_zone_jobs(
                     taper_boundary=outer_boundary,
                     edge_taper_m=_EDGE_TAPER_WIDTH_M,
                     taper_mode="edge_shrub",
+                    zone_tier=0,
                 )
             )
         n_edge_under = round(ep_ha * _DEFAULT_EDGE_UNDERGROWTH_PER_HA * density_scale)
@@ -2170,6 +2173,7 @@ def _build_forest_zone_jobs(
                     taper_boundary=outer_boundary,
                     edge_taper_m=_EDGE_TAPER_WIDTH_M,
                     taper_mode="edge_shrub",
+                    zone_tier=0,
                 )
             )
 
@@ -2192,6 +2196,7 @@ def _build_forest_zone_jobs(
                         canopy_weights,
                         road_dist_range=(0.0, _ROADSIDE_ZONE_M),
                         scale_range=(0.90, 1.35),
+                        zone_tier=0,
                     )
                 )
             n_near_sap = round(near_ha * _DEFAULT_SAPLING_ROADSIDE_PER_HA * density_scale)
@@ -2205,6 +2210,7 @@ def _build_forest_zone_jobs(
                         sapling_weights,
                         road_dist_range=(0.0, _ROADSIDE_ZONE_M),
                         scale_range=(0.65, 0.95),
+                        zone_tier=0,
                     )
                 )
             n_near_u = round(near_ha * _DEFAULT_EDGE_UNDERGROWTH_PER_HA * density_scale)
@@ -2218,6 +2224,7 @@ def _build_forest_zone_jobs(
                         bush_weights,
                         road_dist_range=(0.0, _ROADSIDE_ZONE_M),
                         scale_range=(0.75, 1.20),
+                        zone_tier=0,
                     )
                 )
 
@@ -2235,6 +2242,7 @@ def _build_forest_zone_jobs(
                         canopy_weights,
                         road_dist_range=mid_range,
                         scale_range=(0.90, 1.35),
+                        zone_tier=1,
                     )
                 )
             n_mid_sap = round(mid_ha * _DEFAULT_SAPLING_CORE_PER_HA * density_scale)
@@ -2248,6 +2256,7 @@ def _build_forest_zone_jobs(
                         sapling_weights,
                         road_dist_range=mid_range,
                         scale_range=(0.65, 0.95),
+                        zone_tier=1,
                     )
                 )
             n_mid_bush = round(mid_ha * _DEFAULT_CORE_BUSH_FALLBACK_PER_HA * density_scale)
@@ -2261,6 +2270,7 @@ def _build_forest_zone_jobs(
                         bush_weights,
                         road_dist_range=mid_range,
                         scale_range=(0.75, 1.15),
+                        zone_tier=1,
                     )
                 )
             if has_ferns and fern_keys:
@@ -2276,6 +2286,7 @@ def _build_forest_zone_jobs(
                             is_fern=True,
                             road_dist_range=mid_range,
                             scale_range=(0.85, 1.30),
+                            zone_tier=1,
                         )
                     )
 
@@ -2292,6 +2303,7 @@ def _build_forest_zone_jobs(
                         canopy_weights,
                         road_dist_range=(_BACKDROP_DISTANCE_M, math.inf),
                         scale_range=(0.92, 1.32),
+                        zone_tier=2,
                     )
                 )
 
@@ -2617,9 +2629,11 @@ def export_vegetation(
                                 taper_boundary=job.taper_boundary,
                                 edge_taper_m=job.edge_taper_m,
                                 taper_mode=job.taper_mode,
+                                zone_tier=job.zone_tier,
                             )
                         )
 
+        pass2_queue.sort(key=lambda j: j.zone_tier)
         for job in pass2_queue:
             if total_placed >= max_trees:
                 break

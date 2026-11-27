@@ -135,3 +135,85 @@ class TestRoadsideProps:
         for gr_obj in (o for o in objs if "/road_props/guardrail_" in o["shapeName"]):
             rel = gr_obj["shapeName"].split("/test_level/", 1)[1]
             assert (tmp_path / rel).is_file()
+            assert gr_obj["collisionType"] == "Collision Mesh"
+            assert gr_obj["meshCulling"] is True
+            assert "useInstanceRenderData" not in gr_obj
+            gr_root = ET.parse(tmp_path / rel).getroot()
+            node_ids = {n.attrib.get("id") for n in gr_root.findall(".//c:node", {"c": "http://www.collada.org/2005/11/COLLADASchema"})}
+            assert "Colmesh-1" in node_ids
+            assert "nulldetail6" in node_ids
+
+        # Collision & instancing optimization checks
+        for o in objs:
+            assert o["meshCulling"] is True
+            sn = o["shapeName"]
+            if sn in {POLE_LIGHT_SINGLE, POLE_WOOD_OLD, BUS_STOP_SHELTER}:
+                assert o["collisionType"] == "Collision Mesh"
+                assert o["useInstanceRenderData"] is True
+            elif sn == BUS_STOP_SIGN or "/Clutter/" in sn:
+                assert o["collisionType"] == "Bounds"
+                assert o["useInstanceRenderData"] is True
+
+    def test_guardrail_and_poles_never_block_curved_approaches_or_loops(self, tmp_path: Path) -> None:
+        elev = np.full((32, 32), 100.0, dtype=np.float64)
+        build = SimpleNamespace(elevations=elev, origin_x=-100.0, origin_y=-100.0, cell_size_m=20.0)
+        tree = SceneTree(level_id="test_level")
+
+        # Bridge (layer=1) connecting to a sharply curved approach road (layer=0)
+        bridge = _road(10, np.array([[100.0, 100.0], [160.0, 100.0]]), highway="primary", bridge=True, layer=1, width_m=7.0)
+        curved_app = _road(
+            11,
+            np.array([[160.0, 100.0], [185.0, 105.0], [205.0, 125.0], [220.0, 160.0]]),
+            highway="primary",
+            layer=0,
+            width_m=7.0,
+        )
+        # Hairpin residential loop bending within 3m of itself + unnamed short residential stub
+        hairpin = _road(
+            12,
+            np.array([[20.0, 200.0], [140.0, 200.0], [145.0, 203.0], [140.0, 205.0], [20.0, 205.0]]),
+            highway="residential",
+            name="Hairpin St",
+            width_m=7.0,
+        )
+        short_unnamed = _road(
+            13,
+            np.array([[10.0, 280.0], [90.0, 280.0]]),
+            highway="residential",
+            name="",
+            width_m=7.0,
+        )
+
+        add_roadside_props_to_scene(tree, [bridge, curved_app, hairpin, short_unnamed], build, level_dir=tmp_path)
+        objs = tree.objects[ROAD_PROPS_GROUP]
+
+        # Unnamed short residential stub should get 0 poles
+        assert not any(o["name"].startswith("prop_pole_13_") for o in objs)
+
+        # Verify zero prop origins and zero guardrail vertices lie inside any road carriageway
+        from ivanovo2beam.roads.build import build_carriageway_index
+
+        idx = build_carriageway_index([bridge, curved_app, hairpin, short_unnamed])
+        for o in objs:
+            px, py, _ = o["position"]
+            if "guardrail_" in o["name"]:
+                rel = o["shapeName"].split("/test_level/", 1)[1]
+                root = ET.parse(tmp_path / rel).getroot()
+                fa = root.find(".//{http://www.collada.org/2005/11/COLLADASchema}float_array")
+                assert fa is not None and fa.text
+                vals = [float(v) for v in fa.text.split()]
+                for k in range(0, len(vals), 3):
+                    vx, vy = px + vals[k], py + vals[k + 1]
+                    for seg in idx.segments:
+                        dx, dy = seg.bx - seg.ax, seg.by - seg.ay
+                        l2 = dx * dx + dy * dy
+                        t = max(0.0, min(1.0, ((vx - seg.ax) * dx + (vy - seg.ay) * dy) / l2))
+                        d = ((seg.ax + t * dx - vx) ** 2 + (seg.ay + t * dy - vy) ** 2) ** 0.5
+                        assert d >= seg.half_width - 0.05, f"{o['name']} vertex inside road at d={d:.2f}"
+            else:
+                for seg in idx.segments:
+                    dx, dy = seg.bx - seg.ax, seg.by - seg.ay
+                    l2 = dx * dx + dy * dy
+                    t = max(0.0, min(1.0, ((px - seg.ax) * dx + (py - seg.ay) * dy) / l2))
+                    d = ((seg.ax + t * dx - px) ** 2 + (seg.ay + t * dy - py) ** 2) ** 0.5
+                    assert d >= seg.half_width - 0.05, f"{o['name']} inside road at d={d:.2f}"

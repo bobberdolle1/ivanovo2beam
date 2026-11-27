@@ -641,6 +641,42 @@ def _build_extruded_body(
             builder.add_roof_triangles(p, lift_gable, material=roof_material, up=True)
 
 
+def add_prism_collider(
+    builder: MeshBuilder,
+    ring: NDArray[np.float64],
+    holes: Sequence[NDArray[np.float64]] = (),
+    *,
+    base_z: float,
+    top_z: float,
+    simplify_m: float = 1.5,
+) -> None:
+    """Append a simplified flat-top prism to ``builder`` for ``Colmesh-1`` physics."""
+    col_ring = ring
+    if ring.shape[0] > 7 and not holes:
+        poly = Polygon(ring).simplify(simplify_m, preserve_topology=True)
+        if isinstance(poly, Polygon) and poly.is_valid and poly.area > 1.0:
+            coords = np.asarray(poly.exterior.coords, dtype=np.float64)
+            if coords.shape[0] >= 4:
+                col_ring = coords
+    signed_area = float(0.5 * np.sum(col_ring[:-1, 0] * col_ring[1:, 1] - col_ring[1:, 0] * col_ring[:-1, 1]))
+    if signed_area < 0:
+        col_ring = col_ring[::-1].copy()
+
+    n_ring = col_ring.shape[0]
+    builder.add_wall_strip(
+        col_ring, [base_z] * n_ring, [top_z] * n_ring, material="colmesh", is_inner=False
+    )
+    for h in holes:
+        nh = h.shape[0]
+        h_area = float(0.5 * np.sum(h[:-1, 0] * h[1:, 1] - h[1:, 0] * h[:-1, 1]))
+        h_ccw = h[::-1].copy() if h_area < 0 else h
+        builder.add_wall_strip(
+            h_ccw, [base_z] * nh, [top_z] * nh, material="colmesh", is_inner=True
+        )
+    poly_col = Polygon(col_ring, holes)
+    builder.add_roof_triangles(poly_col, lambda _x, _y: top_z, material="colmesh", up=True)
+
+
 # ---------------------------------------------------------------------------
 # COLLADA 1.4.1 Export
 # ---------------------------------------------------------------------------
@@ -658,11 +694,13 @@ def mesh_to_dae_xml(
     material_name: str | None = None,
     materials: Sequence[str] | None = None,
     colour: tuple[float, float, float] = (0.7, 0.7, 0.7),
+    collision_mesh: Mesh | None = None,
+    nulldetail_px: int | None = None,
 ) -> str:
     """Serialise a mesh as a BeamNG-compatible COLLADA 1.4.1 document.
 
-    Supports multiple materials, texture coordinates (map1), and standard BeamNG
-    lighting techniques.
+    Supports multiple materials, texture coordinates (map1), optional simplified
+    ``Colmesh-1`` physics geometry, and Torque3D ``nulldetail`` LOD culling.
     """
     if materials is None:
         mat_list = [material_name] if material_name else mesh.unique_materials()
@@ -757,6 +795,89 @@ def mesh_to_dae_xml(
     materials_str = "\n".join(materials_xml)
     triangles_str = "\n".join(triangles_xml)
 
+    col_geom_xml = ""
+    col_node_xml = ""
+    if collision_mesh is not None and collision_mesh.triangles and collision_mesh.positions:
+        c_pos = _format_floats([c for p in collision_mesh.positions for c in p])
+        c_norm = _format_floats([c for n in collision_mesh.normals for c in n])
+        c_p = " ".join(
+            f"{tri[corner_i][0]} {tri[corner_i][1]}"
+            for tri in collision_mesh.triangles
+            for corner_i in range(3)
+        )
+        col_geom_xml = f"""
+    <geometry id="{escape(name)}-colmesh" name="{escape(name)}-colmesh">
+      <mesh>
+        <source id="{escape(name)}-colmesh-positions">
+          <float_array id="{escape(name)}-colmesh-positions-array" count="{len(collision_mesh.positions) * 3}">{c_pos}</float_array>
+          <technique_common>
+            <accessor source="#{escape(name)}-colmesh-positions-array" count="{len(collision_mesh.positions)}" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="{escape(name)}-colmesh-normals">
+          <float_array id="{escape(name)}-colmesh-normals-array" count="{len(collision_mesh.normals) * 3}">{c_norm}</float_array>
+          <technique_common>
+            <accessor source="#{escape(name)}-colmesh-normals-array" count="{len(collision_mesh.normals)}" stride="3">
+              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="{escape(name)}-colmesh-vertices">
+          <input semantic="POSITION" source="#{escape(name)}-colmesh-positions"/>
+        </vertices>
+        <triangles count="{len(collision_mesh.triangles)}">
+          <input semantic="VERTEX" source="#{escape(name)}-colmesh-vertices" offset="0"/>
+          <input semantic="NORMAL" source="#{escape(name)}-colmesh-normals" offset="1"/>
+          <p>{c_p}</p>
+        </triangles>
+      </mesh>
+    </geometry>"""
+        col_node_xml = f"""
+          <node id="Colmesh-1" name="Colmesh-1" type="NODE">
+            <matrix sid="transform">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+            <instance_geometry url="#{escape(name)}-colmesh" name="Colmesh-1"/>
+          </node>"""
+
+    if col_node_xml or nulldetail_px is not None:
+        null_xml = (
+            f"""
+        <node id="nulldetail{nulldetail_px}" name="nulldetail{nulldetail_px}" type="NODE">
+          <matrix sid="transform">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        </node>"""
+            if nulldetail_px is not None
+            else ""
+        )
+        vis_node_name = f"{escape(name)}_a12"
+        visual_scene_xml = f"""      <node id="base00" name="base00" type="NODE">
+        <matrix sid="transform">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <node id="start01" name="start01" type="NODE">
+          <matrix sid="transform">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+          <node id="{vis_node_name}" name="{vis_node_name}" type="NODE">
+            <matrix sid="transform">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+            <instance_geometry url="#{escape(name)}-mesh" name="{vis_node_name}">
+              <bind_material>
+                <technique_common>
+{instance_materials_xml}
+                </technique_common>
+              </bind_material>
+            </instance_geometry>
+          </node>{col_node_xml}
+        </node>{null_xml}
+      </node>"""
+    else:
+        visual_scene_xml = f"""      <node id="{escape(name)}" name="{escape(name)}" type="NODE">
+        <matrix sid="transform">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <instance_geometry url="#{escape(name)}-mesh" name="{escape(name)}">
+          <bind_material>
+            <technique_common>
+{instance_materials_xml}
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>"""
+
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <asset>
@@ -813,20 +934,11 @@ def mesh_to_dae_xml(
         </vertices>
 {triangles_str}
       </mesh>
-    </geometry>
+    </geometry>{col_geom_xml}
   </library_geometries>
   <library_visual_scenes>
     <visual_scene id="Scene" name="Scene">
-      <node id="{escape(name)}" name="{escape(name)}" type="NODE">
-        <matrix sid="transform">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
-        <instance_geometry url="#{escape(name)}-mesh" name="{escape(name)}">
-          <bind_material>
-            <technique_common>
-{instance_materials_xml}
-            </technique_common>
-          </bind_material>
-        </instance_geometry>
-      </node>
+{visual_scene_xml}
     </visual_scene>
   </library_visual_scenes>
   <scene>
@@ -844,13 +956,21 @@ def write_dae(
     material_name: str | None = None,
     materials: Sequence[str] | None = None,
     colour: tuple[float, float, float] = (0.7, 0.7, 0.7),
+    collision_mesh: Mesh | None = None,
+    nulldetail_px: int | None = None,
 ) -> int:
     """Write a mesh as a COLLADA file."""
     if not mesh.triangles:
         raise ValueError(f"refusing to write an empty mesh for {name!r}")
     path.parent.mkdir(parents=True, exist_ok=True)
     xml = mesh_to_dae_xml(
-        mesh, name=name, material_name=material_name, materials=materials, colour=colour
+        mesh,
+        name=name,
+        material_name=material_name,
+        materials=materials,
+        colour=colour,
+        collision_mesh=collision_mesh,
+        nulldetail_px=nulldetail_px,
     )
     path.write_text(xml, encoding="utf-8")
     return len(xml)

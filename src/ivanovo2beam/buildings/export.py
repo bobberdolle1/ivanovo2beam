@@ -43,6 +43,7 @@ from ivanovo2beam.buildings.mesh import (
     MeshBuilder,
     _build_extruded_body,
     _centre,
+    add_prism_collider,
     extrude_footprint,
     normalize_roof_shape,
     roof_height_for,
@@ -58,7 +59,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 _BUILDING_MATERIAL_NS = uuid.UUID("7a31b4e0-9112-4c28-98e6-1c8832a514d2")
 
 #: Default spatial sector chunk size in metres.
-DEFAULT_CHUNK_SIZE_M = 500.0
+DEFAULT_CHUNK_SIZE_M = 750.0
 
 #: Footprint area above which a building gets its own exact mesh in archetype mode.
 UNIQUE_AREA_M2 = 1500.0
@@ -556,8 +557,13 @@ def export_buildings(
         )
 
     # Emit main.materials.json mapping all materials so there is zero WarningMaterial
+    # (Chunked mode only uses BUILDING_MATERIALS keys; legacy archetype mode uses per-archetype names.)
     materials_path = shapes_dir / "main.materials.json"
-    extra_mats = [o["shapeName"].rsplit("/", 1)[-1].replace(".dae", "") for o in objects]
+    extra_mats = (
+        []
+        if batch_chunks
+        else [o["shapeName"].rsplit("/", 1)[-1].replace(".dae", "") for o in objects]
+    )
     stats.bytes_written += write_building_materials(materials_path, level_id, extra_materials=extra_mats)
 
     for footprint in selected:
@@ -594,6 +600,7 @@ def _export_buildings_chunked(
         chunk_cy = (iy + 0.5) * chunk_size_m
 
         builder = MeshBuilder()
+        col_builder = MeshBuilder()
 
         for footprint in chunk_buildings:
             wall_mat, roof_mat = resolve_building_materials(footprint)
@@ -643,6 +650,17 @@ def _export_buildings_chunked(
                 )
                 bld_mesh = bld_builder.build()
 
+                # Add simplified flat-top prism collider (Colmesh-1) in chunk frame
+                col_top_z = anchor_z + footprint.min_height_m + footprint.height_m + (0.5 * roof_h if roof != "flat" else 0.0)
+                col_base_z = anchor_z + footprint.min_height_m - skirt_depth
+                add_prism_collider(
+                    col_builder,
+                    ring_local,
+                    holes_local,
+                    base_z=col_base_z,
+                    top_z=col_top_z,
+                )
+
                 # Add to chunk mesh with world elevation and chunk offset
                 for idx, tri in enumerate(bld_mesh.triangles):
                     mat = bld_mesh.triangle_materials[idx]
@@ -673,6 +691,7 @@ def _export_buildings_chunked(
         chunk_mesh = builder.build()
         if chunk_mesh.triangle_count == 0:
             continue
+        col_mesh = col_builder.build()
 
         dae_filename = f"{chunk_name}.dae"
         dae_path = shapes_dir / dae_filename
@@ -681,6 +700,8 @@ def _export_buildings_chunked(
             chunk_mesh,
             name=f"{level_id}_{chunk_name}",
             materials=chunk_mesh.unique_materials(),
+            collision_mesh=col_mesh if col_mesh.triangle_count > 0 else None,
+            nulldetail_px=6,
         )
 
         stats.bytes_written += written
@@ -695,7 +716,7 @@ def _export_buildings_chunked(
                 "position": [round(chunk_cx, 4), round(chunk_cy, 4), 0.0],
                 "shapeName": f"{asset_prefix}/{dae_filename}",
                 "scale": [1.0, 1.0, 1.0],
-                "collisionType": "Visible Mesh Final",
+                "collisionType": "Collision Mesh" if col_mesh.triangle_count > 0 else "Visible Mesh Final",
                 "decalType": "None",
                 "meshCulling": True,
                 "useInstanceRenderData": True,

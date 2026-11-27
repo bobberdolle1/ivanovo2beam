@@ -1543,3 +1543,77 @@ class TestV2TerrainAndHydrologyRegressions:
         assert (layers == mat_idx["Field"]).any()
         assert (layers == mat_idx["Meadow"]).any()
         assert (layers == mat_idx["DryGrass"]).any()
+
+    def test_4m_diagonal_narrow_street_and_tjunction_no_grass_bleed(self) -> None:
+        from ivanovo2beam.beamng.materials import DEFAULT_MATERIAL_ORDER
+
+        mat_idx = {k: i for i, k in enumerate(DEFAULT_MATERIAL_ORDER)}
+        n, cell = 64, 4.0
+        elev = np.full((n, n), 100.0, dtype=np.float64)
+        # Add cross-slope variation so un-graded flanking vertices would otherwise poke through
+        rows = np.arange(n, dtype=np.float64)[:, None]
+        elev += 0.6 * np.sin(rows * 0.4)
+        layers = np.zeros((n, n), dtype=np.uint8)
+
+        diag_street = RoadCorridor(
+            points=np.array([[20.0, 20.0], [220.0, 220.0]]),
+            half_width_m=2.0,
+            corridor_half_width_m=14.0,
+            priority=50,
+            surface_z=np.array([100.0, 100.0]),
+            material_key="Asphalt",
+            shoulder_material_key="Grass",
+            key="diag",
+        )
+        side_street = RoadCorridor(
+            points=np.array([[120.0, 120.0], [120.0, 220.0]]),
+            half_width_m=1.75,
+            corridor_half_width_m=14.0,
+            priority=40,
+            surface_z=np.array([100.0, 100.0]),
+            material_key="Asphalt",
+            shoulder_material_key="Grass",
+            key="side",
+        )
+        grade_corridors(
+            elev,
+            layers,
+            mat_idx,
+            [diag_street, side_street],
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=cell,
+            min_blend_skirt_m=15.0,
+        )
+        # Flanking vertices along the 45-deg street (dist ~2.83m) must stay flat at 100.0
+        # and NEVER stay Grass (must be Asphalt or Gravel)
+        excluded = {mat_idx["Asphalt"], mat_idx["Gravel"]}
+        for k in range(10, 45):
+            assert elev[k, k] == pytest.approx(100.0, abs=0.02)
+            assert elev[k, k + 1] == pytest.approx(100.0, abs=0.02)
+            assert int(layers[k, k]) in excluded
+            assert int(layers[k, k + 1]) in excluded
+        # T-junction corner at (120, 124) -> row 31, col 30 must not have shoulder erased to Grass
+        assert int(layers[31, 30]) in excluded
+
+    def test_paint_landcover_4m_forest_floor_has_mossy_glades(self) -> None:
+        from shapely.geometry import Polygon
+
+        from ivanovo2beam.beamng.materials import DEFAULT_MATERIAL_ORDER
+        from ivanovo2beam.terrain.builder import paint_landcover
+
+        mat_idx = {k: i for i, k in enumerate(DEFAULT_MATERIAL_ORDER)}
+        layers = np.zeros((128, 128), dtype=np.uint8)
+        forest_poly = Polygon([[40.0, 40.0], [460.0, 40.0], [460.0, 460.0], [40.0, 460.0], [40.0, 40.0]])
+        paint_landcover(
+            layers,
+            mat_idx,
+            {"ForestFloor": [forest_poly]},
+            origin_x=0.0,
+            origin_y=0.0,
+            cell_size_m=4.0,
+            natural_variation=True,
+        )
+        sub = layers[15:110, 15:110]
+        assert (sub == mat_idx["ForestFloor"]).any()
+        assert (sub == mat_idx["Grass"]).any()

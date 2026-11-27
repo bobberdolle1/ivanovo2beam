@@ -669,7 +669,7 @@ class TestExport:
         assert len(objects) == 5
 
     def test_spatial_chunk_batching(self, tmp_path: Path) -> None:
-        """Batch buildings into 500m x 500m sector .dae files."""
+        """Batch buildings into sector .dae files with Colmesh-1 and nulldetail LOD."""
         objects, stats = export_buildings(
             self._buildings(), self._FlatBuild(), level_id="lvl", level_dir=tmp_path, batch_chunks=True
         )
@@ -678,26 +678,35 @@ class TestExport:
         assert len(objects) == stats.chunks
         for obj in objects:
             assert obj["class"] == "TSStatic"
-            assert obj["collisionType"] == "Visible Mesh Final"
+            assert obj["collisionType"] == "Collision Mesh"
             assert obj["meshCulling"] is True
             assert obj["useInstanceRenderData"] is True
             assert obj["shapeName"].startswith("/levels/lvl/art/shapes/buildings/chunk_")
             assert obj["scale"] == [1.0, 1.0, 1.0]
 
-        # Check .dae files on disk
+        # Check .dae files on disk have Colmesh-1 and nulldetail6
         for obj in objects:
             rel = obj["shapeName"].replace("/levels/lvl/", "")
             dae_path = tmp_path / rel
             assert dae_path.is_file()
             root = ET.fromstring(dae_path.read_text(encoding="utf-8"))
             assert root.tag.endswith("COLLADA")
+            node_ids = {n.attrib.get("id") for n in root.findall(f".//{COLLADA_NS}node")}
+            assert "Colmesh-1" in node_ids
+            assert "nulldetail6" in node_ids
+            geoms = root.findall(f".//{COLLADA_NS}geometry")
+            assert len(geoms) == 2
+            vis_tris = sum(int(t.attrib["count"]) for t in geoms[0].findall(f".//{COLLADA_NS}triangles"))
+            col_tris = sum(int(t.attrib["count"]) for t in geoms[1].findall(f".//{COLLADA_NS}triangles"))
+            assert 0 < col_tris < vis_tris
 
-        # Check main.materials.json
+        # Check main.materials.json contains typology materials without chunk_* bloat
         mat_path = tmp_path / "art" / "shapes" / "buildings" / "main.materials.json"
         assert mat_path.is_file()
         materials = json.loads(mat_path.read_text(encoding="utf-8"))
         assert "bld_brick_industrial" in materials
         assert "bld_wood_wall" in materials
+        assert not any(k.startswith("chunk_") for k in materials)
         assert materials["bld_brick_industrial"]["class"] == "Material"
 
     def test_slope_skirts_extend_walls_downwards(self) -> None:
