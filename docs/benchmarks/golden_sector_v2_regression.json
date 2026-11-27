@@ -1,11 +1,11 @@
 {
-  "timestamp_utc": "2026-11-26T14:39:44.424117+00:00",
+  "timestamp_utc": "2026-11-27T07:34:36.280280+00:00",
   "level_id": "ivanovo_golden_sector",
   "mode": "regression",
   "vehicle": "etk800",
-  "cold_cache": false,
-  "wall_load_to_ready_s": 35.79,
-  "fps_limit_reason": "{\"backgroundCap\":240,\"backgroundActive\":false,\"fpsCap\":0,\"windowFocused\":true,\"vr\":false,\"foregroundCap\":60,\"foregroundActive\":false,\"vsync\":false}",
+  "cold_cache": true,
+  "wall_load_to_ready_s": 35.8,
+  "fps_limit_reason": "{\"backgroundCap\":240,\"backgroundActive\":false,\"fpsCap\":0,\"windowFocused\":false,\"vr\":false,\"foregroundCap\":60,\"foregroundActive\":false,\"vsync\":false}",
   "settings": {
     "settings_path": "<BEAMNG_USER_DIR>\\settings\\settings.json",
     "GraphicDisplayResolutions": "1920 1080",
@@ -38,49 +38,49 @@
   },
   "nvidia_smi_baseline": {
     "gpu_name": "NVIDIA GeForce RTX 3080",
-    "vram_used_mib": 2026.0,
+    "vram_used_mib": 1863.0,
     "vram_total_mib": 10240.0,
-    "gpu_util_pct": 4.0,
-    "gpu_clock_mhz": 1860.0
+    "gpu_util_pct": 6.0,
+    "gpu_clock_mhz": 390.0
   },
   "static_budget": {
     "level_id": "ivanovo_golden_sector",
     "level_dir": "<REPO_ROOT>\\build\\levels\\ivanovo_golden_sector",
     "zip_path": "<REPO_ROOT>\\build\\ivanovo_golden_sector.zip",
-    "zip_bytes": 34245409,
-    "zip_mib": 32.66,
+    "zip_bytes": 37644336,
+    "zip_mib": 35.9,
     "ter_bytes": 50331771,
     "ter_mib": 48.0,
     "terrain_grid_size": 4096,
     "terrain_square_size_m": 1.0,
-    "decal_roads": 1733,
-    "decal_nodes": 21578,
+    "decal_roads": 979,
+    "decal_nodes": 13994,
     "mesh_roads": 0,
     "forest_items": 45000,
     "forest_types": 30,
-    "water_blocks": 407,
+    "water_blocks": 119,
     "rivers": 9,
-    "ts_statics": 642,
-    "dae_files": 45,
-    "dae_bytes": 3721264
+    "ts_statics": 310,
+    "dae_files": 34,
+    "dae_bytes": 4493315
   },
   "extended_static": {
     "terrain_blocks": 1,
     "ground_covers": 8,
-    "decal_roads_over_objects_true": 8,
-    "decal_roads_over_objects_false": 1725,
+    "decal_roads_over_objects_true": 4,
+    "decal_roads_over_objects_false": 975,
     "ground_mesh_statics": 0
   },
   "scene_probe": {
-    "decal_roads_over_objects_true": 8,
+    "decal_roads_over_objects_true": 4,
     "spawn_pos": [
       7605.0639648438,
       -8258.87109375,
-      104.09823608398
+      104.09824371338
     ],
     "decal_roads_missing_material": 0,
-    "road_props_count": 604,
-    "water_block_count": 407,
+    "road_props_count": 283,
+    "water_block_count": 119,
     "terrain_blocks": [
       {
         "min": [
@@ -103,49 +103,49 @@
       }
     ],
     "river_count": 9,
-    "ts_static_count": 653,
+    "ts_static_count": 321,
     "groundcovers": [
       {
         "name": "gc_meadow_grass_close",
-        "maxElements": 48000
+        "maxElements": 34000
       },
       {
         "name": "gc_meadow_grass_distant",
-        "maxElements": 72000
+        "maxElements": 46000
       },
       {
         "name": "gc_tall_roadside_grass",
-        "maxElements": 48000
+        "maxElements": 32000
       },
       {
         "name": "gc_field_grass",
-        "maxElements": 44000
+        "maxElements": 30000
       },
       {
         "name": "gc_wildflowers",
-        "maxElements": 28000
+        "maxElements": 16000
       },
       {
         "name": "gc_forest_undergrowth",
-        "maxElements": 48000
+        "maxElements": 32000
       },
       {
         "name": "gc_low_scrub",
-        "maxElements": 18000
+        "maxElements": 10000
       },
       {
         "name": "gc_3d_foliage_close",
-        "maxElements": 16000
+        "maxElements": 10000
       }
     ],
-    "decal_roads_total": 1733,
-    "decal_roads_over_objects_false": 1725,
-    "buildings_count": 34,
+    "decal_roads_total": 979,
+    "decal_roads_over_objects_false": 975,
+    "buildings_count": 23,
     "ground_mesh_sample_boxes": {},
     "groundcover_count": 8
   },
   "zfighting_and_materials": {
-    "decal_road_count": 1733,
+    "decal_road_count": 979,
     "decal_bias_max": 0.0049999998882413,
     "decal_bias_min": 0.0015000000130385,
     "over_objects_sample": [
@@ -170,30 +170,6 @@
       {
         "bias": 0.0049999998882413,
         "name": "way274102985_line_right",
-        "mat": "m_line_white",
-        "pri": 1
-      },
-      {
-        "bias": 0.0020000000949949,
-        "name": "way274102983",
-        "mat": "road_asphalt_2lane",
-        "pri": 15
-      },
-      {
-        "bias": 0.0049999998882413,
-        "name": "way274102983_mark_1",
-        "mat": "m_line_white_discontinue",
-        "pri": 2
-      },
-      {
-        "bias": 0.0049999998882413,
-        "name": "way274102983_line_left",
-        "mat": "m_line_white",
-        "pri": 1
-      },
-      {
-        "bias": 0.0049999998882413,
-        "name": "way274102983_line_right",
         "mat": "m_line_white",
         "pri": 1
       }
@@ -301,155 +277,195 @@
       ]
     }
   ],
+  "end_to_end_nav_path": {
+    "path_length_km": 0.818,
+    "end_label": "kokhma_junc",
+    "end_node": "way2743908071",
+    "connected": true,
+    "start_node": "way274102986_07",
+    "path_nodes": 20,
+    "start_label": "spawn"
+  },
   "drive_legs": [
     {
       "leg": "p152_eastbound",
-      "reached_target": true,
-      "distance_km": 1.142,
-      "duration_s": 39.69,
-      "samples": 184,
-      "max_speed_kmh": 175.2,
-      "avg_speed_kmh": 103.62,
-      "min_vz": -1.959,
-      "max_vz": 2.868,
-      "p99_abs_vz": 2.718,
+      "reached_target": false,
+      "distance_km": 0.977,
+      "duration_s": 50.07,
+      "samples": 237,
+      "max_speed_kmh": 95.6,
+      "avg_speed_kmh": 71.03,
+      "min_vz": -1.14,
+      "max_vz": 1.615,
+      "p99_abs_vz": 1.454,
+      "peak_vz_pos": [
+        7883.4,
+        -8303.2,
+        105.5
+      ],
       "min_z_seen": 103.37,
-      "damage_sum": 0
+      "damage_sum": 0,
+      "damage_events": []
     },
     {
       "leg": "p152_westbound",
       "reached_target": false,
-      "distance_km": 1.074,
-      "duration_s": 48.41,
-      "samples": 224,
-      "max_speed_kmh": 178.63,
-      "avg_speed_kmh": 79.15,
-      "min_vz": -2.686,
-      "max_vz": 1.658,
-      "p99_abs_vz": 1.994,
-      "min_z_seen": 103.38,
-      "damage_sum": 0
+      "distance_km": 1.011,
+      "duration_s": 50.16,
+      "samples": 238,
+      "max_speed_kmh": 95.47,
+      "avg_speed_kmh": 72.74,
+      "min_vz": -1.589,
+      "max_vz": 1.113,
+      "p99_abs_vz": 1.455,
+      "peak_vz_pos": [
+        7883.8,
+        -8302.7,
+        105.6
+      ],
+      "min_z_seen": 103.37,
+      "damage_sum": 0,
+      "damage_events": []
     }
   ],
   "drive_totals": {
     "legs_count": 2,
-    "total_distance_km": 2.216,
-    "max_speed_kmh": 178.63,
+    "total_distance_km": 1.988,
+    "max_speed_kmh": 95.6,
     "max_damage_sum": 0,
-    "max_abs_vz": 2.868
+    "max_abs_vz": 1.615
   },
   "perf_summary": {
-    "sample_count": 15,
-    "fps_avg": 143.17,
-    "fps_1pct_low": 111.07,
-    "fps_min_sampled": 104.97,
-    "frametime_avg_ms": 6.98,
-    "frametime_1pct_ms": 9.0,
-    "cpu_ms_avg": 5.96,
-    "gpu_ms_avg": 6.65,
+    "sample_count": 25,
+    "fps_avg": 137.45,
+    "fps_1pct_low": 118.03,
+    "fps_min_sampled": 113.98,
+    "frametime_avg_ms": 7.28,
+    "frametime_1pct_ms": 8.47,
+    "cpu_ms_avg": 5.37,
+    "gpu_ms_avg": 6.34,
+    "perf_render_ms_avg": 1.94,
+    "perf_shadows_ms_avg": 0.78,
+    "perf_reflections_ms_avg": 0.7,
+    "perf_post_render_ms_avg": 0.13,
+    "perf_lua_ms_avg": 1.62,
+    "perf_physics_nodes_ms_avg": 0.08,
+    "terrain_draw_calls_avg": 251.9,
+    "terrain_draw_calls_max": 297,
+    "forest_items_rendered_avg": 0.0,
+    "forest_items_rendered_max": 0,
     "draw_calls_avg": null,
     "draw_calls_max": null,
     "polys_avg": null,
     "polys_max": null,
-    "vram_peak_mib": 4575.0,
-    "vram_avg_mib": 4533.5,
-    "proc_ram_peak_mib": 3957.4,
-    "proc_private_peak_mib": 7076.6,
-    "proc_total_ram_peak_mib": 4979.4,
+    "vram_peak_mib": 4769.0,
+    "vram_avg_mib": 4726.2,
+    "proc_ram_peak_mib": 4032.2,
+    "proc_private_peak_mib": 7328.3,
+    "proc_total_ram_peak_mib": 5082.7,
     "pass_60fps_target": true
   },
+  "stabilization": null,
   "log_metrics": {
-    "world_ready_s": 24.29904,
+    "world_ready_s": 28.40713,
     "load_stages_s": {
       "engine.loading.stage.Terrain::TerrainBlock": {
         "count": 1,
-        "seconds": 0.553
+        "seconds": 6.617
       },
       "engine.loading.stage.Environment::ScatterSky": {
         "count": 1,
-        "seconds": 0.05
+        "seconds": 0.042
       },
       "engine.loading.stage.Environment::WaterBlock": {
-        "count": 407,
-        "seconds": 0.039
+        "count": 119,
+        "seconds": 0.011
       },
       "engine.loading.stage.Environment::GroundCover": {
         "count": 8,
-        "seconds": 0.089
+        "seconds": 0.082
       },
       "engine.loading.stage.Forest::Forest": {
         "count": 1,
-        "seconds": 0.566
+        "seconds": 0.753
       },
       "engine.loading.stage.Meshes::TSStatic": {
-        "count": 642,
-        "seconds": 0.686
+        "count": 310,
+        "seconds": 0.911
       },
       "engine.loading.stage.Roads::DecalRoad": {
-        "count": 1733,
-        "seconds": 0.135
+        "count": 979,
+        "seconds": 0.069
       }
     },
     "forest_items_loaded": 45000,
     "forest_types_loaded": 30,
-    "static_collision_verts": 1154728,
-    "static_collision_tris": 1553104,
-    "static_collision_mb": 63.56,
-    "physics_instances": 49892,
-    "physics_memory_mb": 53.32,
-    "free_ram_at_spawn_gb": 14.594,
-    "total_error_lines": 196,
+    "static_collision_verts": 900637,
+    "static_collision_tris": 1221625,
+    "static_collision_mb": 49.9,
+    "physics_instances": 48003,
+    "physics_memory_mb": 41.94,
+    "free_ram_at_spawn_gb": 18.084,
+    "total_error_lines": 272,
     "total_warning_lines": 73,
-    "stock_error_lines": 155,
-    "level_error_lines": 41,
+    "stock_error_lines": 195,
+    "level_error_lines": 77,
+    "decal_road_batch_errors": 0,
     "level_error_samples": [
-      "18.91828|E|GELua.jsonDecode| JSON decoding error: JSON error (line 3, col 108): '\". This was handed down to her daughter's son. The daughter has a broken marriage and the son is a fire starter, who was also h' - Expected dictionary separator ':' or '=' instead",
-      "19.09534|E|GELua.jsonDecode| JSON decoding error: JSON error (line 21, col 15): '\":\"vehiclesData.hopper.xt4_A.Description\",' - Expected dictionary separator ':' or '=' instead of: '\"'",
-      "19.09684|E|GELua.jsonDecode| JSON decoding error: JSON error (line 21, col 15): '\":\"vehiclesData.hopper.xt4_A.Description\",' - Expected dictionary separator ':' or '=' instead of: '\"'",
-      "19.09755|E|GELua.jsonDecode| JSON decoding error: JSON error (line 21, col 15): '\":\"vehiclesData.hopper.xt4_A.Description\",' - Expected dictionary separator ':' or '=' instead of: '\"'",
-      "22.35353|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: etk800_lettering_858 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35356|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: etk800_lettering_848 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35379|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: pickup_oilpan_i6_race in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35381|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: pickup_oilpan_i6 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35399|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: usarstate in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35418|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: usmisemi in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35449|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: etk_wheel_10a_19x9_R in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35449|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: etk_wheel_10b_19x9_R in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35470|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_oilpan_color_291_colorabe in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35471|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_oilpan_color_291 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35506|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: pigeon_i3_oilpan in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35507|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: pigeon_i3_oilpan_race in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35523|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: tire_R_175_65_14_uni_2 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35531|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_oilpan_v8_small_race_291 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35532|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_oilpan_v8_small_291 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35533|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_oilpan_v8_small_drysump_291 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35535|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_engine_color_291 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35536|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_engine_color_291_colorable in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35552|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: covello_wheel_05a_14x7_F in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35672|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: tire_F_175_65_14_uni_2 in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35745|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: pickup_engine_v8_6.9_ecu_sport in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35749|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: pickup_engine_v8_6.9_ecu_race in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35750|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: pickup_engine_v8_6.9_ecu in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35778|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_oilpan_v8_small_race_alu in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35779|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_oilpan_v8_small_alu in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35780|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: c_oilpan_v8_small_drysump_alu in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35829|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: tire_R_175_70_13_standard in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35830|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: tire_R_165_70_13_old in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "22.35831|E|GELua.jbeam.getAvailableSlotNameMap| parts names are duplicate: tire_R_155_13_standard in folders: { \"/vehicles/etk800/\", \"/vehicles/common/\" }",
-      "24.06132|E|engine::SceneContainer::checkBins| Failed to find Sceneobject in SceneOctree:",
-      "24.06134|E|engine::SceneContainer::checkBins|     Octree search worldBox, [DecalRoad - (7431.1353, -7340.032, 126.12745)  (7431.136, -7340.0312, 126.128456)]",
-      "24.06135|E|engine::SceneContainer::checkBins|     Octree fixed",
-      "24.06135|E|engine::SceneContainer::checkBins| Failed to find Sceneobject in render SceneOctree:",
-      "24.06136|E|engine::SceneContainer::checkBins|     Render octree search worldBox, [DecalRoad - (7431.1353, -7340.032, 126.12745)  (7431.136, -7340.0312, 126.128456)]",
-      "24.06136|E|engine::SceneContainer::checkBins|     Render octree fixed",
-      "25.77921|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [road_asphalt_2lane] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'y' by inf m (local axis value inf). w",
-      "25.77925|E|engine::SceneStaticDecalRoadManager::_rebuildNodeBatchesThread| DecalRoad [road_asphalt_2lane] packed position exceeded supported local range of 2048 meters by more than tolerated overflow 0.000976563 m on axis 'y' by inf m (local axis value inf). w"
+      "23.05854|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "23.05856|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "23.05857|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "23.05858|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "23.05859|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "23.05859|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "23.05861|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "23.05863|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "23.05863|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "23.05865|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05866|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05867|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05870|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05871|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05872|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05873|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05874|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05875|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05876|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05877|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05878|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05879|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05880|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05881|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05882|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05883|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05884|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05885|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05886|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05886|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
+      "23.05887|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05888|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
+      "23.05889|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
+      "23.05890|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
+      "23.05891|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
+      "23.05892|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_bridge_not_motorway.dae",
+      "23.05893|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
+      "23.05894|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_stop.dae",
+      "23.05895|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05896|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
+      "23.05897|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
+      "23.05900|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_give_way.dae",
+      "23.05901|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
+      "23.05902|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_priorityroad.dae",
+      "23.05903|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_speed_90.dae",
+      "23.05904|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_speed_60.dae",
+      "23.05905|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_speed_90.dae",
+      "23.05906|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_speed_90.dae",
+      "23.05907|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_speed_60.dae",
+      "23.05907|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_speed_90.dae"
     ],
     "level_warning_samples": [],
     "signal_hits": {
-      "SceneStaticDecalRoadManager": 2,
-      "SceneContainer::checkBins": 6,
-      "Failed to find": 2
+      "TSStatic": 77
     }
   },
   "screenshots_captured": [

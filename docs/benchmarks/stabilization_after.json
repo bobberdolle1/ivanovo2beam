@@ -1,0 +1,1347 @@
+{
+  "timestamp_utc": "2026-11-27T06:47:19.681475+00:00",
+  "level_id": "ivanovo_shuya_v2",
+  "mode": "stabilization",
+  "vehicle": "etk800",
+  "cold_cache": true,
+  "wall_load_to_ready_s": 60.78,
+  "fps_limit_reason": "{\"backgroundCap\":240,\"backgroundActive\":false,\"fpsCap\":0,\"windowFocused\":true,\"vr\":false,\"foregroundCap\":60,\"foregroundActive\":false,\"vsync\":false}",
+  "settings": {
+    "settings_path": "<BEAMNG_USER_DIR>\\settings\\settings.json",
+    "GraphicDisplayResolutions": "1920 1080",
+    "GraphicDisplayModes": "Borderless",
+    "GraphicDisplayRefreshRates": 144,
+    "GraphicAntialiasType": "dlss",
+    "GraphicAntialias": 4,
+    "GraphicOverallQuality": "Ultra",
+    "GraphicTerrainQuality": "High",
+    "GraphicTextureQuality": "Normal",
+    "GraphicMeshQuality": "Ultra",
+    "GraphicShadowsQuality": "High",
+    "GraphicLightingQuality": "Ultra",
+    "GraphicDynReflectionEnabled": true,
+    "GraphicDynReflectionDistance": 250,
+    "GraphicDynMirrorsDistance": 500,
+    "enableMcp": true,
+    "pref_Terrain": {
+      "lodScale": 0.75,
+      "detailScale": 1.5
+    },
+    "pref_TS": {
+      "maxDecalCount": 8000,
+      "detailAdjust": 2,
+      "skipRenderDLs": 0
+    },
+    "pref_Video_displayDevice": "D3D12",
+    "pref_Video_gpu": "NVIDIA GeForce RTX 3080",
+    "resolution_warning": "Active resolution is '1920 1080', not '2560 1440' (1440p target). Set 2560x1440 in BeamNG Display settings before final benchmark."
+  },
+  "nvidia_smi_baseline": {
+    "gpu_name": "NVIDIA GeForce RTX 3080",
+    "vram_used_mib": 1843.0,
+    "vram_total_mib": 10240.0,
+    "gpu_util_pct": 23.0,
+    "gpu_clock_mhz": 1095.0
+  },
+  "static_budget": {
+    "level_id": "ivanovo_shuya_v2",
+    "level_dir": "<REPO_ROOT>\\build\\levels\\ivanovo_shuya_v2",
+    "zip_path": "<REPO_ROOT>\\build\\ivanovo_shuya_v2.zip",
+    "zip_bytes": 169416005,
+    "zip_mib": 161.57,
+    "ter_bytes": 201326715,
+    "ter_mib": 192.0,
+    "terrain_grid_size": 8192,
+    "terrain_square_size_m": 4.0,
+    "decal_roads": 40612,
+    "decal_nodes": 467567,
+    "mesh_roads": 0,
+    "forest_items": 120000,
+    "forest_types": 32,
+    "water_blocks": 1859,
+    "rivers": 157,
+    "ts_statics": 12464,
+    "dae_files": 1030,
+    "dae_bytes": 105468030
+  },
+  "extended_static": {
+    "terrain_blocks": 1,
+    "ground_covers": 8,
+    "decal_roads_over_objects_true": 235,
+    "decal_roads_over_objects_false": 40377,
+    "ground_mesh_statics": 0
+  },
+  "scene_probe": {
+    "decal_roads_over_objects_true": 235,
+    "spawn_pos": [
+      4125.375,
+      -5043.2021484375,
+      124.59828948975
+    ],
+    "decal_roads_missing_material": 0,
+    "road_props_count": 11772,
+    "water_block_count": 1859,
+    "terrain_blocks": [
+      {
+        "min": [
+          -4484.5693359375,
+          -24791.427734375,
+          81.500335693359
+        ],
+        "name": "theTerrain",
+        "squareSize": 4,
+        "pos": [
+          -4484.5693359375,
+          -24791.427734375,
+          73.5
+        ],
+        "max": [
+          28283.4296875,
+          7976.572265625,
+          173.22723388672
+        ]
+      }
+    ],
+    "river_count": 157,
+    "ts_static_count": 12475,
+    "groundcovers": [
+      {
+        "name": "gc_meadow_grass_close",
+        "maxElements": 34000
+      },
+      {
+        "name": "gc_meadow_grass_distant",
+        "maxElements": 46000
+      },
+      {
+        "name": "gc_tall_roadside_grass",
+        "maxElements": 32000
+      },
+      {
+        "name": "gc_field_grass",
+        "maxElements": 30000
+      },
+      {
+        "name": "gc_wildflowers",
+        "maxElements": 16000
+      },
+      {
+        "name": "gc_forest_undergrowth",
+        "maxElements": 32000
+      },
+      {
+        "name": "gc_low_scrub",
+        "maxElements": 10000
+      },
+      {
+        "name": "gc_3d_foliage_close",
+        "maxElements": 10000
+      }
+    ],
+    "decal_roads_total": 40612,
+    "decal_roads_over_objects_false": 40377,
+    "buildings_count": 457,
+    "ground_mesh_sample_boxes": {},
+    "groundcover_count": 8
+  },
+  "zfighting_and_materials": {
+    "decal_road_count": 40612,
+    "decal_bias_max": 0.0049999998882413,
+    "decal_bias_min": 0.0015000000130385,
+    "over_objects_sample": [
+      {
+        "bias": 0.0020000000949949,
+        "name": "way488516208_0",
+        "mat": "road_asphalt_2lane",
+        "pri": 12
+      },
+      {
+        "bias": 0.0020000000949949,
+        "name": "way488516208_1",
+        "mat": "road_asphalt_2lane",
+        "pri": 12
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way488516208_0_mark_1",
+        "mat": "m_line_white_discontinue",
+        "pri": 2
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way488516208_0_mark_2",
+        "mat": "m_line_white_discontinue",
+        "pri": 2
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way488516208_0_line_left",
+        "mat": "m_line_white",
+        "pri": 1
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way488516208_0_line_right",
+        "mat": "m_line_white",
+        "pri": 1
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way488516208_1_mark_1",
+        "mat": "m_line_white_discontinue",
+        "pri": 2
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way488516208_1_mark_2",
+        "mat": "m_line_white_discontinue",
+        "pri": 2
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way488516208_1_line_left",
+        "mat": "m_line_white",
+        "pri": 1
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way488516208_1_line_right",
+        "mat": "m_line_white",
+        "pri": 1
+      },
+      {
+        "bias": 0.0020000000949949,
+        "name": "way744360222",
+        "mat": "road_asphalt_2lane",
+        "pri": 12
+      },
+      {
+        "bias": 0.0049999998882413,
+        "name": "way744360222_mark_1",
+        "mat": "m_line_white_discontinue",
+        "pri": 2
+      }
+    ],
+    "decal_bias_zero_count": 0
+  },
+  "surface_collision_probes": [
+    {
+      "terrain_z": 124.4005,
+      "x": 4125.375,
+      "ray1_minus_terrain_m": -0.0,
+      "y": -5043.2021484375,
+      "ray1_hit_z": 124.4005,
+      "label": "spawn_road"
+    },
+    {
+      "terrain_z": 130.9259,
+      "x": 4204.1586914062,
+      "ray1_minus_terrain_m": -0.0034,
+      "y": -804.94354248047,
+      "ray1_hit_z": 130.9225,
+      "label": "ivanovo_exit"
+    },
+    {
+      "terrain_z": 115.4948,
+      "x": 6198.619140625,
+      "ray1_minus_terrain_m": -0.0,
+      "y": -6718.4501953125,
+      "ray1_hit_z": 115.4948,
+      "label": "kokhma_west"
+    },
+    {
+      "terrain_z": 127.8813,
+      "x": 7944.2079476531,
+      "ray1_minus_terrain_m": 0.0051,
+      "y": -6225.0828317115,
+      "ray1_hit_z": 127.8865,
+      "label": "uvod_bridge"
+    },
+    {
+      "terrain_z": 127.289,
+      "x": 8347.4526367188,
+      "ray1_minus_terrain_m": -0.0,
+      "y": -6814.4514160156,
+      "ray1_hit_z": 127.289,
+      "label": "kokhma_junc"
+    },
+    {
+      "terrain_z": 113.491,
+      "x": 11487.280736832,
+      "ray1_minus_terrain_m": 0.0,
+      "y": -10159.044126318,
+      "ray1_hit_z": 113.491,
+      "label": "corridor_11km"
+    },
+    {
+      "terrain_z": 123.6614,
+      "x": 15030.11328125,
+      "ray1_minus_terrain_m": -0.0001,
+      "y": -20434.384765625,
+      "ray1_hit_z": 123.6612,
+      "label": "corridor_15km"
+    },
+    {
+      "terrain_z": 143.5007,
+      "x": 4045.375,
+      "ray1_minus_terrain_m": 0.0002,
+      "y": -5163.2021484375,
+      "ray1_hit_z": 143.5009,
+      "label": "offroad_south"
+    },
+    {
+      "terrain_z": 123.8687,
+      "x": 4475.375,
+      "ray1_minus_terrain_m": -0.0005,
+      "y": -4693.2021484375,
+      "ray1_hit_z": 123.8682,
+      "label": "offroad_far"
+    }
+  ],
+  "navgraph_probes": [
+    {
+      "label": "spawn",
+      "center": [
+        4125.4,
+        -5043.2,
+        124.6
+      ],
+      "node_count": 56,
+      "zero_z_nodes": 0,
+      "min_z": 121.53,
+      "max_z": 126.0,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "ivanovo_exit",
+      "center": [
+        4204.2,
+        -804.9,
+        130.9
+      ],
+      "node_count": 102,
+      "zero_z_nodes": 0,
+      "min_z": 128.64,
+      "max_z": 132.43,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "kokhma_west",
+      "center": [
+        6198.6,
+        -6718.5,
+        115.5
+      ],
+      "node_count": 102,
+      "zero_z_nodes": 0,
+      "min_z": 109.5,
+      "max_z": 122.92,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "uvod_bridge",
+      "center": [
+        7944.2,
+        -6225.1,
+        127.8
+      ],
+      "node_count": 68,
+      "zero_z_nodes": 0,
+      "min_z": 126.99,
+      "max_z": 128.91,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "kokhma_junc",
+      "center": [
+        8347.5,
+        -6814.5,
+        127.3
+      ],
+      "node_count": 128,
+      "zero_z_nodes": 0,
+      "min_z": 126.12,
+      "max_z": 133.42,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "corridor_11km",
+      "center": [
+        11487.3,
+        -10159.0,
+        113.5
+      ],
+      "node_count": 54,
+      "zero_z_nodes": 0,
+      "min_z": 112.74,
+      "max_z": 126.23,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "corridor_15km",
+      "center": [
+        15030.1,
+        -20434.4,
+        123.7
+      ],
+      "node_count": 4,
+      "zero_z_nodes": 0,
+      "min_z": 123.66,
+      "max_z": 124.33,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "corridor_18km",
+      "center": [
+        18497.2,
+        147.4,
+        103.7
+      ],
+      "node_count": 14,
+      "zero_z_nodes": 0,
+      "min_z": 98.6,
+      "max_z": 105.71,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "shuya_approach",
+      "center": [
+        21799.8,
+        -18714.9,
+        109.5
+      ],
+      "node_count": 45,
+      "zero_z_nodes": 0,
+      "min_z": 107.39,
+      "max_z": 117.0,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    },
+    {
+      "label": "shuya_city",
+      "center": [
+        23721.1,
+        -14625.7,
+        107.3
+      ],
+      "node_count": 20,
+      "zero_z_nodes": 0,
+      "min_z": 105.24,
+      "max_z": 107.57,
+      "raw_keys": [
+        "closestRoad",
+        "nodeCount",
+        "nodes",
+        "center",
+        "linkCount",
+        "returned",
+        "bbox"
+      ]
+    }
+  ],
+  "end_to_end_nav_path": {
+    "path_length_km": 25.178,
+    "end_label": "shuya_city",
+    "end_node": "way1857510738",
+    "connected": true,
+    "start_node": "way48328464241",
+    "path_nodes": 488,
+    "start_label": "spawn"
+  },
+  "drive_legs": [
+    {
+      "leg": "rt_1_ivanovo_to_kokhma",
+      "reached_target": true,
+      "distance_km": 12.239,
+      "duration_s": 616.56,
+      "samples": 2886,
+      "max_speed_kmh": 76.62,
+      "avg_speed_kmh": 71.47,
+      "min_vz": -2.169,
+      "max_vz": 2.167,
+      "p99_abs_vz": 1.388,
+      "peak_vz_pos": [
+        3842.2,
+        -1179.1,
+        134.1
+      ],
+      "min_z_seen": 104.21,
+      "damage_sum": 2834743.75,
+      "damage_events": [
+        {
+          "t_s": 296.04,
+          "x": 3987.79,
+          "y": -3841.26,
+          "z": 109.53,
+          "kmh": 74.66,
+          "damage_sum": 2834743.75
+        }
+      ]
+    },
+    {
+      "leg": "rt_2_kokhma_to_kitovo",
+      "reached_target": true,
+      "distance_km": 14.219,
+      "duration_s": 538.49,
+      "samples": 2525,
+      "max_speed_kmh": 95.98,
+      "avg_speed_kmh": 95.04,
+      "min_vz": -2.758,
+      "max_vz": 2.613,
+      "p99_abs_vz": 1.554,
+      "peak_vz_pos": [
+        18173.7,
+        -14329.3,
+        124.9
+      ],
+      "min_z_seen": 103.37,
+      "damage_sum": 2834743.75,
+      "damage_events": [
+        {
+          "t_s": 0.02,
+          "x": 7566.38,
+          "y": -8240.61,
+          "z": 104.21,
+          "kmh": 75.48,
+          "damage_sum": 2834743.75
+        }
+      ]
+    },
+    {
+      "leg": "rt_3_kitovo_to_shuya",
+      "reached_target": true,
+      "distance_km": 4.028,
+      "duration_s": 203.43,
+      "samples": 958,
+      "max_speed_kmh": 80.14,
+      "avg_speed_kmh": 71.26,
+      "min_vz": -2.241,
+      "max_vz": 1.411,
+      "p99_abs_vz": 1.745,
+      "peak_vz_pos": [
+        21679.4,
+        -15411.6,
+        107.0
+      ],
+      "min_z_seen": 98.72,
+      "damage_sum": 2834743.75,
+      "damage_events": [
+        {
+          "t_s": 0.01,
+          "x": 19828.43,
+          "y": -15174.37,
+          "z": 108.84,
+          "kmh": 72.42,
+          "damage_sum": 2834743.75
+        }
+      ]
+    },
+    {
+      "leg": "rt_4_shuya_to_kokhma",
+      "reached_target": true,
+      "distance_km": 18.266,
+      "duration_s": 728.28,
+      "samples": 3407,
+      "max_speed_kmh": 96.23,
+      "avg_speed_kmh": 90.28,
+      "min_vz": -2.73,
+      "max_vz": 2.569,
+      "p99_abs_vz": 1.757,
+      "peak_vz_pos": [
+        10814.7,
+        -9786.1,
+        111.1
+      ],
+      "min_z_seen": 98.72,
+      "damage_sum": 2834743.75,
+      "damage_events": [
+        {
+          "t_s": 0.02,
+          "x": 22703.2,
+          "y": -16706.02,
+          "z": 103.97,
+          "kmh": 78.24,
+          "damage_sum": 2834743.75
+        }
+      ]
+    },
+    {
+      "leg": "rt_5_kokhma_to_ivanovo",
+      "reached_target": false,
+      "distance_km": 6.752,
+      "duration_s": 340.35,
+      "samples": 1594,
+      "max_speed_kmh": 76.25,
+      "avg_speed_kmh": 71.38,
+      "min_vz": -2.148,
+      "max_vz": 1.725,
+      "p99_abs_vz": 1.567,
+      "peak_vz_pos": [
+        3910.4,
+        -3876.2,
+        115.0
+      ],
+      "min_z_seen": 103.93,
+      "damage_sum": 7789039.5,
+      "damage_events": [
+        {
+          "t_s": 0.01,
+          "x": 7640.42,
+          "y": -8270.25,
+          "z": 103.93,
+          "kmh": 53.36,
+          "damage_sum": 2834743.75
+        },
+        {
+          "t_s": 326.54,
+          "x": 3994.22,
+          "y": -3837.91,
+          "z": 109.55,
+          "kmh": 18.47,
+          "damage_sum": 7789039.5
+        }
+      ]
+    }
+  ],
+  "drive_totals": {
+    "legs_count": 5,
+    "total_distance_km": 55.504,
+    "max_speed_kmh": 96.23,
+    "max_damage_sum": 7789039,
+    "max_abs_vz": 2.758
+  },
+  "perf_summary": {},
+  "stabilization": {
+    "regimes": {
+      "urban_ivanovo": {
+        "sample_count": 20,
+        "fps_avg": 114.4,
+        "fps_1pct_low": 89.98,
+        "fps_min_sampled": 80.49,
+        "frametime_avg_ms": 8.74,
+        "frametime_1pct_ms": 11.11,
+        "cpu_ms_avg": 8.73,
+        "gpu_ms_avg": 4.97,
+        "perf_render_ms_avg": 5.13,
+        "perf_shadows_ms_avg": 0.77,
+        "perf_reflections_ms_avg": 0.79,
+        "perf_post_render_ms_avg": 0.1,
+        "perf_lua_ms_avg": 2.79,
+        "perf_physics_nodes_ms_avg": 0.17,
+        "terrain_draw_calls_avg": 176.0,
+        "terrain_draw_calls_max": 214,
+        "forest_items_rendered_avg": 0.0,
+        "forest_items_rendered_max": 0,
+        "draw_calls_avg": null,
+        "draw_calls_max": null,
+        "polys_avg": null,
+        "polys_max": null,
+        "vram_peak_mib": 5771.0,
+        "vram_avg_mib": 5706.9,
+        "proc_ram_peak_mib": 7115.1,
+        "proc_private_peak_mib": 10763.3,
+        "proc_total_ram_peak_mib": 8519.7,
+        "pass_60fps_target": true,
+        "frame_dt_stats": {
+          "frames_total": 2461,
+          "frametime_avg_ms": 7.93,
+          "frametime_p50_ms": 7.91,
+          "frametime_p95_ms": 9.5,
+          "frametime_p99_ms": 10.69,
+          "frametime_p999_ms": 11.47,
+          "frametime_max_ms": 11.5,
+          "fps_avg_exact": 126.14,
+          "fps_1pct_low_exact": 93.54,
+          "fps_0_1pct_low_exact": 87.22,
+          "hitches_gt_33ms": 0,
+          "hitches_gt_50ms": 0,
+          "hitches_gt_100ms": 0
+        }
+      },
+      "urban_shuya": {
+        "sample_count": 20,
+        "fps_avg": 121.37,
+        "fps_1pct_low": 98.63,
+        "fps_min_sampled": 56.79,
+        "frametime_avg_ms": 8.24,
+        "frametime_1pct_ms": 10.14,
+        "cpu_ms_avg": 8.62,
+        "gpu_ms_avg": 4.97,
+        "perf_render_ms_avg": 3.76,
+        "perf_shadows_ms_avg": 0.59,
+        "perf_reflections_ms_avg": 0.72,
+        "perf_post_render_ms_avg": 0.17,
+        "perf_lua_ms_avg": 0.77,
+        "perf_physics_nodes_ms_avg": 0.32,
+        "terrain_draw_calls_avg": 196.6,
+        "terrain_draw_calls_max": 230,
+        "forest_items_rendered_avg": 0.0,
+        "forest_items_rendered_max": 0,
+        "draw_calls_avg": null,
+        "draw_calls_max": null,
+        "polys_avg": null,
+        "polys_max": null,
+        "vram_peak_mib": 6086.0,
+        "vram_avg_mib": 6024.1,
+        "proc_ram_peak_mib": 7179.6,
+        "proc_private_peak_mib": 11137.2,
+        "proc_total_ram_peak_mib": 8499.4,
+        "pass_60fps_target": true,
+        "frame_dt_stats": {
+          "frames_total": 2638,
+          "frametime_avg_ms": 7.68,
+          "frametime_p50_ms": 7.46,
+          "frametime_p95_ms": 9.96,
+          "frametime_p99_ms": 16.11,
+          "frametime_p999_ms": 23.72,
+          "frametime_max_ms": 24.01,
+          "fps_avg_exact": 130.18,
+          "fps_1pct_low_exact": 62.09,
+          "fps_0_1pct_low_exact": 42.15,
+          "hitches_gt_33ms": 0,
+          "hitches_gt_50ms": 0,
+          "hitches_gt_100ms": 0
+        }
+      },
+      "rural_p152": {
+        "sample_count": 25,
+        "fps_avg": 122.86,
+        "fps_1pct_low": 92.84,
+        "fps_min_sampled": 88.24,
+        "frametime_avg_ms": 8.14,
+        "frametime_1pct_ms": 10.77,
+        "cpu_ms_avg": 8.32,
+        "gpu_ms_avg": 4.97,
+        "perf_render_ms_avg": 3.91,
+        "perf_shadows_ms_avg": 0.59,
+        "perf_reflections_ms_avg": 0.71,
+        "perf_post_render_ms_avg": 0.19,
+        "perf_lua_ms_avg": 1.76,
+        "perf_physics_nodes_ms_avg": 0.33,
+        "terrain_draw_calls_avg": 184.2,
+        "terrain_draw_calls_max": 234,
+        "forest_items_rendered_avg": 0.0,
+        "forest_items_rendered_max": 0,
+        "draw_calls_avg": null,
+        "draw_calls_max": null,
+        "polys_avg": null,
+        "polys_max": null,
+        "vram_peak_mib": 6198.0,
+        "vram_avg_mib": 6136.5,
+        "proc_ram_peak_mib": 7184.2,
+        "proc_private_peak_mib": 11246.9,
+        "proc_total_ram_peak_mib": 8535.3,
+        "pass_60fps_target": true,
+        "frame_dt_stats": {
+          "frames_total": 3222,
+          "frametime_avg_ms": 7.78,
+          "frametime_p50_ms": 7.93,
+          "frametime_p95_ms": 10.03,
+          "frametime_p99_ms": 11.05,
+          "frametime_p999_ms": 11.46,
+          "frametime_max_ms": 11.51,
+          "fps_avg_exact": 128.61,
+          "fps_1pct_low_exact": 90.52,
+          "fps_0_1pct_low_exact": 87.24,
+          "hitches_gt_33ms": 0,
+          "hitches_gt_50ms": 0,
+          "hitches_gt_100ms": 0
+        }
+      }
+    },
+    "camera_spin_stress": [
+      {
+        "zone": "spin_urban_ivanovo",
+        "pos": [
+          -20.5,
+          18.8,
+          130.9
+        ],
+        "total_deg": 720.0,
+        "step_deg": 15.0,
+        "duration_s": 7.13,
+        "frame_dt_stats": {
+          "frames_total": 1043,
+          "frametime_avg_ms": 6.89,
+          "frametime_p50_ms": 6.39,
+          "frametime_p95_ms": 9.05,
+          "frametime_p99_ms": 10.23,
+          "frametime_p999_ms": 10.29,
+          "frametime_max_ms": 10.33,
+          "fps_avg_exact": 145.2,
+          "fps_1pct_low_exact": 97.77,
+          "fps_0_1pct_low_exact": 97.21,
+          "hitches_gt_33ms": 0,
+          "hitches_gt_50ms": 0,
+          "hitches_gt_100ms": 0
+        },
+        "telemetry_pre": {
+          "t_rel_s": 144.5,
+          "nv_vram_used_mib": 6129.0,
+          "nv_gpu_util_pct": 68.0,
+          "nv_gpu_clock_mhz": 1935.0,
+          "proc_working_set_mib": 7178.7,
+          "proc_private_mib": 11175.0,
+          "proc_total_working_set_mib": 8534.3,
+          "fps_inst": 95.8093,
+          "poly_count": -1,
+          "veh_pos": [
+            15368.234375,
+            -12508.700195312,
+            128.74388122559
+          ],
+          "terrain_draw_calls": 166,
+          "forest_items_rendered": 0,
+          "draw_calls": -1,
+          "fps_p95": 91.9219,
+          "veh_speed_ms": 27.275387488765,
+          "cpu_ms": 10.1609,
+          "forest_cells_rendered": 0,
+          "vram_usage": 3956139424,
+          "sys_avail_bytes": 13891944448,
+          "gpu_avail_bytes": 5314510848,
+          "gpu_ms": 4.970272,
+          "terrain_cells": 166,
+          "shadow_polys": 0,
+          "forest_items_batched": 0,
+          "fps_p99": 76.105818,
+          "forest_total_cells": 0,
+          "state_changes": -1,
+          "gpu_wait_ms": 0.2753,
+          "shadow_draw_calls": 0,
+          "fps_min": 68.843973,
+          "fps_uncap": 95.832254,
+          "fps_avg": 113.608906,
+          "perf_render_ms": 4.8882000000106,
+          "perf_shadows_ms": 0.42379999999298,
+          "perf_reflections_ms": 0,
+          "perf_post_render_ms": 0.42799999999943,
+          "perf_lua_ms": 0.94670000001429,
+          "perf_physics_nodes_ms": 0.31520000001706
+        },
+        "telemetry_post": {
+          "t_rel_s": 151.91,
+          "nv_vram_used_mib": 6149.0,
+          "nv_gpu_util_pct": 61.0,
+          "nv_gpu_clock_mhz": 1935.0,
+          "proc_working_set_mib": 7179.2,
+          "proc_private_mib": 11192.2,
+          "proc_total_working_set_mib": 8539.5,
+          "fps_inst": 143.866263,
+          "poly_count": -1,
+          "veh_pos": [
+            15534.362304688,
+            -12598.250976562,
+            128.93367004395
+          ],
+          "terrain_draw_calls": 169,
+          "forest_items_rendered": 0,
+          "draw_calls": -1,
+          "fps_p95": 91.304189,
+          "veh_speed_ms": 23.903581807468,
+          "cpu_ms": 6.8284,
+          "forest_cells_rendered": 0,
+          "vram_usage": 3965351296,
+          "sys_avail_bytes": 13787566080,
+          "gpu_avail_bytes": 5297676288,
+          "gpu_ms": 4.970272,
+          "terrain_cells": 169,
+          "shadow_polys": 0,
+          "forest_items_batched": 0,
+          "fps_p99": 85.658242,
+          "forest_total_cells": 0,
+          "state_changes": -1,
+          "gpu_wait_ms": 0.1215,
+          "shadow_draw_calls": 0,
+          "fps_min": 36.753626,
+          "fps_uncap": 143.903528,
+          "fps_avg": 114.911061,
+          "perf_render_ms": 4.2128999999989,
+          "perf_shadows_ms": 0.47059999999988,
+          "perf_reflections_ms": 0,
+          "perf_post_render_ms": 0.1995000000079,
+          "perf_lua_ms": 9.3130999999858,
+          "perf_physics_nodes_ms": 0.3321000000085
+        }
+      },
+      {
+        "zone": "spin_forest_corridor",
+        "pos": [
+          11472.1,
+          -10145.3,
+          135.4
+        ],
+        "total_deg": 720.0,
+        "step_deg": 15.0,
+        "duration_s": 7.17,
+        "frame_dt_stats": {
+          "frames_total": 1139,
+          "frametime_avg_ms": 6.31,
+          "frametime_p50_ms": 6.24,
+          "frametime_p95_ms": 7.63,
+          "frametime_p99_ms": 8.62,
+          "frametime_p999_ms": 8.9,
+          "frametime_max_ms": 8.93,
+          "fps_avg_exact": 158.43,
+          "fps_1pct_low_exact": 116.05,
+          "fps_0_1pct_low_exact": 112.4,
+          "hitches_gt_33ms": 0,
+          "hitches_gt_50ms": 0,
+          "hitches_gt_100ms": 0
+        },
+        "telemetry_pre": {
+          "t_rel_s": 153.23,
+          "nv_vram_used_mib": 6149.0,
+          "nv_gpu_util_pct": 71.0,
+          "nv_gpu_clock_mhz": 1935.0,
+          "proc_working_set_mib": 7180.7,
+          "proc_private_mib": 11194.7,
+          "proc_total_working_set_mib": 8540.2,
+          "fps_inst": 128.861,
+          "poly_count": -1,
+          "veh_pos": [
+            15561.4921875,
+            -12612.793945312,
+            127.98078918457
+          ],
+          "terrain_draw_calls": 173,
+          "forest_items_rendered": 0,
+          "draw_calls": -1,
+          "fps_p95": 121.354802,
+          "veh_speed_ms": 23.748517123781,
+          "cpu_ms": 7.6285,
+          "forest_cells_rendered": 0,
+          "vram_usage": 3979902112,
+          "sys_avail_bytes": 13778948096,
+          "gpu_avail_bytes": 5297676288,
+          "gpu_ms": 4.970272,
+          "terrain_cells": 173,
+          "shadow_polys": 0,
+          "forest_items_batched": 0,
+          "fps_p99": 111.74558,
+          "forest_total_cells": 0,
+          "state_changes": -1,
+          "gpu_wait_ms": 0.131,
+          "shadow_draw_calls": 0,
+          "fps_min": 90.448622,
+          "fps_uncap": 128.894219,
+          "fps_avg": 134.514572,
+          "perf_render_ms": 4.314700000009,
+          "perf_shadows_ms": 0.28389999999945,
+          "perf_reflections_ms": 0.57040000001507,
+          "perf_post_render_ms": 0.24530000001732,
+          "perf_lua_ms": 0.50420000002305,
+          "perf_physics_nodes_ms": 0.3016999999943
+        },
+        "telemetry_post": {
+          "t_rel_s": 160.69,
+          "nv_vram_used_mib": 6193.0,
+          "nv_gpu_util_pct": 82.0,
+          "nv_gpu_clock_mhz": 1935.0,
+          "proc_working_set_mib": 7179.6,
+          "proc_private_mib": 11240.9,
+          "proc_total_working_set_mib": 8543.8,
+          "fps_inst": 128.552877,
+          "poly_count": -1,
+          "veh_pos": [
+            15713.495117188,
+            -12694.645507812,
+            123.96550750732
+          ],
+          "terrain_draw_calls": 177,
+          "forest_items_rendered": 0,
+          "draw_calls": -1,
+          "fps_p95": 122.454476,
+          "veh_speed_ms": 22.325803134888,
+          "cpu_ms": 7.65,
+          "forest_cells_rendered": 0,
+          "vram_usage": 4014173312,
+          "sys_avail_bytes": 13887459328,
+          "gpu_avail_bytes": 5247201280,
+          "gpu_ms": 4.970272,
+          "terrain_cells": 177,
+          "shadow_polys": 0,
+          "forest_items_batched": 0,
+          "fps_p99": 105.699303,
+          "forest_total_cells": 0,
+          "state_changes": -1,
+          "gpu_wait_ms": 0.1278,
+          "shadow_draw_calls": 0,
+          "fps_min": 92.279015,
+          "fps_uncap": 128.589244,
+          "fps_avg": 154.006514,
+          "perf_render_ms": 4.2983000000163,
+          "perf_shadows_ms": 0.31250000000682,
+          "perf_reflections_ms": 0.59449999997696,
+          "perf_post_render_ms": 0.15729999998371,
+          "perf_lua_ms": 0.44730000001891,
+          "perf_physics_nodes_ms": 0.31299999997714
+        }
+      }
+    ],
+    "continuous_roundtrip_legs": [
+      {
+        "leg": "rt_1_ivanovo_to_kokhma",
+        "reached_target": true,
+        "distance_km": 12.239,
+        "duration_s": 616.56,
+        "samples": 2886,
+        "max_speed_kmh": 76.62,
+        "avg_speed_kmh": 71.47,
+        "min_vz": -2.169,
+        "max_vz": 2.167,
+        "p99_abs_vz": 1.388,
+        "peak_vz_pos": [
+          3842.2,
+          -1179.1,
+          134.1
+        ],
+        "min_z_seen": 104.21,
+        "damage_sum": 2834743.75,
+        "damage_events": [
+          {
+            "t_s": 296.04,
+            "x": 3987.79,
+            "y": -3841.26,
+            "z": 109.53,
+            "kmh": 74.66,
+            "damage_sum": 2834743.75
+          }
+        ]
+      },
+      {
+        "leg": "rt_2_kokhma_to_kitovo",
+        "reached_target": true,
+        "distance_km": 14.219,
+        "duration_s": 538.49,
+        "samples": 2525,
+        "max_speed_kmh": 95.98,
+        "avg_speed_kmh": 95.04,
+        "min_vz": -2.758,
+        "max_vz": 2.613,
+        "p99_abs_vz": 1.554,
+        "peak_vz_pos": [
+          18173.7,
+          -14329.3,
+          124.9
+        ],
+        "min_z_seen": 103.37,
+        "damage_sum": 2834743.75,
+        "damage_events": [
+          {
+            "t_s": 0.02,
+            "x": 7566.38,
+            "y": -8240.61,
+            "z": 104.21,
+            "kmh": 75.48,
+            "damage_sum": 2834743.75
+          }
+        ]
+      },
+      {
+        "leg": "rt_3_kitovo_to_shuya",
+        "reached_target": true,
+        "distance_km": 4.028,
+        "duration_s": 203.43,
+        "samples": 958,
+        "max_speed_kmh": 80.14,
+        "avg_speed_kmh": 71.26,
+        "min_vz": -2.241,
+        "max_vz": 1.411,
+        "p99_abs_vz": 1.745,
+        "peak_vz_pos": [
+          21679.4,
+          -15411.6,
+          107.0
+        ],
+        "min_z_seen": 98.72,
+        "damage_sum": 2834743.75,
+        "damage_events": [
+          {
+            "t_s": 0.01,
+            "x": 19828.43,
+            "y": -15174.37,
+            "z": 108.84,
+            "kmh": 72.42,
+            "damage_sum": 2834743.75
+          }
+        ]
+      },
+      {
+        "leg": "rt_4_shuya_to_kokhma",
+        "reached_target": true,
+        "distance_km": 18.266,
+        "duration_s": 728.28,
+        "samples": 3407,
+        "max_speed_kmh": 96.23,
+        "avg_speed_kmh": 90.28,
+        "min_vz": -2.73,
+        "max_vz": 2.569,
+        "p99_abs_vz": 1.757,
+        "peak_vz_pos": [
+          10814.7,
+          -9786.1,
+          111.1
+        ],
+        "min_z_seen": 98.72,
+        "damage_sum": 2834743.75,
+        "damage_events": [
+          {
+            "t_s": 0.02,
+            "x": 22703.2,
+            "y": -16706.02,
+            "z": 103.97,
+            "kmh": 78.24,
+            "damage_sum": 2834743.75
+          }
+        ]
+      },
+      {
+        "leg": "rt_5_kokhma_to_ivanovo",
+        "reached_target": false,
+        "distance_km": 6.752,
+        "duration_s": 340.35,
+        "samples": 1594,
+        "max_speed_kmh": 76.25,
+        "avg_speed_kmh": 71.38,
+        "min_vz": -2.148,
+        "max_vz": 1.725,
+        "p99_abs_vz": 1.567,
+        "peak_vz_pos": [
+          3910.4,
+          -3876.2,
+          115.0
+        ],
+        "min_z_seen": 103.93,
+        "damage_sum": 7789039.5,
+        "damage_events": [
+          {
+            "t_s": 0.01,
+            "x": 7640.42,
+            "y": -8270.25,
+            "z": 103.93,
+            "kmh": 53.36,
+            "damage_sum": 2834743.75
+          },
+          {
+            "t_s": 326.54,
+            "x": 3994.22,
+            "y": -3837.91,
+            "z": 109.55,
+            "kmh": 18.47,
+            "damage_sum": 7789039.5
+          }
+        ]
+      }
+    ],
+    "roundtrip_perf_summary": {
+      "sample_count": 2275,
+      "fps_avg": 114.23,
+      "fps_1pct_low": 94.95,
+      "fps_min_sampled": 41.65,
+      "frametime_avg_ms": 8.75,
+      "frametime_1pct_ms": 10.53,
+      "cpu_ms_avg": 8.81,
+      "gpu_ms_avg": 4.97,
+      "perf_render_ms_avg": null,
+      "perf_shadows_ms_avg": null,
+      "perf_reflections_ms_avg": null,
+      "perf_post_render_ms_avg": null,
+      "perf_lua_ms_avg": null,
+      "perf_physics_nodes_ms_avg": null,
+      "terrain_draw_calls_avg": 186.6,
+      "terrain_draw_calls_max": 242,
+      "forest_items_rendered_avg": 0.0,
+      "forest_items_rendered_max": 0,
+      "draw_calls_avg": null,
+      "draw_calls_max": null,
+      "polys_avg": null,
+      "polys_max": null,
+      "vram_peak_mib": 6372.0,
+      "vram_avg_mib": 6247.9,
+      "proc_ram_peak_mib": 6672.7,
+      "proc_private_peak_mib": 11560.7,
+      "proc_total_ram_peak_mib": 7749.7,
+      "pass_60fps_target": true
+    }
+  },
+  "log_metrics": {
+    "world_ready_s": 56.06841,
+    "load_stages_s": {
+      "engine.loading.stage.Terrain::TerrainBlock": {
+        "count": 1,
+        "seconds": 8.207
+      },
+      "engine.loading.stage.Environment::ScatterSky": {
+        "count": 1,
+        "seconds": 0.057
+      },
+      "engine.loading.stage.Environment::WaterBlock": {
+        "count": 1859,
+        "seconds": 0.127
+      },
+      "engine.loading.stage.Environment::GroundCover": {
+        "count": 8,
+        "seconds": 0.084
+      },
+      "engine.loading.stage.Forest::Forest": {
+        "count": 1,
+        "seconds": 1.035
+      },
+      "engine.loading.stage.Meshes::TSStatic": {
+        "count": 12464,
+        "seconds": 16.813
+      },
+      "engine.loading.stage.Roads::DecalRoad": {
+        "count": 40612,
+        "seconds": 3.72
+      },
+      "engine.loading.stage.Other::River": {
+        "count": 157,
+        "seconds": 0.121
+      }
+    },
+    "forest_items_loaded": 120000,
+    "forest_types_loaded": 32,
+    "static_collision_verts": 2968572,
+    "static_collision_tris": 4132073,
+    "static_collision_mb": 167.85,
+    "physics_instances": 142607,
+    "physics_memory_mb": 141.86,
+    "free_ram_at_spawn_gb": 15.906,
+    "total_error_lines": 1169,
+    "total_warning_lines": 76,
+    "stock_error_lines": 134,
+    "level_error_lines": 1035,
+    "decal_road_batch_errors": 33,
+    "level_error_samples": [
+      "45.33943|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33946|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "45.33947|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33948|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33949|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33949|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "45.33950|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "45.33951|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33952|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33956|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "45.33957|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "45.33958|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33959|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33959|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "45.33961|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33962|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33963|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33964|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33965|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33966|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33967|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33968|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "45.33969|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33970|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33971|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "45.33972|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33973|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33974|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33975|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33976|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33977|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33978|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33979|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33980|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33981|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33982|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "45.33983|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33983|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "45.33984|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "45.33985|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "45.33986|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "45.33987|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33987|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/objects/s_sign_busstop.dae",
+      "45.33988|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33989|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33997|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33998|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.33999|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.34000|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae",
+      "45.34001|E|engine::TSStatic::updatePhysicsCollision| Bounds collision not supported: /art/shapes/garage_and_dealership/Clutter/italy_traf_sign_zebra.dae"
+    ],
+    "level_warning_samples": [],
+    "signal_hits": {
+      "SceneStaticDecalRoadManager": 33,
+      "TSStatic": 1001
+    }
+  },
+  "screenshots_captured": []
+}

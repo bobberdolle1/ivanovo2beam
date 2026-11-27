@@ -216,6 +216,7 @@ def classify_beamng_log(log_path: Path, user_dir: Path, beamng_exe: Path) -> dic
         "total_warning_lines": lm.warning_lines,
         "stock_error_lines": stock_errors,
         "level_error_lines": lm.error_lines - stock_errors,
+        "decal_road_batch_errors": signal_hits.get("SceneStaticDecalRoadManager", 0),
         "level_error_samples": level_errors,
         "level_warning_samples": level_warnings,
         "signal_hits": {k: v for k, v in signal_hits.items() if v > 0},
@@ -240,6 +241,14 @@ def summarize_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
     gpu_vals = col("gpu_ms")
     dc_vals = col("draw_calls")
     poly_vals = col("poly_count")
+    tdc_vals = col("terrain_draw_calls")
+    render_vals = col("perf_render_ms")
+    shadows_vals = col("perf_shadows_ms")
+    refl_vals = col("perf_reflections_ms")
+    post_vals = col("perf_post_render_ms")
+    lua_vals = col("perf_lua_ms")
+    phys_vals = col("perf_physics_nodes_ms")
+    forest_vals = col("forest_items_rendered")
     vram_vals = col("nv_vram_used_mib")
     ram_vals = col("proc_working_set_mib")
     priv_vals = col("proc_private_mib")
@@ -263,6 +272,16 @@ def summarize_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "cpu_ms_avg": round(statistics.mean(cpu_vals), 2) if cpu_vals else None,
         "gpu_ms_avg": round(statistics.mean(gpu_vals), 2) if gpu_vals else None,
+        "perf_render_ms_avg": round(statistics.mean(render_vals), 2) if render_vals else None,
+        "perf_shadows_ms_avg": round(statistics.mean(shadows_vals), 2) if shadows_vals else None,
+        "perf_reflections_ms_avg": round(statistics.mean(refl_vals), 2) if refl_vals else None,
+        "perf_post_render_ms_avg": round(statistics.mean(post_vals), 2) if post_vals else None,
+        "perf_lua_ms_avg": round(statistics.mean(lua_vals), 2) if lua_vals else None,
+        "perf_physics_nodes_ms_avg": round(statistics.mean(phys_vals), 2) if phys_vals else None,
+        "terrain_draw_calls_avg": round(statistics.mean(tdc_vals), 1) if tdc_vals else None,
+        "terrain_draw_calls_max": int(max(tdc_vals)) if tdc_vals else None,
+        "forest_items_rendered_avg": round(statistics.mean(forest_vals), 1) if forest_vals else None,
+        "forest_items_rendered_max": int(max(forest_vals)) if forest_vals else None,
         "draw_calls_avg": round(statistics.mean(dc_vals), 1) if dc_vals else None,
         "draw_calls_max": int(max(dc_vals)) if dc_vals else None,
         "polys_avg": int(statistics.mean(poly_vals)) if poly_vals else None,
@@ -796,6 +815,8 @@ def run_drive_leg(
     distance_m = 0.0
     prev_xy: tuple[float, float] | None = None
     stuck_since: float | None = None
+    prev_dmg = 0.0
+    damage_events: list[dict[str, Any]] = []
 
     while time.perf_counter() - t_start < max_time_s:
         st = json.loads(
@@ -824,7 +845,7 @@ def run_drive_leg(
         if spd_kmh < 2.0 and st["t_s"] > 5.0:
             if stuck_since is None:
                 stuck_since = time.perf_counter()
-            elif time.perf_counter() - stuck_since > 8.0:
+            elif time.perf_counter() - stuck_since > 12.0:
                 break
         else:
             stuck_since = None
@@ -832,6 +853,19 @@ def run_drive_leg(
         now = time.perf_counter()
         if now - last_perf >= 1.0:
             last_perf = now
+            with contextlib.suppress(Exception):
+                dmg_cur = json.loads(mcp.call_tool("get_vehicle_damage"))
+                dsum_cur = float(dmg_cur.get("damageSum", 0) or 0)
+                if dsum_cur > prev_dmg + 1.0 and len(damage_events) < 20:
+                    damage_events.append({
+                        "t_s": st["t_s"],
+                        "x": round(cur_xy[0], 2),
+                        "y": round(cur_xy[1], 2),
+                        "z": round(float(st["z"]), 2),
+                        "kmh": st["speed_kmh"],
+                        "damage_sum": dsum_cur,
+                    })
+                prev_dmg = dsum_cur
             row: dict[str, Any] = {"t_rel_s": round(now - t0, 2)}
             nv = query_nvidia_smi()
             if nv:
@@ -847,7 +881,7 @@ def run_drive_leg(
                 row.update(json.loads(mcp.call_tool("run_lua", {"code": _LUA_PERF_SNAPSHOT})))
             perf_samples.append(row)
 
-        if math.hypot(cur_xy[0] - target[0], cur_xy[1] - target[1]) <= 30.0:
+        if math.hypot(cur_xy[0] - target[0], cur_xy[1] - target[1]) <= 45.0:
             break
         time.sleep(0.15)
 
@@ -857,6 +891,7 @@ def run_drive_leg(
     dmg = json.loads(mcp.call_tool("get_vehicle_damage"))
     abs_vz = sorted(abs(float(s["vz"])) for s in trace)
     p99_vz = abs_vz[max(0, int(len(abs_vz) * 0.99) - 1)] if abs_vz else 0.0
+    peak_vz_row = max(trace, key=lambda s: abs(float(s["vz"])), default=None)
     reached = bool(prev_xy and math.hypot(prev_xy[0] - target[0], prev_xy[1] - target[1]) <= 60.0)
 
     return {
@@ -870,8 +905,10 @@ def run_drive_leg(
         "min_vz": round(min((s["vz"] for s in trace), default=0.0), 3),
         "max_vz": round(max((s["vz"] for s in trace), default=0.0), 3),
         "p99_abs_vz": round(p99_vz, 3),
+        "peak_vz_pos": [round(peak_vz_row["x"], 1), round(peak_vz_row["y"], 1), round(peak_vz_row["z"], 1)] if peak_vz_row else None,
         "min_z_seen": round(min((s["z"] for s in trace), default=0.0), 2),
         "damage_sum": dmg.get("damageSum", dmg),
+        "damage_events": damage_events,
     }
 
 
@@ -992,6 +1029,118 @@ def capture_mode_screenshots(
     return shots
 
 
+def sample_live_telemetry(mcp: BeamNgMcpClient, t0: float) -> dict[str, Any]:
+    """Capture one 1 Hz sample combining nvidia-smi, process RAM, Lua counters, and engine metrics."""
+    row: dict[str, Any] = {"t_rel_s": round(time.perf_counter() - t0, 2)}
+    nv = query_nvidia_smi()
+    if nv:
+        row["nv_vram_used_mib"] = nv["vram_used_mib"]
+        row["nv_gpu_util_pct"] = nv["gpu_util_pct"]
+        row["nv_gpu_clock_mhz"] = nv["gpu_clock_mhz"]
+    pm = get_beamng_memory_stats()
+    if pm:
+        row["proc_working_set_mib"] = pm["working_set_mib"]
+        row["proc_private_mib"] = pm["private_bytes_mib"]
+        row["proc_total_working_set_mib"] = pm["total_working_set_mib"]
+    with contextlib.suppress(Exception):
+        row.update(json.loads(mcp.call_tool("run_lua", {"code": _LUA_PERF_SNAPSHOT})))
+    with contextlib.suppress(Exception):
+        pm_eng = json.loads(mcp.call_tool("get_performance_metrics"))
+        if isinstance(pm_eng, dict):
+            row["perf_render_ms"] = pm_eng.get("Render")
+            row["perf_shadows_ms"] = pm_eng.get("RenderShadows")
+            row["perf_reflections_ms"] = pm_eng.get("RenderReflections")
+            row["perf_post_render_ms"] = pm_eng.get("PostRender")
+            row["perf_lua_ms"] = pm_eng.get("Lua")
+            row["perf_physics_nodes_ms"] = pm_eng.get("PhysicsNodes")
+    return row
+
+
+def _start_frame_dt_recorder(mcp: BeamNgMcpClient) -> None:
+    """Install/reset transient per-frame dtReal (ms) recorder via BeamNG ``extensions.hook``."""
+    lua = r"""
+    if not _G._qa_orig_ext_hook then
+      _G._qa_orig_ext_hook = extensions.hook
+      _G._qa_dts = {}
+      _G._qa_prof_active = false
+      extensions.hook = function(funcName, a, b, c, d)
+        if _G._qa_prof_active and funcName == "onPreRender" and type(a) == "number" then
+          table.insert(_G._qa_dts, a * 1000.0)
+        end
+        return _G._qa_orig_ext_hook(funcName, a, b, c, d)
+      end
+    end
+    _G._qa_dts = {}
+    _G._qa_prof_active = true
+    return "ok"
+    """
+    mcp.call_tool("run_lua", {"code": lua})
+
+
+def _stop_frame_dt_recorder(mcp: BeamNgMcpClient) -> dict[str, Any]:
+    """Stop transient per-frame dtReal recorder and summarize frame-time percentiles/hitches."""
+    raw = mcp.call_tool(
+        "run_lua",
+        {
+            "code": (
+                "_G._qa_prof_active = false; "
+                "local d = _G._qa_dts or {}; "
+                "_G._qa_dts = {}; "
+                "return jsonEncode(d)"
+            )
+        },
+    )
+    dts = [float(x) for x in json.loads(raw) if isinstance(x, (int, float)) and float(x) > 0]
+    if not dts:
+        return {"frames_total": 0}
+    s_dts = sorted(dts)
+    n = len(s_dts)
+
+    def _pct(p: float) -> float:
+        idx = min(n - 1, max(0, int(math.ceil(n * p)) - 1))
+        return s_dts[idx]
+
+    avg_ms = statistics.mean(dts)
+    p99_ms = _pct(0.99)
+    p999_ms = _pct(0.999)
+    return {
+        "frames_total": n,
+        "frametime_avg_ms": round(avg_ms, 2),
+        "frametime_p50_ms": round(_pct(0.50), 2),
+        "frametime_p95_ms": round(_pct(0.95), 2),
+        "frametime_p99_ms": round(p99_ms, 2),
+        "frametime_p999_ms": round(p999_ms, 2),
+        "frametime_max_ms": round(max(dts), 2),
+        "fps_avg_exact": round(1000.0 / avg_ms, 2) if avg_ms > 0 else None,
+        "fps_1pct_low_exact": round(1000.0 / p99_ms, 2) if p99_ms > 0 else None,
+        "fps_0_1pct_low_exact": round(1000.0 / p999_ms, 2) if p999_ms > 0 else None,
+        "hitches_gt_33ms": sum(1 for x in dts if x > 33.33),
+        "hitches_gt_50ms": sum(1 for x in dts if x > 50.0),
+        "hitches_gt_100ms": sum(1 for x in dts if x > 100.0),
+    }
+
+
+def _place_vehicle(
+    mcp: BeamNgMcpClient,
+    pos: tuple[float, float, float],
+    dir_xy: tuple[float, float] = (1.0, -0.5),
+) -> None:
+    """Place player vehicle safely on surface using ``castRayStatic``."""
+    lua = f"""
+    local d = castRayStatic(vec3({pos[0]}, {pos[1]}, 500), vec3(0, 0, -1), 600)
+    local z = (d and d > 0) and (500 - d + 0.45) or {pos[2] + 0.5}
+    local v = be:getPlayerVehicle(0)
+    if v then
+      local q = quatFromDir(vec3({dir_xy[0]}, {dir_xy[1]}, 0):normalized(), vec3(0,0,1))
+      v:setPosRot({pos[0]}, {pos[1]}, z, q.x, q.y, q.z, q.w)
+      v:resetBrokenFlexMesh()
+    end
+    return tostring(z)
+    """
+    mcp.call_tool("run_lua", {"code": lua})
+    time.sleep(1.0)
+
+
 def run_benchmark_window(
     mcp: BeamNgMcpClient,
     *,
@@ -1006,20 +1155,7 @@ def run_benchmark_window(
     end_t = time.perf_counter() + duration_s
     while time.perf_counter() < end_t:
         ts = time.perf_counter()
-        row: dict[str, Any] = {"t_rel_s": round(ts - t0, 2)}
-        nv = query_nvidia_smi()
-        if nv:
-            row["nv_vram_used_mib"] = nv["vram_used_mib"]
-            row["nv_gpu_util_pct"] = nv["gpu_util_pct"]
-            row["nv_gpu_clock_mhz"] = nv["gpu_clock_mhz"]
-        pm = get_beamng_memory_stats()
-        if pm:
-            row["proc_working_set_mib"] = pm["working_set_mib"]
-            row["proc_private_mib"] = pm["private_bytes_mib"]
-            row["proc_total_working_set_mib"] = pm["total_working_set_mib"]
-        with contextlib.suppress(Exception):
-            row.update(json.loads(mcp.call_tool("run_lua", {"code": _LUA_PERF_SNAPSHOT})))
-        samples.append(row)
+        samples.append(sample_live_telemetry(mcp, t0))
         elapsed = time.perf_counter() - ts
         if elapsed < 1.0:
             time.sleep(1.0 - elapsed)
@@ -1028,10 +1164,196 @@ def run_benchmark_window(
     return samples
 
 
+def run_regime_drive_profile(
+    mcp: BeamNgMcpClient,
+    *,
+    name: str,
+    start: tuple[float, float, float],
+    target: tuple[float, float, float],
+    speed_ms: float,
+    duration_s: float,
+    t0: float,
+) -> dict[str, Any]:
+    """Profile a fixed-duration driving regime with 1 Hz engine telemetry + per-frame dtReal."""
+    _place_vehicle(mcp, start, (target[0] - start[0], target[1] - start[1]))
+    with contextlib.suppress(Exception):
+        mcp.call_tool("set_camera", {"name": "chase"})
+        time.sleep(0.4)
+    mcp.call_tool("drive_to", {"pos": {"x": target[0], "y": target[1], "z": target[2]}, "speed": speed_ms, "aggression": 0.45})
+    with contextlib.suppress(Exception):
+        mcp.call_tool(
+            "run_lua",
+            {"code": f"local v=be:getPlayerVehicle(0); if v then v:queueLuaCommand(\"ai.setSpeedMode('limit'); ai.setSpeed({float(speed_ms)})\") end"},
+        )
+    time.sleep(2.5)
+
+    _start_frame_dt_recorder(mcp)
+    samples: list[dict[str, Any]] = []
+    end_t = time.perf_counter() + duration_s
+    while time.perf_counter() < end_t:
+        ts = time.perf_counter()
+        samples.append(sample_live_telemetry(mcp, t0))
+        elapsed = time.perf_counter() - ts
+        if elapsed < 1.0:
+            time.sleep(1.0 - elapsed)
+    frame_stats = _stop_frame_dt_recorder(mcp)
+    with contextlib.suppress(Exception):
+        mcp.call_tool("set_ai", {"mode": "disabled"})
+    summary = summarize_samples(samples)
+    summary["frame_dt_stats"] = frame_stats
+    return {"regime": name, "summary": summary}
+
+
+def run_camera_spin_stress(
+    mcp: BeamNgMcpClient,
+    *,
+    name: str,
+    pos: tuple[float, float, float],
+    t0: float,
+    step_deg: float = 15.0,
+    total_deg: float = 720.0,
+    step_delay_s: float = 0.12,
+) -> dict[str, Any]:
+    """Spin free camera rapidly in ``step_deg`` increments and measure frame-time hitches."""
+    z_ground = float(
+        mcp.call_tool(
+            "run_lua",
+            {"code": f"local d=castRayStatic(vec3({pos[0]},{pos[1]},500),vec3(0,0,-1),600); return tostring(d and (500-d) or {pos[2]})"},
+        ).strip()
+    )
+    cam_z = z_ground + max(8.0, pos[2])
+    # Prime camera at yaw=0 first so initial stream-in settles slightly, then spin 720 deg
+    rot0 = json.loads(mcp.call_tool("run_lua", {"code": "local q=quatFromDir(vec3(1,0,0),vec3(0,0,1)); return jsonEncode({x=q.x,y=q.y,z=q.z,w=q.w})"}))
+    mcp.call_tool("set_free_camera", {"pos": {"x": pos[0], "y": pos[1], "z": cam_z}, "rot": rot0, "fov": 65.0})
+    time.sleep(1.0)
+
+    steps = int(round(total_deg / step_deg))
+    pre_snap = sample_live_telemetry(mcp, t0)
+    _start_frame_dt_recorder(mcp)
+    t_spin0 = time.perf_counter()
+    for i in range(1, steps + 1):
+        ang = math.radians(i * step_deg)
+        dx, dy = math.cos(ang), math.sin(ang)
+        rot = json.loads(
+            mcp.call_tool(
+                "run_lua",
+                {"code": f"local q=quatFromDir(vec3({dx:.5f},{dy:.5f},-0.12):normalized(),vec3(0,0,1)); return jsonEncode({{x=q.x,y=q.y,z=q.z,w=q.w}})"},
+            )
+        )
+        mcp.call_tool("set_free_camera", {"pos": {"x": pos[0], "y": pos[1], "z": cam_z}, "rot": rot, "fov": 65.0})
+        time.sleep(step_delay_s)
+    spin_dur = round(time.perf_counter() - t_spin0, 2)
+    frame_stats = _stop_frame_dt_recorder(mcp)
+    post_snap = sample_live_telemetry(mcp, t0)
+    mcp.call_tool("set_camera", {"name": "chase"})
+    return {
+        "zone": name,
+        "pos": [round(pos[0], 1), round(pos[1], 1), round(cam_z, 1)],
+        "total_deg": total_deg,
+        "step_deg": step_deg,
+        "duration_s": spin_dur,
+        "frame_dt_stats": frame_stats,
+        "telemetry_pre": pre_snap,
+        "telemetry_post": post_snap,
+    }
+
+
+def run_stabilization_suite(
+    mcp: BeamNgMcpClient,
+    *,
+    level_id: str,
+    t0: float,
+    run_roundtrip: bool = False,
+) -> dict[str, Any]:
+    """Run 3-regime profiling (Urban, Rural, Fast Camera-Spin) + optional continuous round-trip."""
+    # Canonical coordinates discovered from ivanovo_shuya_v2 SpawnSpheres & P152 navgraph:
+    # - Ivanovo urban center: (-20.48, 18.81, 113.13) -> (-405.0, 2682.0, 128.0) or (2293.0, -3063.0, 127.0)
+    # - Shuya urban entrance/center: (22718.39, -16745.86, 104.86) -> (23707.7, -14574.6, 106.8)
+    # - Kokhma SE / Uvod crossing: (7605.06, -8258.87, 104.26)
+    # - Forest highway: (11472.13, -10145.29, 113.73)
+    # - Rural P152 straightaway (Kitovo -> Shuya): (19869.38, -15179.29, 109.28) -> (22718.39, -16745.86, 104.86)
+    urban_iv = run_regime_drive_profile(
+        mcp,
+        name="urban_ivanovo",
+        start=(-20.48, 18.81, 113.13),
+        target=(2293.2, -3063.5, 127.5),
+        speed_ms=13.9,
+        duration_s=20.0,
+        t0=t0,
+    )
+    urban_sh = run_regime_drive_profile(
+        mcp,
+        name="urban_shuya",
+        start=(22718.39, -16745.86, 104.86),
+        target=(23707.7, -14574.6, 106.8),
+        speed_ms=13.9,
+        duration_s=20.0,
+        t0=t0,
+    )
+    rural_p152 = run_regime_drive_profile(
+        mcp,
+        name="rural_p152_corridor",
+        start=(14970.97, -12289.27, 127.87),
+        target=(19869.38, -15179.29, 109.28),
+        speed_ms=27.8,
+        duration_s=25.0,
+        t0=t0,
+    )
+    spin_urban = run_camera_spin_stress(
+        mcp,
+        name="spin_urban_ivanovo",
+        pos=(-20.48, 18.81, 18.0),
+        t0=t0,
+    )
+    spin_forest = run_camera_spin_stress(
+        mcp,
+        name="spin_forest_corridor",
+        pos=(11472.13, -10145.29, 22.0),
+        t0=t0,
+    )
+
+    roundtrip_legs: list[dict[str, Any]] = []
+    if run_roundtrip:
+        # True unbroken continuous round-trip: Ivanovo -> Kokhma -> Shuya -> Kokhma -> Ivanovo
+        # Starts at ivanovo_exit (4204.16, -804.94) so BOTH outbound and inbound cross the twin bridge (4052, -3815).
+        # Zero teleportation between intermediate waypoints!
+        rt_waypoints = [
+            ("rt_1_ivanovo_to_kokhma", (4204.16, -804.94, 130.92), (7605.06, -8258.87, 104.26), 21.0, 900.0),
+            ("rt_2_kokhma_to_kitovo", (7605.06, -8258.87, 104.26), (19869.38, -15179.29, 109.28), 26.5, 960.0),
+            ("rt_3_kitovo_to_shuya", (19869.38, -15179.29, 109.28), (22718.39, -16745.86, 104.86), 22.0, 320.0),
+            ("rt_4_shuya_to_kokhma", (22718.39, -16745.86, 104.86), (7605.06, -8258.87, 104.26), 26.5, 1150.0),
+            ("rt_5_kokhma_to_ivanovo", (7605.06, -8258.87, 104.26), (4204.16, -804.94, 130.92), 21.0, 900.0),
+        ]
+        rt_perf: list[dict[str, Any]] = []
+        for idx, (leg_name, s_pt, e_pt, spd, max_s) in enumerate(rt_waypoints):
+            leg_res = run_drive_leg(
+                mcp,
+                name=leg_name,
+                start=s_pt,
+                target=e_pt,
+                speed_ms=spd,
+                max_time_s=max_s,
+                perf_samples=rt_perf,
+                t0=t0,
+                teleport_to_start=(idx == 0),
+            )
+            roundtrip_legs.append(leg_res)
+
+    return {
+        "regimes": {
+            "urban_ivanovo": urban_iv["summary"],
+            "urban_shuya": urban_sh["summary"],
+            "rural_p152": rural_p152["summary"],
+        },
+        "camera_spin_stress": [spin_urban, spin_forest],
+        "continuous_roundtrip_legs": roundtrip_legs,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Live BeamNG.drive 0.40 D3D12 QA & scaling benchmark.")
     parser.add_argument("--level", required=True, help="BeamNG level identifier")
-    parser.add_argument("--mode", choices=("regression", "p0", "p1", "p2"), required=True, help="Experiment QA mode")
+    parser.add_argument("--mode", choices=("regression", "p0", "p1", "p2", "stabilization"), required=True, help="Experiment QA mode")
     parser.add_argument("--out", type=Path, default=None, help="Output JSON path (default: docs/benchmarks/<level>_<mode>.json)")
     parser.add_argument("--user-dir", type=Path, default=DEFAULT_USER_DIR)
     parser.add_argument("--beamng-exe", type=Path, default=DEFAULT_BEAMNG_EXE)
@@ -1043,6 +1365,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--duration", type=float, default=25.0, help="Sustained FPS benchmark window seconds")
     parser.add_argument("--load-timeout", type=float, default=240.0, help="Max seconds to wait for worldReadyState")
     parser.add_argument("--screenshot-dir", type=Path, default=DEFAULT_SCREENSHOT_DIR)
+    parser.add_argument("--roundtrip", action="store_true", help="Run full unbroken round-trip drive in stabilization mode")
+    parser.add_argument("--keep-running", action="store_true", help="Leave BeamNG running after finishing")
     args = parser.parse_args(argv)
 
     out_path = args.out or (REPO_ROOT / "docs" / "benchmarks" / f"{args.level}_{args.mode}.json")
@@ -1118,61 +1442,77 @@ def main(argv: list[str] | None = None) -> int:
 
     scene_info = probe_scene_lua(mcp)
     zfighting_audit = probe_zfighting_and_materials(mcp)
-    plan = discover_p152_waypoints(mcp, args.mode, scene_info)
+    plan_mode = "p2" if args.mode == "stabilization" else args.mode
+    plan = discover_p152_waypoints(mcp, plan_mode, scene_info)
     surface_probes = probe_surface_and_double_collision(mcp, plan["probe_points"])
     navgraph_probes = probe_navgraph_points(mcp, plan["navgraph_anchors"])
     end_to_end_path = probe_end_to_end_nav_path(mcp, plan["navgraph_anchors"])
-    screenshots = capture_mode_screenshots(
-        mcp,
-        args.mode,
-        args.level,
-        args.screenshot_dir,
-        scene_info,
-        seam_cam_target=plan.get("seam_cam_target"),
-        far_corridor_points=plan.get("far_corridor_points"),
-    )
 
+    stabilization_data: dict[str, Any] | None = None
     perf_samples: list[dict[str, Any]] = []
     drive_legs: list[dict[str, Any]] = []
-    for idx, leg in enumerate(plan["legs"]):
-        leg_res = run_drive_leg(
+    screenshots: list[dict[str, str]] = []
+
+    if args.mode == "stabilization":
+        stabilization_data = run_stabilization_suite(
             mcp,
-            name=leg["name"],
-            start=leg["start"],
-            target=leg["target"],
-            speed_ms=leg["speed_ms"],
-            max_time_s=leg["max_time_s"],
-            perf_samples=perf_samples,
+            level_id=args.level,
             t0=t0,
-            teleport_to_start=(idx == 0 or args.mode != "p2" or idx == len(plan["legs"]) - 1),
+            run_roundtrip=bool(args.roundtrip),
         )
-        drive_legs.append(leg_res)
+        drive_legs = stabilization_data.get("continuous_roundtrip_legs") or []
+        all_samples = []
+    else:
+        screenshots = capture_mode_screenshots(
+            mcp,
+            args.mode,
+            args.level,
+            args.screenshot_dir,
+            scene_info,
+            seam_cam_target=plan.get("seam_cam_target"),
+            far_corridor_points=plan.get("far_corridor_points"),
+        )
 
-    # Reset vehicle to canonical spawn road location before sustained D3D12 benchmark
-    spawn = scene_info.get("spawn_pos") or [7605.06, -8258.87, 104.1]
-    with contextlib.suppress(Exception):
-        mcp.call_tool(
-            "run_lua",
-            {
-                "code": (
-                    f"local d=castRayStatic(vec3({spawn[0]},{spawn[1]},500),vec3(0,0,-1),600); "
-                    f"local z=(d and d>0) and (500-d+0.45) or {spawn[2]+0.5}; "
-                    f"local v=be:getPlayerVehicle(0); "
-                    f"if v then local q=quatFromDir(vec3(1,-0.5,0):normalized(),vec3(0,0,1)); "
-                    f"v:setPosRot({spawn[0]},{spawn[1]},z,q.x,q.y,q.z,q.w); v:resetBrokenFlexMesh() end"
-                )
-            },
-        )
+        for idx, leg in enumerate(plan["legs"]):
+            leg_res = run_drive_leg(
+                mcp,
+                name=leg["name"],
+                start=leg["start"],
+                target=leg["target"],
+                speed_ms=leg["speed_ms"],
+                max_time_s=leg["max_time_s"],
+                perf_samples=perf_samples,
+                t0=t0,
+                teleport_to_start=(idx == 0 or args.mode != "p2" or idx == len(plan["legs"]) - 1),
+            )
+            drive_legs.append(leg_res)
+
+        # Reset vehicle to canonical spawn road location before sustained D3D12 benchmark
+        spawn = scene_info.get("spawn_pos") or [7605.06, -8258.87, 104.1]
+        with contextlib.suppress(Exception):
+            mcp.call_tool(
+                "run_lua",
+                {
+                    "code": (
+                        f"local d=castRayStatic(vec3({spawn[0]},{spawn[1]},500),vec3(0,0,-1),600); "
+                        f"local z=(d and d>0) and (500-d+0.45) or {spawn[2]+0.5}; "
+                        f"local v=be:getPlayerVehicle(0); "
+                        f"if v then local q=quatFromDir(vec3(1,-0.5,0):normalized(),vec3(0,0,1)); "
+                        f"v:setPosRot({spawn[0]},{spawn[1]},z,q.x,q.y,q.z,q.w); v:resetBrokenFlexMesh() end"
+                    )
+                },
+            )
+            time.sleep(1.0)
+
+        # Dedicated sustained D3D12 benchmark window
+        bench_samples = run_benchmark_window(mcp, duration_s=args.duration, t0=t0)
+        all_samples = bench_samples if bench_samples else perf_samples
+
+    # Stop cleanly before parsing final beamng.log (unless --keep-running)
+    if not args.keep_running:
+        with contextlib.suppress(Exception):
+            bridge.post("/beamng/stop", timeout=20.0)
         time.sleep(1.0)
-
-    # Dedicated sustained D3D12 benchmark window
-    bench_samples = run_benchmark_window(mcp, duration_s=args.duration, t0=t0)
-    all_samples = bench_samples if bench_samples else perf_samples
-
-    # Stop cleanly before parsing final beamng.log
-    with contextlib.suppress(Exception):
-        bridge.post("/beamng/stop", timeout=20.0)
-    time.sleep(1.0)
 
     log_summary = classify_beamng_log(args.user_dir / "beamng.log", args.user_dir, args.beamng_exe)
 
@@ -1202,6 +1542,7 @@ def main(argv: list[str] | None = None) -> int:
             "max_abs_vz": round(max((max(abs(l["min_vz"]), abs(l["max_vz"])) for l in drive_legs), default=0.0), 3),
         },
         "perf_summary": summarize_samples(all_samples),
+        "stabilization": stabilization_data,
         "log_metrics": log_summary,
         "screenshots_captured": [Path(s["path"]).name for s in screenshots],
     }
